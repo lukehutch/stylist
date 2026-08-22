@@ -115,13 +115,37 @@ npm run test:live
 ```
 
 which is `gapp-test live`: `clasp push`, then `clasp run-function
-gappRunInGas`, then the TAP report printed here. It needs clasp logged in, the
-script linked to a standard GCP project, and the Apps Script API enabled at
-[script.google.com/home/usersettings](https://script.google.com/home/usersettings).
-`gapp-test live --dry-run` prints the commands without running them.
+gappRunInGas --json`, then the TAP report printed here. `gapp-test live
+--dry-run` prints the commands without running them.
 
-You can also open the editor, pick `gappRunInGas` from the function list and
-press Run; the report lands in the execution log either way.
+**The simpler route is the editor.** Open it, pick `gappRunInGas` from the
+function list, press Run, and read the report in the execution log. That needs
+no setup at all beyond `clasp push`, and it is the recommended way to run these
+the first time.
+
+`gapp-test live` is worth the setup only if you want the result in your
+terminal or in CI, because Google's Execution API asks for a fair amount
+([its prerequisites](https://developers.google.com/apps-script/api/how-tos/execute)):
+
+1. Turn on the Apps Script API at
+   [script.google.com/home/usersettings](https://script.google.com/home/usersettings).
+2. Create a **standard** Cloud project and attach it to the script (Project
+   Settings → Google Cloud Platform (GCP) Project). The default project Apps
+   Script makes for you is explicitly not enough.
+3. In *that same* Cloud project, create an OAuth client of type **Desktop
+   App**, download `client_secret.json`, and
+   `clasp login --creds client_secret.json --use-project-scopes`. The token has
+   to cover every scope in `appsscript.json`, not just the ones `gappRunInGas`
+   touches — so `--use-project-scopes` matters.
+4. Deploy once as an **API Executable** (Deploy → New deployment → API
+   Executable). `devMode` runs the code you just pushed rather than the deployed
+   version, but a deployment still has to exist.
+5. Add `"executionApi": {"access": "ANYONE"}` to `src/appsscript.json`.
+
+Step 5 is deliberately **not** committed. `executionApi` is a permanent
+execution surface on the add-on, and shipping one for the sake of a test suite
+is the wrong trade for something published to the Marketplace. Add it while
+testing, take it out before publishing.
 
 What `src/LiveTests.js` checks, in order: the Docs advanced service is actually
 enabled; `Docs.Documents.get` returns this document; tab resolution works on it

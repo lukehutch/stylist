@@ -175,8 +175,9 @@ the endnote rewrite order, corrupting the cm conversion factor, or removing the
 sidebar's guard against refreshing a field you are typing in each turn it red.
 
 **These tests cover logic, not Google's runtime.** They cannot prove the Docs
-API accepts a given request. That is what `src/LiveTests.js` is for: it runs
-inside Apps Script against the open document, exercising the real API —
+API accepts a given request. That is what `src/LiveTests.js` is for: pick
+`gappRunInGas` in the Apps Script editor and press Run. It executes against the
+open document, exercising the real API —
 including the named-style field mask, the likeliest thing to be wrong — and
 prints a TAP report. Every write it makes re-asserts values the document
 already has, so a passing run changes nothing. DEV.md scores this approach
