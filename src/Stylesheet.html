@@ -19,10 +19,18 @@
     --ok: #188038;
   }
   * { box-sizing: border-box; }
+  /* Keep the vertical scrollbar present even when there is nothing to scroll.
+     Otherwise opening a section makes the bar appear and every control in the
+     sidebar shifts left by its width. */
+  html { overflow-y: scroll; }
   body {
     font: var(--fs)/1.45 Roboto, Arial, sans-serif;
     color: var(--fg); margin: 0; background: var(--bg);
   }
+  /* A placeholder says where the value comes from when the box is empty, so it
+     has to read as a hint rather than as a value. opacity: 1 because Firefox
+     dims placeholders by default, which on top of a grey would be unreadable. */
+  ::placeholder { color: var(--muted); opacity: 1; font-style: italic; }
   .wrap { padding: 8px 10px 40px; }
 
   /* Section headings sit in a full-bleed band: the .wrap padding is 8px 10px,

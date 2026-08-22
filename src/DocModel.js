@@ -99,7 +99,12 @@ function uiToTextStyle_(ui) {
   TEXT_STYLE_BOOLS.forEach(function (k) {
     if (ui[k] !== undefined) { style[k] = !!ui[k]; fields.push(k); }
   });
-  if (ui.baselineOffset !== undefined) {
+  // null means "put this back to whatever it inherits". The Docs API asks
+  // for that by naming the field in the mask and sending no value for it,
+  // which is exactly what pushing the field without setting style[k] does.
+  if (ui.baselineOffset === null) {
+    fields.push('baselineOffset');
+  } else if (ui.baselineOffset !== undefined) {
     style.baselineOffset = ui.baselineOffset || 'NONE';
     fields.push('baselineOffset');
   }
@@ -264,6 +269,8 @@ function uiToParagraphStyle_(ui) {
   var style = {};
   var fields = [];
   ['alignment', 'direction', 'spacingMode'].forEach(function (k) {
+    // As above: null resets the property to the inherited value.
+    if (ui[k] === null) { fields.push(k); return; }
     if (ui[k]) { style[k] = ui[k]; fields.push(k); }
   });
   if (ui.lineSpacing !== undefined && ui.lineSpacing !== null && ui.lineSpacing !== '') {

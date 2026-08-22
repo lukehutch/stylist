@@ -155,6 +155,44 @@ module.exports = ({ suite, test }) => {
     t.match(css, /\.tw \{[^}]*transition: transform/);
   });
 
+  suite('Inherited and default values');
+
+  test('an empty box says where its value comes from', (t) => {
+    // Both dimension builders -- the one with a unit menu and the plain point
+    // box -- say "inherited"; the unitless numbers say "default".
+    const inherited = clientJs.match(/placeholder = opts\.placeholder \|\| 'inherited'/g) || [];
+    t.equal(inherited.length, 2);
+    t.match(clientJs, /placeholder = opts\.placeholder \|\| 'default'/);
+    t.match(clientJs, /fontInput\.placeholder = 'inherited'/);
+  });
+
+  test('the placeholder is grey, not mistakable for a value', (t) => {
+    t.match(css, /::placeholder \{[^}]*color:/);
+  });
+
+  test('style selects offer Inherited first', (t) => {
+    t.match(clientJs, /var INHERIT = \{ id: '', label: 'Inherited' \}/);
+    ['ALIGNMENTS', 'SPACING_MODES', 'DIRECTIONS', 'BASELINES'].forEach((e) => {
+      t.match(clientJs, new RegExp('\\[INHERIT\\]\\.concat\\(' + e + '\\)'), e);
+    });
+  });
+
+  test('choosing it clears the value rather than writing one', (t) => {
+    const sets = clientJs.match(/set[TP]\('\w+', v \|\| null\)/g) || [];
+    t.equal(sets.length, 4, 'alignment, spacing mode, direction, offset');
+  });
+
+  test('nothing pretends an unset value is Left, or Normal, any more', (t) => {
+    t.notOk(/alignment \|\| 'START'/.test(clientJs));
+    t.notOk(/spacingMode \|\| 'COLLAPSE_LISTS'/.test(clientJs));
+    t.notOk(/direction \|\| 'LEFT_TO_RIGHT'/.test(clientJs));
+    t.notOk(/baselineOffset \|\| 'NONE'/.test(clientJs));
+  });
+
+  test('the scrollbar is always there, so the layout never jumps', (t) => {
+    t.match(css, /html \{ overflow-y: scroll; \}/);
+  });
+
   suite('Grouped controls');
 
   test('a group is a fieldset with its heading in the top edge', (t) => {

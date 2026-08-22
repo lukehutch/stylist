@@ -236,6 +236,31 @@ test('styling all footnotes targets each footnote by segmentId', (t) => {
   t.equal(reqs[0].updateTextStyle.textStyle.fontSize.magnitude, 9);
 });
 
+test('choosing "Inherited" resets a property instead of writing a value', (t) => {
+  const r = S.uiToParagraphStyle_({ alignment: null, spacingMode: null, direction: null });
+  t.deepEqual(r.fields.sort(), ['alignment', 'direction', 'spacingMode']);
+  t.deepEqual(r.style, {}, 'the mask names the fields, the message leaves them unset');
+
+  const rt = S.uiToTextStyle_({ baselineOffset: null });
+  t.deepEqual(rt.fields, ['baselineOffset']);
+  t.deepEqual(rt.style, {});
+});
+
+test('a property nobody touched is still left out of the mask entirely', (t) => {
+  const r = S.uiToParagraphStyle_({ alignment: 'CENTER' });
+  t.deepEqual(r.fields, ['alignment']);
+  t.equal(r.style.alignment, 'CENTER');
+});
+
+test('a reset reaches the document as a real request', (t) => {
+  S.__reset();
+  S.writeSegmentStyle({ target: 'footnotes', paragraphStyle: { alignment: null } });
+  const reqs = allRequests(S).filter(r => r.updateParagraphStyle);
+  t.ok(reqs.length > 0);
+  t.equal(reqs[0].updateParagraphStyle.fields, 'alignment');
+  t.notOk('alignment' in reqs[0].updateParagraphStyle.paragraphStyle);
+});
+
 test('styling all footnotes writes only the settings that were changed', (t) => {
   S.__reset();
   S.writeSegmentStyle({ target: 'footnotes', textStyle: { fontSizePt: 9 } });

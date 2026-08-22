@@ -172,6 +172,9 @@ function numUnit(valuePt, commitPt, opts) {
   var input = el('input');
   input.type = 'text';
   input.value = fromPt(valuePt, S.unit);
+  // An empty dimension box means the value comes from somewhere else -- the
+  // named style, the document default -- so say so rather than looking unset.
+  input.placeholder = opts.placeholder || 'inherited';
   input._pt = valuePt;
   var unitTag = el('span', 'unit', S.unit.toLowerCase());
 
@@ -198,6 +201,7 @@ function numPt(value, commit, opts) {
   var input = el('input');
   input.type = 'text';
   input.value = (value === null || value === undefined) ? '' : value;
+  input.placeholder = opts.placeholder || 'inherited';
   var tag = el('span', 'unit', 'pt');
   bindCommit(input, function (i) {
     var raw = i.value.trim();
@@ -217,6 +221,7 @@ function numPlain(value, commit, opts) {
   var input = el('input');
   input.type = 'text';
   input.value = (value === null || value === undefined) ? '' : value;
+  input.placeholder = opts.placeholder || 'default';
   bindCommit(input, function (i) {
     var raw = i.value.trim();
     if (raw === '') return { skip: true };
@@ -280,6 +285,16 @@ function colorField(hex, commit) {
 /* =================================================================
  * Enumerations mirrored from the Docs API
  * ================================================================= */
+/**
+ * The blank first option on a style select.
+ *
+ * It is both a display and a control. Shown, it means the value is not set
+ * here and comes from the named style or the document default. Chosen, it
+ * resets the property: the write names the field in its mask but sends no
+ * value, which is how the Docs API asks for the inherited value back.
+ */
+var INHERIT = { id: '', label: 'Inherited' };
+
 var ALIGNMENTS = [
   { id: 'START', label: 'Left / start' }, { id: 'CENTER', label: 'Centre' },
   { id: 'END', label: 'Right / end' }, { id: 'JUSTIFIED', label: 'Justified' }
@@ -406,9 +421,9 @@ function buildStyleEditor(model, commit, opts) {
     });
     gChar.appendChild(effects);
 
-    gChar.appendChild(fieldRow('Offset', selectField(BASELINES,
-      model.textStyle.baselineOffset || 'NONE',
-      function (v) { return setT('baselineOffset', v); })));
+    gChar.appendChild(fieldRow('Offset', selectField([INHERIT].concat(BASELINES),
+      model.textStyle.baselineOffset || '',
+      function (v) { return setT('baselineOffset', v || null); })));
 
     gChar.appendChild(fieldRow('Text colour', colorField(model.textStyle.foregroundColor,
       function (v) { return setT('foregroundColor', v); })));
@@ -421,24 +436,24 @@ function buildStyleEditor(model, commit, opts) {
     var gPara = group('Paragraph');
     root.appendChild(gPara);
 
-    gPara.appendChild(fieldRow('Alignment', selectField(ALIGNMENTS,
-      model.paragraphStyle.alignment || 'START',
-      function (v) { return setP('alignment', v); })));
+    gPara.appendChild(fieldRow('Alignment', selectField([INHERIT].concat(ALIGNMENTS),
+      model.paragraphStyle.alignment || '',
+      function (v) { return setP('alignment', v || null); })));
 
     // Docs stores line spacing as a percentage where normal is 100.
     gPara.appendChild(fieldRow('Line spacing', numPlain(
       model.paragraphStyle.lineSpacing === undefined ? '' : model.paragraphStyle.lineSpacing / 100,
       function (v) { return setP('lineSpacing', v * 100); },
-      { min: 0.1 })));
+      { min: 0.1, placeholder: 'inherited' })));
 
     gPara.appendChild(fieldRow('Space above', numUnit(model.paragraphStyle.spaceAbovePt,
       function (v) { return setP('spaceAbovePt', v); }, { min: 0 })));
     gPara.appendChild(fieldRow('Space below', numUnit(model.paragraphStyle.spaceBelowPt,
       function (v) { return setP('spaceBelowPt', v); }, { min: 0 })));
 
-    gPara.appendChild(fieldRow('Spacing mode', selectField(SPACING_MODES,
-      model.paragraphStyle.spacingMode || 'COLLAPSE_LISTS',
-      function (v) { return setP('spacingMode', v); })));
+    gPara.appendChild(fieldRow('Spacing mode', selectField([INHERIT].concat(SPACING_MODES),
+      model.paragraphStyle.spacingMode || '',
+      function (v) { return setP('spacingMode', v || null); })));
 
     gPara.appendChild(fieldRow('Indent left', numUnit(model.paragraphStyle.indentStartPt,
       function (v) { return setP('indentStartPt', v); })));
@@ -447,9 +462,9 @@ function buildStyleEditor(model, commit, opts) {
     gPara.appendChild(fieldRow('First line', numUnit(model.paragraphStyle.indentFirstLinePt,
       function (v) { return setP('indentFirstLinePt', v); })));
 
-    gPara.appendChild(fieldRow('Direction', selectField(DIRECTIONS,
-      model.paragraphStyle.direction || 'LEFT_TO_RIGHT',
-      function (v) { return setP('direction', v); })));
+    gPara.appendChild(fieldRow('Direction', selectField([INHERIT].concat(DIRECTIONS),
+      model.paragraphStyle.direction || '',
+      function (v) { return setP('direction', v || null); })));
 
     var flow = el('div', 'checks');
     [['keepLinesTogether', 'Keep lines together'], ['keepWithNext', 'Keep with next'],
