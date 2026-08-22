@@ -43,6 +43,13 @@ clasp open-script
 server, so clasp asks before overwriting it, and declining skips the whole push
 rather than just the manifest.
 
+Delete `src/src/` before pushing. `create-script --rootDir src` applies
+`rootDir` twice when it downloads the new project's stub manifest, leaving it at
+`src/src/appsscript.json`. Two files then claim the manifest name and the push
+stops with *"A file with this name already exists in the current project:
+appsscript"*. `rm -rf src/src` — the stub is a throwaway; `src/appsscript.json`
+is the real manifest.
+
 `--type standalone`, not `--type docs`: an editor add-on is not bound to one
 document, and a test deployment makes you pick the document to try it in. A
 bound script would leave you with a stray Doc you never open.

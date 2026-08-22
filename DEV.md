@@ -35,7 +35,14 @@ directory, or write `.clasp.json` by hand:
 { "scriptId": "1a2B3c...", "rootDir": "src" }
 ```
 
-Three notes on that first push:
+Four notes on that first push:
+
+- **`create-script` leaves a stray `src/src/`.** It applies `rootDir` twice
+  when downloading the new project's stub manifest, writing it to
+  `src/src/appsscript.json`. Both that and the real `src/appsscript.json` map
+  to the manifest name, so the push refuses with *"A file with this name
+  already exists in the current project: appsscript"*. `rm -rf src/src` and
+  push again. Observed with clasp 3.4.0.
 
 - **`--force` on the first push.** `create-script` leaves a default
   `appsscript.json` on the server, so the first push changes the manifest and
