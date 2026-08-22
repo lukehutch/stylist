@@ -123,7 +123,61 @@ function deletePreset(payload) {
 
 /* ---------------- Individual style presets ---------------- */
 
+/**
+ * Styles a new user gets before defining any of their own.
+ *
+ * Courier New rather than a nicer monospace because it is one of the fonts
+ * Docs always offers; a font the document has never used may not resolve.
+ * Shading and borders cannot be set on a selection (see CustomStyles.js), so
+ * the two block styles come into their own when bound to a named style --
+ * the character-level styles work either way.
+ */
+var DEFAULT_STYLE_PRESETS = {
+  'Source code': {
+    textStyle: { fontFamily: 'Courier New', fontSizePt: 10, foregroundColor: '#202124' },
+    paragraphStyle: {
+      shadingColor: '#f1f3f4', spaceAbovePt: 6, spaceBelowPt: 6, lineSpacing: 100,
+      borderTop: { color: '#dadce0', widthPt: 1, paddingPt: 6, dashStyle: 'SOLID' },
+      borderBottom: { color: '#dadce0', widthPt: 1, paddingPt: 6, dashStyle: 'SOLID' },
+      borderLeft: { color: '#dadce0', widthPt: 1, paddingPt: 6, dashStyle: 'SOLID' },
+      borderRight: { color: '#dadce0', widthPt: 1, paddingPt: 6, dashStyle: 'SOLID' }
+    }
+  },
+  'Inline code': {
+    textStyle: {
+      fontFamily: 'Courier New', fontSizePt: 10,
+      foregroundColor: '#b31412', backgroundColor: '#f1f3f4'
+    },
+    paragraphStyle: {}
+  },
+  'Block quote': {
+    textStyle: { italic: true, foregroundColor: '#5f6368' },
+    paragraphStyle: {
+      indentStartPt: 36, indentEndPt: 36, spaceAbovePt: 6, spaceBelowPt: 6,
+      borderLeft: { color: '#dadce0', widthPt: 3, paddingPt: 8, dashStyle: 'SOLID' }
+    }
+  },
+  'Caption': {
+    textStyle: { italic: true, fontSizePt: 9, foregroundColor: '#5f6368' },
+    paragraphStyle: { alignment: 'CENTER', spaceAbovePt: 2, spaceBelowPt: 10 }
+  }
+};
+
+/**
+ * Put the defaults in place once, the first time the list is read.
+ *
+ * The test is whether the property exists at all, not whether it holds any
+ * styles: a user who deletes every default leaves an empty object behind,
+ * and that has to stay empty rather than being refilled on the next read.
+ */
+function seedStylePresets_() {
+  var props = PropertiesService.getUserProperties();
+  if (props.getProperty(STYLE_PRESET_STORE_KEY) !== null) return;
+  writeStore_(STYLE_PRESET_STORE_KEY, JSON.parse(JSON.stringify(DEFAULT_STYLE_PRESETS)));
+}
+
 function listStylePresets() {
+  seedStylePresets_();
   var store = readStore_(STYLE_PRESET_STORE_KEY);
   return Object.keys(store).sort().map(function (name) {
     return {

@@ -465,6 +465,7 @@ function buildStyleEditor(model, commit, opts) {
     /* ---- borders ---- */
     var bItem = el('div', 'item');
     var bHead = el('div', 'head');
+    bHead.appendChild(el('span', 'tw'));
     bHead.appendChild(el('span', 'name', 'Paragraph borders'));
     bHead.appendChild(el('span', 'meta', '5 sides'));
     bHead.addEventListener('click', function () { bItem.classList.toggle('open'); });
@@ -504,6 +505,7 @@ function listItem(name, meta, buildBody, key) {
   key = key || name;
   var item = el('div', 'item');
   var head = el('div', 'head');
+  head.appendChild(el('span', 'tw'));   // turnstile arrow; CSS rotates it when open
   head.appendChild(el('span', 'name', name));
   head.appendChild(el('span', 'meta', meta || ''));
   var body = el('div', 'body');

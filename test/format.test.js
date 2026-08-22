@@ -460,6 +460,45 @@ test('style presets save, list and bind to a named style', (t) => {
   t.equal(r.namedStyle.textStyle.bold, true);
 });
 
+test('a new user gets default custom styles', (t) => {
+  const N = makeSandbox(makeDoc());
+  const names = N.listStylePresets().map(p => p.name);
+  t.ok(names.indexOf('Source code') >= 0, 'Source code is there: ' + names.join(', '));
+  t.ok(names.length >= 3);
+  const code = N.listStylePresets().filter(p => p.name === 'Source code')[0];
+  t.equal(code.textStyle.fontFamily, 'Courier New');
+  t.equal(code.paragraphStyle.shadingColor, '#f1f3f4');
+});
+
+test('defaults are real stored styles, not a display-only list', (t) => {
+  const N = makeSandbox(makeDoc());
+  N.listStylePresets();
+  N.applyStylePresetToNamedStyle({ name: 'Source code', namedStyleType: 'HEADING_6' });
+  const r = allRequests(N)[0].updateNamedStyle;
+  t.equal(r.namedStyle.textStyle.weightedFontFamily.fontFamily, 'Courier New');
+  t.ok(r.namedStyle.paragraphStyle.shading, 'the grey box travels too');
+});
+
+test('a user who already has styles is not given the defaults', (t) => {
+  const N = makeSandbox(makeDoc());
+  N.saveStylePreset({ name: 'Mine', textStyle: { bold: true } });
+  const names = N.listStylePresets().map(p => p.name);
+  t.deepEqual(names, ['Mine']);
+});
+
+test('deleting a default keeps it deleted', (t) => {
+  const N = makeSandbox(makeDoc());
+  N.listStylePresets();
+  N.deleteStylePreset({ name: 'Source code' });
+  t.ok(N.listStylePresets().every(p => p.name !== 'Source code'));
+});
+
+test('deleting every default does not bring them back', (t) => {
+  const N = makeSandbox(makeDoc());
+  N.listStylePresets().forEach(p => N.deleteStylePreset({ name: p.name }));
+  t.equal(N.listStylePresets().length, 0);
+});
+
 test('an unnamed preset is refused', (t) => {
   t.throws(() => S.saveStylePreset({ name: '  ' }), /Give the style a name/);
 });

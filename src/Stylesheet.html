@@ -82,7 +82,16 @@
     align-items: center; gap: 6px; background: #f8f9fa;
   }
   .item > .head:hover { background: #f1f3f4; }
-  .item > .head .name { font-weight: 500; font-size: var(--fs-md); }
+  .item > .head .name { font-weight: 500; font-size: var(--fs-md); margin-right: auto; }
+  /* Turnstile: a CSS triangle pointing right, rotated a quarter turn to point
+     down when the row is open, on the same 160ms as the row itself. */
+  .item > .head .tw {
+    flex: 0 0 auto; width: 0; height: 0;
+    border-left: 6px solid var(--muted);
+    border-top: 4px solid transparent; border-bottom: 4px solid transparent;
+    transition: transform 160ms ease;
+  }
+  .item.open > .head .tw { transform: rotate(90deg); }
   .item > .head .meta { color: var(--muted); font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .item > .body { overflow: hidden; min-height: 0;
                   padding: 0 8px; border-top: 0 solid var(--line);
@@ -90,7 +99,7 @@
   .item.open > .body { padding: 8px; border-top-width: 1px; }
 
   @media (prefers-reduced-motion: reduce) {
-    .item, .item > .body { transition: none; }
+    .item, .item > .body, .item > .head .tw { transition: none; }
   }
   .swatch { display: inline-block; width: 10px; height: 10px; border: 1px solid var(--line); vertical-align: -1px; }
 

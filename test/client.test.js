@@ -139,6 +139,21 @@ module.exports = ({ suite, test }) => {
     t.match(css, /prefers-reduced-motion: reduce/);
   });
 
+  test('every clickable expander head carries a turnstile arrow', (t) => {
+    const heads = clientJs.match(/el\('div', 'head'\)/g) || [];
+    const twisties = clientJs.match(/appendChild\(el\('span', 'tw'\)\)/g) || [];
+    const togglers = clientJs.match(/classList\.toggle\('open'\)/g) || [];
+    t.ok(heads.length >= 2);
+    t.equal(twisties.length, togglers.length,
+      'one arrow per head that actually toggles');
+  });
+
+  test('the arrow points right when closed and down when open', (t) => {
+    t.match(css, /\.tw \{[^}]*border-left: 6px solid/, 'a right-pointing triangle');
+    t.match(css, /\.item\.open > \.head \.tw \{[^}]*transform: rotate\(90deg\)/);
+    t.match(css, /\.tw \{[^}]*transition: transform/);
+  });
+
   suite('Staying in step with the document');
 
   test('the sidebar polls the document instead of waiting to be asked', (t) => {
