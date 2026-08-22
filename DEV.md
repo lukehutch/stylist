@@ -186,7 +186,7 @@ returns `pageWidthPt`.
 
 ```bash
 clasp push
-clasp open
+clasp open-script
 ```
 
 In the editor, **Deploy → Test deployments → Install**, then open a document

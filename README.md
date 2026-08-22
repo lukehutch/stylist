@@ -34,13 +34,24 @@ Requires [clasp](https://github.com/google/clasp) (`npm i -g @google/clasp`).
 
 ```bash
 clasp login
-clasp create --type docs --title "Doc Format Config" --rootDir src
+clasp create-script --type standalone --title "Doc Format Config" --rootDir src
 clasp push
-clasp open
+clasp open-script
 ```
 
-To attach to an existing script project instead, copy `.clasp.json.example` to
-`.clasp.json` and paste in its script id, then `clasp push`.
+`--type standalone`, not `--type docs`: an editor add-on is not bound to one
+document, and a test deployment makes you pick the document to try it in. A
+bound script would leave you with a stray Doc you never open.
+
+`create-script` writes `.clasp.json` in the project root, holding the script id
+it just created and `"rootDir": "src"`. That file is what every later `clasp`
+command reads — without it you get *"Script ID not set"*. It is gitignored,
+because the id is specific to your copy.
+
+To attach to a script project you already have, skip `create-script`: copy
+`.clasp.json.example` to `.clasp.json`, paste in its script id, then
+`clasp push`. The id is in the Apps Script editor under **Project Settings (⚙)
+→ IDs → Script ID**, or in the editor URL between `/projects/` and `/edit`.
 
 In the Apps Script editor: **Deploy > Test deployments > Install**, then open any
 Google Doc and choose **Extensions > Doc Format Config > Open format editor**.
