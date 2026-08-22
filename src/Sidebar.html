@@ -3,6 +3,13 @@
   <head>
     <base target="_top">
     <meta charset="utf-8">
+    <!-- The font picker draws every name in the font it names, which means
+         having the font. Only the Google Fonts families are fetched -- the
+         rest of the list ships with the machine -- and the request is
+         subsetted to the letters a font name can contain, so the whole set
+         costs under 10KB. -->
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Arvo&amp;family=Caveat&amp;family=Comfortaa&amp;family=EB+Garamond&amp;family=Inconsolata&amp;family=Lato&amp;family=Lexend&amp;family=Libre+Baskerville&amp;family=Lobster&amp;family=Merriweather&amp;family=Montserrat&amp;family=Nunito&amp;family=Open+Sans&amp;family=Oswald&amp;family=Pacifico&amp;family=Playfair+Display&amp;family=PT+Sans&amp;family=PT+Serif&amp;family=Raleway&amp;family=Roboto&amp;family=Roboto+Mono&amp;family=Roboto+Slab&amp;family=Source+Code+Pro&amp;family=Source+Sans+Pro&amp;family=Spectral&amp;family=Ubuntu&amp;family=Work+Sans&amp;text=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz%20&amp;display=swap">
     <?!= include('Stylesheet'); ?>
   </head>
   <body>
@@ -45,20 +52,10 @@
             <option value="PT">points</option>
           </select>
         </div>
-        <div class="row">
-          <label for="scale">Scale</label>
-          <select id="scale">
-            <option value="1">100%</option>
-            <option value="0.9">90% — fits 11% more</option>
-            <option value="0.8">80% — fits 25% more</option>
-            <option value="0.77">77% — fits 30% more</option>
-            <option value="0.7">70% — fits 43% more</option>
-          </select>
-        </div>
       </div>
 
       <div class="tabs">
-        <button id="tab-page" class="active"><span class="tico">&#x25AF;</span>Page</button>
+        <button id="tab-page" class="active"><span class="tico">&#x1F5CE;</span>Page</button>
         <button id="tab-styles"><span class="tico">Aa</span>Text</button>
         <button id="tab-lists"><span class="tico">&#x2630;</span>Lists</button>
         <button id="tab-tables"><span class="tico">&#x25A6;</span>Tables</button>
@@ -75,7 +72,6 @@
       <div id="panel-notes"    class="panel"></div>
       <div id="panel-presets"  class="panel"></div>
 
-      <datalist id="fontlist"></datalist>
     </div>
 
     <!-- Fixed to the bottom of the sidebar, outside .wrap: it belongs to the

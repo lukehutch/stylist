@@ -79,13 +79,20 @@
   .tabs { display: flex; flex-wrap: wrap; gap: 2px; margin: 8px 0; }
   .tabs button {
     flex: 1 1 auto; padding: 5px 6px; font-size: var(--fs-sm); cursor: pointer;
-    border: 1px solid var(--line); background: #f8f9fa; border-radius: 4px; color: var(--muted);
+    border: 1px solid var(--line); background: #f8f9fa; border-radius: 4px; color: var(--fg);
   }
   .tabs button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
   /* The glyph before each tab's label. Text-presentation symbols rather than
-     emoji, so they inherit the button colour: muted when inactive, white on
-     the accent blue when active. */
-  .tabs .tico { margin-right: 3px; opacity: 0.85; }
+     emoji, and a shade lighter than the black label beside them, so the icon
+     reads as an icon and the word as the word; both go white on the active
+     button's accent blue. */
+  .tabs .tico { margin-right: 3px; opacity: 0.85; color: var(--muted);
+    /* The symbol fonts first: Roboto and Arial cover none of these, and the
+       fallback a browser reaches for on its own is either a colour emoji
+       font or whatever happens to be installed. */
+    font-family: "Segoe UI Symbol", "Noto Sans Symbols 2", Symbola,
+                 "DejaVu Sans", sans-serif; }
+  .tabs button.active .tico { color: #fff; }
   .panel { display: none; }
   .panel.active { display: block; }
 
@@ -93,6 +100,11 @@
   .field { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
   .field > label { flex: 0 0 118px; color: var(--muted); font-size: var(--fs-sm); }
   .field > .ctl { flex: 1; display: flex; gap: 4px; min-width: 0; }
+  /* Nested inside a border group there is barely 250px to share, and the
+     labels there are single short words. Giving them the full 118px column
+     spends most of the row on white space, so they get only what they need
+     and the controls take the rest. */
+  .group.narrow .field > label { flex: 0 0 58px; }
   input[type=text], input[type=number], select {
     width: 100%; min-width: 0; padding: 3px 5px; font: inherit; font-size: var(--fs-md);
     border: 1px solid var(--line); border-radius: 3px; background: #fff; color: var(--fg);
@@ -108,8 +120,12 @@
   .combo > select { -webkit-appearance: none; appearance: none; }
   .combo::after {
     /* Inset by another pixel past the select's own border, so the strip sits
-       inside it at any zoom rather than painting over it. */
-    content: ''; position: absolute; top: 2px; right: 2px; bottom: 2px; width: 18px;
+       inside it at any zoom rather than painting over it. Sized as a small
+       patch around the arrow -- about a fifth smaller each way than the
+       full-height strip it used to be -- because the select's padding-right
+       already keeps value text out of this corner; the patch is backdrop,
+       not mask. */
+    content: ''; position: absolute; top: 4px; right: 2px; bottom: 4px; width: 14px;
     border-radius: 0 2px 2px 0;
     background: #fff no-repeat center;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0h10L5 6z' fill='%235f6368'/%3E%3C/svg%3E");
@@ -117,7 +133,7 @@
   }
   /* No fixed height: the swatch stretches to the row, so it matches the
      "none" button standing beside it however the scale control is set. */
-  input[type=color] { width: 30px; min-height: 24px; align-self: stretch; padding: 0;
+  input[type=color] { width: 30px; min-height: 28px; align-self: stretch; padding: 0;
     border: 1px solid var(--line); border-radius: 3px; background: #fff; }
   input.invalid { border-color: var(--err); background: #fce8e6; }
   input.saving { border-color: var(--accent); }
@@ -209,6 +225,16 @@
   }
   /* Icon-only action buttons (apply, delete): square, so the glyph centres. */
   button.iconbtn { flex: 0 0 auto; width: 28px; padding: 5px 0; text-align: center; }
+  /* The trash can on a delete button. U+FE0E asks for the text form of the
+     glyph, but a machine whose only font for it is a colour emoji font
+     ignores that and paints a red bin, which sits oddly beside the flat
+     tick next to it. Naming the monochrome symbol fonts first settles it
+     wherever one of them is installed. */
+  button.trash { font-family: "Segoe UI Symbol", "Noto Sans Symbols 2",
+                 "Noto Emoji", Symbola, sans-serif; }
+  /* The buttons at the right of a row, kept together on one line however
+     long the name beside them gets. */
+  .item > .head .btns { display: flex; gap: 4px; flex: 0 0 auto; }
 
   .note { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 4px;
           padding: 6px 8px; font-size: var(--fs-sm); margin: 6px 0; }
@@ -269,7 +295,8 @@
   .tip > .head { border-top: 5px solid var(--line); }
   /* The footer is capped at the viewport, so a tall tip panel scrolls inside
      itself instead of pushing its own heading off the top of the screen. */
-  .tip.open > .body { overflow-y: auto; }
+  .tip.open > .body { overflow-y: auto; scrollbar-width: none; }
+  .tip.open > .body::-webkit-scrollbar { width: 0; height: 0; }
   .tip .body a { color: var(--accent); }
   /* 80% of the sidebar itself, so vw rather than a percentage of the padded
      box it sits in. The image is square, so height follows. */
@@ -277,6 +304,9 @@
   .tiplink { display: block; text-align: center; font-weight: 700;
              font-size: calc(var(--fs) * 1.15); margin: 12px 0 8px; text-decoration: none; }
   .tiplink:hover { text-decoration: underline; }
+
+  /* Each font name in the picker is drawn in the font it names. */
+  option.fontface { font-size: calc(var(--fs) + 1px); }
 
   textarea { width: 100%; height: 110px; font-family: Roboto Mono, Consolas, monospace;
              font-size: var(--fs-xs); border: 1px solid var(--line); border-radius: 3px; padding: 4px; }

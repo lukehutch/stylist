@@ -220,6 +220,18 @@ function bindCommit(input, validate, commit) {
 
 /* ---- field constructors ---------------------------------------- */
 
+/**
+ * Emptying a box and pressing Enter.
+ *
+ * Where the property can be inherited, that has to reach the document: the
+ * box says "inherit" once it is empty, and until the value is actually
+ * unset server-side the box is lying. `opts.clearable` marks those fields,
+ * and they commit null -- which the writers turn into a field named in the
+ * mask with no value, the Docs API's way of saying "back to inherited".
+ *
+ * Fields with a real default rather than an inherited one are left alone:
+ * emptying them means nothing, so they keep the old no-op.
+ */
 /** Dimension field: displayed in the current unit, committed in points. */
 function numUnit(valuePt, commitPt, opts) {
   opts = opts || {};
@@ -234,7 +246,7 @@ function numUnit(valuePt, commitPt, opts) {
 
   bindCommit(input, function (i) {
     var raw = i.value.trim();
-    if (raw === '') return { skip: true };
+    if (raw === '') return opts.clearable ? { value: null } : { skip: true };
     var n = Number(raw);
     if (!isFinite(n)) return { error: '"' + raw + '" is not a number' };
     if (opts.min !== undefined && n < opts.min) return { error: 'Must be at least ' + opts.min };
@@ -259,7 +271,7 @@ function numPt(value, commit, opts) {
   var tag = el('span', 'unit', 'pt');
   bindCommit(input, function (i) {
     var raw = i.value.trim();
-    if (raw === '') return { skip: true };
+    if (raw === '') return opts.clearable ? { value: null } : { skip: true };
     var n = Number(raw);
     if (!isFinite(n)) return { error: '"' + raw + '" is not a number' };
     if (opts.min !== undefined && n < opts.min) return { error: 'Must be at least ' + opts.min };
@@ -278,7 +290,7 @@ function numPlain(value, commit, opts) {
   input.placeholder = opts.placeholder || 'default';
   bindCommit(input, function (i) {
     var raw = i.value.trim();
-    if (raw === '') return { skip: true };
+    if (raw === '') return opts.clearable ? { value: null } : { skip: true };
     var n = Number(raw);
     if (!isFinite(n)) return { error: '"' + raw + '" is not a number' };
     if (opts.min !== undefined && n < opts.min) return { error: 'Must be at least ' + opts.min };
@@ -310,8 +322,42 @@ function selectField(options, value, commit) {
 
 /**
  * `face` is a class put on the label text, so a checkbox that turns an
- * effect on can show its own name wearing that effect.
+ * effect on can show its own name wearing that effect. `labelText` may also
+ * be an element, for a label only part of which wears the effect.
  */
+/**
+ * The font picker.
+ *
+ * A real <select>, not a text box with a datalist behind it: a datalist
+ * cannot draw each name in the font it names, and it filters as you type
+ * rather than showing what is on offer.
+ *
+ * Docs accepts any Google Fonts family, not only the ones listed, so a
+ * document already set to a font off the list keeps it as its own option at
+ * the top rather than being quietly rewritten to the nearest name in the
+ * menu.
+ */
+function fontField(current, commit) {
+  var fonts = (S.data && S.data.constants && S.data.constants.fonts) || [];
+  if (current && fonts.indexOf(current) === -1) fonts = [current].concat(fonts);
+  var sel = el('select');
+  var blank = el('option', null, 'inherit');
+  blank.value = '';
+  sel.appendChild(blank);
+  fonts.forEach(function (f) {
+    var o = el('option', 'fontface', f);
+    o.value = f;
+    o.style.fontFamily = '"' + f + '"';
+    sel.appendChild(o);
+  });
+  sel.value = current || '';
+  bindCommit(sel, function (i) { return { value: i.value || null }; }, commit);
+  sel.setLive(current || '');
+  var combo = el('span', 'combo');
+  combo.appendChild(sel);
+  return combo;
+}
+
 function checkField(labelText, value, commit, face) {
   var wrap = el('label');
   var box = el('input');
@@ -320,7 +366,9 @@ function checkField(labelText, value, commit, face) {
   bindCommit(box, function (i) { return { value: i.checked }; }, commit);
   box.setLive(!!value);
   wrap.appendChild(box);
-  if (face) {
+  if (labelText && labelText.nodeType) {
+    wrap.appendChild(labelText);
+  } else if (face) {
     var span = el('span', 'face ' + face);
     span.textContent = labelText;
     wrap.appendChild(span);
@@ -352,7 +400,7 @@ function colorField(hex, commit, opts) {
   input.setLive(hex || blank);
 
   var clear = el('button', 'act', 'none');
-  clear.title = opts.noneTitle || 'Clear the colour (transparent / inherit)';
+  clear.title = opts.noneTitle || 'Clear the color (transparent / inherit)';
   clear.addEventListener('click', function () {
     input.value = blank;
     input.setLive(null);
@@ -419,14 +467,14 @@ var FIELD_LABELS = {
   fontFamily: 'font', fontWeight: 'weight', fontSizePt: 'size',
   bold: 'bold', italic: 'italic', underline: 'underline',
   strikethrough: 'strikethrough', smallCaps: 'small caps',
-  baselineOffset: 'super/subscript', foregroundColor: 'text colour',
+  baselineOffset: 'super/subscript', foregroundColor: 'text color',
   backgroundColor: 'highlight', alignment: 'alignment', direction: 'direction',
   spacingMode: 'spacing mode', lineSpacing: 'line spacing',
   spaceAbovePt: 'space above', spaceBelowPt: 'space below',
   indentStartPt: 'indent start', indentEndPt: 'indent end',
   indentFirstLinePt: 'first-line indent', shadingColor: 'shading',
   keepLinesTogether: 'keep lines together', keepWithNext: 'keep with next',
-  avoidWidowAndOrphan: 'widow/orphan control', pageBreakBefore: 'page break before',
+  avoidWidowAndOrphan: 'stranded lines', pageBreakBefore: 'page break before',
   borderTop: 'top border', borderBottom: 'bottom border', borderLeft: 'left border',
   borderRight: 'right border', borderBetween: 'border between',
   contentAlignment: 'cell alignment', paddingTopPt: 'padding top',
@@ -460,48 +508,40 @@ function buildStyleEditor(model, commit, opts) {
   model.paragraphStyle = model.paragraphStyle || {};
   var root = el('div');
 
-  // The fields below show the document's current values. Where the content
-  // this editor covers is not uniform, there is no single current value, so
-  // say which fields differ rather than showing one arbitrarily.
+  // A caveat about what this editor can and cannot reach, where there is
+  // one worth stating. Which fields are blank is already on the screen; why
+  // a blank one is blank is not.
+  if (opts.caveat) root.appendChild(el('p', 'hint', opts.caveat));
   if (opts.mixed && opts.mixed.length) {
-    var m = el('p', 'hint');
-    m.textContent = 'Differs across this content: ' + opts.mixed.map(fieldLabel).join(', ') +
-      '. Those fields are shown blank; setting one applies it everywhere here.';
-    root.appendChild(m);
+    root.appendChild(el('p', 'hint',
+      'Blank fields differ across this content. Setting one applies it to all of it.'));
   }
 
   function fire(where, k) { return commit(stylePayload(model, where, k)); }
   function setT(k, v) { model.textStyle[k] = v; return fire('textStyle', k); }
   function setP(k, v) { model.paragraphStyle[k] = v; return fire('paragraphStyle', k); }
 
+  var what = opts.what || '';
+
   /* ---- character ---- */
   if (opts.character !== false) {
-    var gChar = group('Character');
-    root.appendChild(gChar);
+    var cFold = styleFold(what, 'character style', 'sfold:' + what + ':char');
+    root.appendChild(cFold.item);
+    var gChar = cFold.body;
 
-    var fontInput = el('input');
-    fontInput.type = 'text';
-    fontInput.setAttribute('list', 'fontlist');
-    fontInput.value = model.textStyle.fontFamily || '';
-    fontInput.placeholder = 'inherit';
-    bindCommit(fontInput, function (i) {
-      var v = i.value.trim();
-      if (v === '') return { skip: true };
-      return { value: v };
-    }, function (v) { return setT('fontFamily', v); });
-    fontInput.setLive(model.textStyle.fontFamily || '');
-    gChar.appendChild(fieldRow('Font', fontInput));
+    gChar.appendChild(fieldRow('Font', fontField(model.textStyle.fontFamily,
+      function (v) { return setT('fontFamily', v); })));
 
     gChar.appendChild(fieldRow('Weight', selectField(WEIGHTS,
       String(model.textStyle.fontWeight || 400),
       function (v) { return setT('fontWeight', Number(v)); })));
 
     gChar.appendChild(fieldRow('Size', numPt(model.textStyle.fontSizePt,
-      function (v) { return setT('fontSizePt', v); }, { min: 1 })));
+      function (v) { return setT('fontSizePt', v); }, { min: 1, clearable: true })));
 
     var effects = el('div', 'checks');
     [['bold', 'Bold'], ['italic', 'Italic'], ['underline', 'Underline'],
-     ['strikethrough', 'Strikethrough'], ['smallCaps', 'Small caps']].forEach(function (p) {
+     ['strikethrough', 'Strikethrough'], ['smallCaps', 'Small Caps']].forEach(function (p) {
       effects.appendChild(checkField(p[1], model.textStyle[p[0]],
         function (v) { return setT(p[0], v); }, p[0]));
     });
@@ -522,10 +562,16 @@ function buildStyleEditor(model, commit, opts) {
       });
       return setT('baselineOffset', v || null);
     }
+    // The word at its ordinary size with a single asterisk carrying the
+    // effect: putting the whole label in superscript made it unreadably
+    // small, and shrank the one thing it was meant to demonstrate.
     [['SUPERSCRIPT', 'Superscript', 'sup'], ['SUBSCRIPT', 'Subscript', 'sub']].forEach(function (p) {
-      var f = checkField(p[1], model.textStyle.baselineOffset === p[0], function (on) {
+      var label = el('span');
+      label.appendChild(document.createTextNode(p[1]));
+      label.appendChild(el('span', 'face ' + p[2], '*'));
+      var f = checkField(label, model.textStyle.baselineOffset === p[0], function (on) {
         return setOffset(on ? p[0] : 'NONE');
-      }, p[2]);
+      });
       offsetBoxes[p[0]] = f.querySelector('input');
       effects.appendChild(f);
     });
@@ -536,7 +582,7 @@ function buildStyleEditor(model, commit, opts) {
       function (v) { return setOffset(v); }).querySelector('select');
     gChar.appendChild(fieldRow('Offset', offsetSel.parentNode));
 
-    gChar.appendChild(fieldRow('Text colour', colorField(model.textStyle.foregroundColor,
+    gChar.appendChild(fieldRow('Text color', colorField(model.textStyle.foregroundColor,
       function (v) { return setT('foregroundColor', v); })));
     gChar.appendChild(fieldRow('Highlight', colorField(model.textStyle.backgroundColor,
       function (v) { return setT('backgroundColor', v); })));
@@ -544,8 +590,9 @@ function buildStyleEditor(model, commit, opts) {
 
   /* ---- paragraph ---- */
   if (opts.paragraph !== false) {
-    var gPara = group('Paragraph');
-    root.appendChild(gPara);
+    var pFold = styleFold(what, 'paragraph style', 'sfold:' + what + ':para');
+    root.appendChild(pFold.item);
+    var gPara = pFold.body;
 
     gPara.appendChild(fieldRow('Alignment', selectField([INHERIT].concat(ALIGNMENTS),
       model.paragraphStyle.alignment || '',
@@ -554,24 +601,24 @@ function buildStyleEditor(model, commit, opts) {
     // Docs stores line spacing as a percentage where normal is 100.
     gPara.appendChild(fieldRow('Line spacing', numPlain(
       model.paragraphStyle.lineSpacing === undefined ? '' : model.paragraphStyle.lineSpacing / 100,
-      function (v) { return setP('lineSpacing', v * 100); },
-      { min: 0.1, placeholder: 'inherit' })));
+      function (v) { return setP('lineSpacing', v === null ? null : v * 100); },
+      { min: 0.1, placeholder: 'inherit', clearable: true })));
 
     gPara.appendChild(fieldRow('Space above', numUnit(model.paragraphStyle.spaceAbovePt,
-      function (v) { return setP('spaceAbovePt', v); }, { min: 0 })));
+      function (v) { return setP('spaceAbovePt', v); }, { min: 0, clearable: true })));
     gPara.appendChild(fieldRow('Space below', numUnit(model.paragraphStyle.spaceBelowPt,
-      function (v) { return setP('spaceBelowPt', v); }, { min: 0 })));
+      function (v) { return setP('spaceBelowPt', v); }, { min: 0, clearable: true })));
 
     gPara.appendChild(fieldRow('Spacing mode', selectField([INHERIT].concat(SPACING_MODES),
       model.paragraphStyle.spacingMode || '',
       function (v) { return setP('spacingMode', v || null); })));
 
     gPara.appendChild(fieldRow('Indent left', numUnit(model.paragraphStyle.indentStartPt,
-      function (v) { return setP('indentStartPt', v); })));
+      function (v) { return setP('indentStartPt', v); }, { clearable: true })));
     gPara.appendChild(fieldRow('Indent right', numUnit(model.paragraphStyle.indentEndPt,
-      function (v) { return setP('indentEndPt', v); })));
+      function (v) { return setP('indentEndPt', v); }, { clearable: true })));
     gPara.appendChild(fieldRow('First line', numUnit(model.paragraphStyle.indentFirstLinePt,
-      function (v) { return setP('indentFirstLinePt', v); })));
+      function (v) { return setP('indentFirstLinePt', v); }, { clearable: true })));
 
     gPara.appendChild(fieldRow('Direction', selectField([INHERIT].concat(DIRECTIONS),
       model.paragraphStyle.direction || '',
@@ -579,11 +626,17 @@ function buildStyleEditor(model, commit, opts) {
 
     var flow = el('div', 'checks');
     [['keepLinesTogether', 'Keep lines together'], ['keepWithNext', 'Keep with next'],
-     ['avoidWidowAndOrphan', 'Avoid widows/orphans'], ['pageBreakBefore', 'Page break before']]
+     ['avoidWidowAndOrphan', 'No stranded lines'], ['pageBreakBefore', 'Page break before']]
       .forEach(function (p) {
         // The API rejects page_break_before in headers, footers and footnotes.
         if (p[0] === 'pageBreakBefore' && opts.noPageBreak) return;
-        flow.appendChild(checkField(p[1], model.paragraphStyle[p[0]], function (v) { return setP(p[0], v); }));
+        var box = checkField(p[1], model.paragraphStyle[p[0]], function (v) { return setP(p[0], v); });
+        if (p[0] === 'avoidWidowAndOrphan') {
+          box.title = 'Never leave the first or last line of a paragraph on its ' +
+            'own at the bottom or top of a page. Known elsewhere as widow and ' +
+            'orphan control.';
+        }
+        flow.appendChild(box);
       });
     gPara.appendChild(flow);
 
@@ -595,11 +648,10 @@ function buildStyleEditor(model, commit, opts) {
     var bHead = el('div', 'head');
     bHead.appendChild(el('span', 'tw'));
     bHead.appendChild(el('span', 'name', 'Paragraph borders'));
-    bHead.appendChild(el('span', 'meta', '5 sides'));
     bHead.addEventListener('click', function () { bItem.classList.toggle('open'); });
     var bBody = el('div', 'body');
     BORDER_SIDES.forEach(function (side) {
-      var gSide = group(side.label);
+      var gSide = group(side.label, 'narrow');
       bBody.appendChild(gSide);
       var cur = model.paragraphStyle[side.key] || {};
       function setB(k, v) {
@@ -613,7 +665,7 @@ function buildStyleEditor(model, commit, opts) {
         function (v) { return setB('widthPt', v); }, { min: 0 })));
       gSide.appendChild(fieldRow('Padding', numPt(cur.paddingPt,
         function (v) { return setB('paddingPt', v); }, { min: 0 })));
-      gSide.appendChild(fieldRow('Colour', colorField(cur.color,
+      gSide.appendChild(fieldRow('Color', colorField(cur.color,
         function (v) { return setB('color', v); })));
       gSide.appendChild(fieldRow('Dash', selectField(DASH_STYLES, cur.dashStyle || 'SOLID',
         function (v) { return setB('dashStyle', v); })));
@@ -659,8 +711,32 @@ function applyAllSwitch(kind, label, unifyFn, unifyArgs) {
   return wrap;
 }
 
-function group(title) {
-  var g = el('fieldset', 'group');
+/**
+ * One half of a style editor, folded away until asked for.
+ *
+ * Both halves are long, and a visit almost always changes one thing in one
+ * of them, so they arrive shut with their names on the outside. `what` names
+ * what is being styled, so a header reads "Heading 1 character style" rather
+ * than a bare "Character" repeated down the panel.
+ */
+function styleFold(what, half, key) {
+  var item = el('div', 'item');
+  var head = el('div', 'head');
+  head.appendChild(el('span', 'tw'));
+  head.appendChild(el('span', 'name', (what ? what + ' ' : '') + half));
+  var body = el('div', 'body');
+  head.addEventListener('click', function () {
+    item.classList.toggle('open');
+    S.open[key] = item.classList.contains('open');
+  });
+  item.appendChild(head);
+  item.appendChild(body);
+  if (S.open[key]) item.classList.add('open');
+  return { item: item, body: body };
+}
+
+function group(title, extra) {
+  var g = el('fieldset', 'group' + (extra ? ' ' + extra : ''));
   g.appendChild(el('legend', null, title));
   return g;
 }
@@ -841,7 +917,8 @@ function renderSections() {
   var secs = S.data.sections || [];
 
   if (!secs.length) {
-    host.appendChild(el('p', 'hint', 'No section breaks in this tab.'));
+    host.appendChild(el('p', 'hint',
+      'Click inside a section in the document to edit it here.'));
     return;
   }
 
@@ -910,7 +987,7 @@ function renderStyles() {
           textStyle: payload.textStyle,
           paragraphStyle: payload.paragraphStyle
         }]);
-      }));
+      }, { what: st.label }));
 
       var row = el('div', 'btnrow');
       var save = el('button', 'act', 'Save as style preset');
@@ -964,8 +1041,7 @@ function renderCustomStyles(host) {
   host.appendChild(el('h2', null, 'Custom styles'));
   var presets = S.data.stylePresets || [];
   if (!presets.length) {
-    host.appendChild(el('p', 'hint',
-      'No custom styles yet. Select text in the document, then apply one.'));
+    host.appendChild(el('p', 'hint', 'No custom styles yet.'));
   }
 
   presets.forEach(function (p) { host.appendChild(customStyleRow(p)); });
@@ -999,7 +1075,7 @@ function customStyleRow(p) {
   var meta = el('span', 'meta', styleMetaLine(p));
   var apply = el('button', 'act iconbtn', '✓');
   apply.title = 'Apply "' + p.name + '" to the current selection';
-  var del = el('button', 'act danger iconbtn', '×');
+  var del = el('button', 'act danger iconbtn trash', '\uD83D\uDDD1\uFE0E');
   del.title = 'Delete this custom style';
 
   // Renames are live: everything downstream reads the box, so applying or
@@ -1056,7 +1132,7 @@ function customStyleRow(p) {
       return call('saveStylePreset', [{
         name: currentName(), textStyle: model.textStyle, paragraphStyle: model.paragraphStyle
       }]).then(function () { meta.textContent = styleMetaLine(model); });
-    }));
+    }, { what: p.name }));
   }
 
   head.addEventListener('click', function (e) {
@@ -1137,7 +1213,8 @@ function renderLists() {
 
   var lists = S.data.lists.lists;
   if (!lists.length) {
-    host.appendChild(el('p', 'hint', 'This tab has no lists.'));
+    host.appendChild(el('p', 'hint',
+      'Click inside a list in the document to edit it here.'));
     return;
   }
   if (lists.length > 1) {
@@ -1220,9 +1297,8 @@ function listBody(list) {
   var box = el('div');
   box.appendChild(el('h2', null, 'Marker style'));
   box.appendChild(el('p', 'hint',
-    'A marker style covers all three levels at once -- that is how the Docs API ' +
-    'defines them, and no level can be given a different one. A level can drop ' +
-    'its markers on its own, with the \u2298 inside it.'));
+    'A marker style covers all three levels at once: the Docs API defines them ' +
+    'that way, so no one level can be given a different one.'));
   box.appendChild(markerPicker(list));
 
   var levels = (list || S.data.lists.lists[0]).levels;
@@ -1244,7 +1320,7 @@ function listBody(list) {
           t.textStyle = payload.textStyle;
           t.paragraphStyle = payload.paragraphStyle;
           return call('writeListLevelStyle', [t]);
-        }, { mixed: cur.mixed }));
+        }, { mixed: cur.mixed, what: 'Level ' + (lv.level + 1) }));
         return inner;
       },
       'lvl:' + key + ':' + lv.level);
@@ -1293,15 +1369,25 @@ function renderNotes() {
   host.innerHTML = '';
 
   host.appendChild(el('h2', null, 'Style all footnote text'));
-  host.appendChild(segmentEditor('footnotes', 'Footnote text'));
+  host.appendChild(segmentEditor('footnotes', 'Footnote text', {
+    caveat: 'Google Docs has no footnote style, so this writes the change into ' +
+      'every footnote in the tab. New footnotes come out unstyled.'
+  }));
 
   host.appendChild(el('h2', null, 'Footnote callout marks'));
-  host.appendChild(segmentEditor('footnoteRefs', 'Footnote callouts', { paragraph: false }));
+  host.appendChild(segmentEditor('footnoteRefs', 'Footnote callouts', {
+    paragraph: false,
+    caveat: 'The small number in the body text, not the note itself.'
+  }));
 
   host.appendChild(el('h2', null, 'All headers'));
-  host.appendChild(segmentEditor('headers', 'Headers'));
+  host.appendChild(segmentEditor('headers', 'Headers', {
+    caveat: 'Every header in the tab at once — first page and even pages included.'
+  }));
   host.appendChild(el('h2', null, 'All footers'));
-  host.appendChild(segmentEditor('footers', 'Footers'));
+  host.appendChild(segmentEditor('footers', 'Footers', {
+    caveat: 'Every footer in the tab at once — first page and even pages included.'
+  }));
 
   // Footnotes are deliberately absent here: they are styled as one set
   // above, not one row per footnote.
@@ -1322,7 +1408,7 @@ function renderNotes() {
             tabId: S.tabId, scope: S.scope, target: 'segment', segmentId: seg.segmentId,
             textStyle: payload.textStyle, paragraphStyle: payload.paragraphStyle
           }]);
-        }, { noPageBreak: true, mixed: cur.mixed }));
+        }, { noPageBreak: true, mixed: cur.mixed, what: seg.role }));
         return box;
       },
       'seg:' + seg.segmentId));
@@ -1362,7 +1448,7 @@ function segmentEditor(target, label, opts) {
       tabId: S.tabId, scope: S.scope, target: target,
       textStyle: payload.textStyle, paragraphStyle: payload.paragraphStyle
     }]);
-  }, { noPageBreak: true, mixed: cur.mixed,
+  }, { noPageBreak: true, mixed: cur.mixed, what: label, caveat: opts.caveat,
        paragraph: opts.paragraph, character: opts.character });
 }
 
@@ -1389,7 +1475,8 @@ function renderTables() {
   host.innerHTML = '';
 
   if (!S.data.tables.length) {
-    host.appendChild(el('p', 'hint', 'This document has no tables.'));
+    host.appendChild(el('p', 'hint',
+      'Click inside a table in the document to edit it here.'));
     return;
   }
 
@@ -1460,8 +1547,7 @@ function tableBody(t) {
     var v = cur.style || {};
     if (cur.mixed && cur.mixed.length) {
       cellHost.appendChild(el('p', 'hint',
-        'Differs across these cells: ' + cur.mixed.map(fieldLabel).join(', ') +
-        '. Those are shown blank; setting one applies it to every cell here.'));
+        'Blank fields differ across these cells. Setting one applies it to all of them.'));
     }
     [['paddingTopPt', 'Padding top'], ['paddingBottomPt', 'Padding bottom'],
      ['paddingLeftPt', 'Padding left'], ['paddingRightPt', 'Padding right']].forEach(function (p) {
@@ -1495,7 +1581,7 @@ function tableBody(t) {
     });
   }
   gBord.appendChild(fieldRow('Width', numPt(bw, function (v) { bw = v; return pushBorder(); }, { min: 0 })));
-  gBord.appendChild(fieldRow('Colour', colorField(bc, function (v) { bc = v; return pushBorder(); })));
+  gBord.appendChild(fieldRow('Color', colorField(bc, function (v) { bc = v; return pushBorder(); })));
   gBord.appendChild(fieldRow('Dash', selectField(DASH_STYLES, bd, function (v) { bd = v; return pushBorder(); })));
 
   var gRows = group('Rows');
@@ -1577,14 +1663,14 @@ function renderPresets() {
       return call('renamePreset', [{ from: p.name, to: v }]).then(function () { p.name = v; });
     });
     head.appendChild(nameIn);
-    var btns = el('span');
+    var btns = el('span', 'btns');
     var apply = el('button', 'act', 'Apply');
     apply.addEventListener('click', function () {
       call('applyPreset', [{ name: nameIn.value.trim() || p.name, tabId: S.tabId, scope: S.scope }])
         .then(reload)
         .catch(function (e) { status(String(e.message || e), 'err'); });
     });
-    var del = el('button', 'act danger iconbtn', '×');
+    var del = el('button', 'act danger iconbtn trash', '\uD83D\uDDD1\uFE0E');
     del.title = 'Delete this preset';
     del.addEventListener('click', function () {
       call('deletePreset', [{ name: nameIn.value.trim() || p.name }])
@@ -1681,9 +1767,6 @@ var POLL_MIN_MS = 1000;
 var POLL_MAX_MS = 5000;
 var POLL_DUTY = 20;
 var CONTEXT_TICK_MS = 110;
-/** The --fs the stylesheet is written against; the scale control multiplies it. */
-var BASE_FS = 14.5;
-
 var lastFetchMs = 0;
 
 function nextPollDelay() {
@@ -1957,26 +2040,6 @@ function switchTab(name) {
 }
 
 function boot() {
-  // Google fixes every script sidebar at 300 pixels and setWidth() applies
-  // only to dialogs, so the pane cannot be widened. What can change is how
-  // much fits inside it: the whole stylesheet derives from --fs, so scaling
-  // that one number scales the entire panel, and 77% fits about 30% more.
-  var scaleSel = document.getElementById('scale');
-  function applyScale(v) {
-    document.documentElement.style.setProperty('--fs', (BASE_FS * Number(v)).toFixed(2) + 'px');
-  }
-  try {
-    // The sidebar is a sandboxed frame; localStorage is there in practice but
-    // is not something to fall over for if a browser withholds it.
-    var saved = window.localStorage.getItem('stylist.scale');
-    if (saved) { scaleSel.value = saved; }
-  } catch (e) { /* no persistence, just this session's choice */ }
-  applyScale(scaleSel.value);
-  scaleSel.addEventListener('change', function (e) {
-    applyScale(e.target.value);
-    try { window.localStorage.setItem('stylist.scale', e.target.value); } catch (err) { /* as above */ }
-  });
-
   document.getElementById('unit').addEventListener('change', function (e) {
     S.unit = e.target.value;
     // Every dimension field, and every summary line that quotes one, is
@@ -2079,12 +2142,6 @@ function boot() {
       sel.value = data.activeTabId;
       document.getElementById('tabRow').style.display = 'flex';
     }
-    var fl = document.getElementById('fontlist');
-    data.constants.fonts.forEach(function (f) {
-      var o = el('option');
-      o.value = f;
-      fl.appendChild(o);
-    });
     status('', '');
     startPolling();
   }).catch(function (e) {

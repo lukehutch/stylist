@@ -163,7 +163,34 @@ module.exports = ({ suite, test }) => {
     const inherited = clientJs.match(/placeholder = opts\.placeholder \|\| 'inherit'/g) || [];
     t.equal(inherited.length, 2);
     t.match(clientJs, /placeholder = opts\.placeholder \|\| 'default'/);
-    t.match(clientJs, /fontInput\.placeholder = 'inherit'/);
+    // The font picker is a menu, which has no placeholder; its first option
+    // is the one that says where the value comes from.
+    t.match(clientJs, /var blank = el\('option', null, 'inherit'\)/);
+  });
+
+  test('emptying a box that can inherit writes that through to the document', (t) => {
+    // Every builder used by the style editor offers the same escape hatch,
+    // and the fields that can be inherited ask for it.
+    const clearable = clientJs.match(/opts\.clearable \? \{ value: null \} : \{ skip: true \}/g) || [];
+    t.equal(clearable.length, 3, 'numUnit, numPt and numPlain all honour it');
+    ['Size', 'Line spacing', 'Space above', 'Space below',
+     'Indent left', 'Indent right', 'First line'].forEach((label) => {
+      const row = new RegExp("fieldRow\\('" + label + "'[^]*?clearable: true");
+      t.match(clientJs, row, label + ' can be cleared');
+    });
+    t.match(clientJs, /\{ value: i\.value \|\| null \}/, 'and so can the font');
+  });
+
+  test('the server turns that null into "put it back to inherited"', (t) => {
+    const model = fs.readFileSync(path.join(SRC, 'DocModel.js'), 'utf8');
+    // The API is told to reset a property by naming it in the field mask and
+    // sending no value for it, which is what pushing without setting does.
+    [/if \(ui\.fontSizePt === null\) \{\s*fields\.push\('fontSize'\)/,
+     /if \(ui\.fontFamily === null\) \{\s*fields\.push\('weightedFontFamily'\)/,
+     /if \(ui\.lineSpacing === null\) \{\s*fields\.push\('lineSpacing'\)/,
+     /if \(v === null\) \{ fields\.push\(k\); return; \}/].forEach((re) => {
+      t.match(model, re);
+    });
   });
 
   test('the placeholder is grey, not mistakable for a value', (t) => {
@@ -217,9 +244,17 @@ module.exports = ({ suite, test }) => {
 
   suite('Tables');
 
-  test('a document with no tables says so, not "this tab"', (t) => {
-    t.match(clientJs, /This document has no tables\./);
-    t.notOk(/This tab has no tables/.test(clientJs));
+  test('a panel with nothing to show says where to put the cursor', (t) => {
+    // Not "this document has no tables": whether there is one is something
+    // the reader can see, and what to do about it is not.
+    ['list', 'table', 'section'].forEach((what) => {
+      t.match(clientJs,
+        new RegExp('Click inside a ' + what + ' in the document to edit it here'),
+        what);
+    });
+    t.notOk(/has no tables/.test(clientJs));
+    t.notOk(/has no lists/.test(clientJs));
+    t.notOk(/No section breaks/.test(clientJs));
   });
 
   test('the table under the cursor is the one shown, and it starts open', (t) => {
@@ -236,21 +271,43 @@ module.exports = ({ suite, test }) => {
   suite('Grouped controls');
 
   test('a group is a fieldset with its heading in the top edge', (t) => {
-    t.match(clientJs, /function group\(title\)[^]*?el\('fieldset', 'group'\)/);
+    t.match(clientJs, /function group\(title, extra\)[^]*?el\('fieldset', 'group'/);
     t.match(clientJs, /appendChild\(el\('legend', null, title\)\)/);
   });
 
-  test('character and paragraph settings each get their own box', (t) => {
-    t.match(clientJs, /var gChar = group\('Character'\)/);
-    t.match(clientJs, /var gPara = group\('Paragraph'\)/);
-    t.match(clientJs, /gChar\.appendChild\(fieldRow\('Font'/, 'the font row goes in the box');
+  test('character and paragraph settings each fold out of their own row', (t) => {
+    t.match(clientJs, /var cFold = styleFold\(what, 'character style'/);
+    t.match(clientJs, /var pFold = styleFold\(what, 'paragraph style'/);
+    t.match(clientJs, /var gChar = cFold\.body/, 'the fields go inside the fold');
+    t.match(clientJs, /var gPara = pFold\.body/);
+    t.match(clientJs, /gChar\.appendChild\(fieldRow\('Font'/);
     t.match(clientJs, /gPara\.appendChild\(fieldRow\('Alignment'/);
+  });
+
+  test('a fold arrives shut, and says what it is a style of', (t) => {
+    const fn = /function styleFold\(what, half, key\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /el\('span', 'name', \(what \? what \+ ' ' : ''\) \+ half\)/,
+      '"Heading 1 character style", not a bare "Character"');
+    t.notOk(/classList\.add\('open'\);\s*$/.test(fn.split('\n')[3] || ''),
+      'nothing opens it on the way in');
+    t.match(fn, /if \(S\.open\[key\]\) item\.classList\.add\('open'\)/,
+      'except a fold you had open before the poll rebuilt the panel');
+  });
+
+  test('every editor names what it is styling', (t) => {
+    ['what: st.label', 'what: p.name', "what: 'Level ' + (lv.level + 1)",
+     'what: seg.role', 'what: label'].forEach((s) => {
+      t.ok(clientJs.includes(s), s);
+    });
   });
 
   test('every heading inside a panel is a group heading now', (t) => {
     t.notOk(/el\('h3'/.test(clientJs), 'no bare sub-headings left');
-    const groups = clientJs.match(/group\('[^']+'\)/g) || [];
-    t.ok(groups.length >= 8, 'grouped everywhere, not just the style editor: ' + groups.length);
+    const groups = clientJs.match(/group\('[^']+'[,)]/g) || [];
+    const folds = clientJs.match(/styleFold\(/g) || [];
+    t.ok(groups.length + folds.length >= 8,
+      'grouped everywhere, not just the style editor: ' +
+      groups.length + ' groups, ' + folds.length + ' folds');
   });
 
   test('the box is rounded and can shrink to the sidebar', (t) => {
@@ -611,7 +668,8 @@ module.exports = ({ suite, test }) => {
     t.match(fn, /el\('input', 'name'\)/,
       'the name is an input on the row itself, not something to prompt for');
     t.match(fn, /el\('button', 'act iconbtn', '✓'\)/);
-    t.match(fn, /el\('button', 'act danger iconbtn', '×'\)/);
+    t.ok(fn.includes("el('button', 'act danger iconbtn trash', '\\uD83D\\uDDD1\\uFE0E')"),
+      'a trash can, in its text form rather than as a colour emoji');
     t.match(fn, /apply\.title = 'Apply "/, 'the unlabelled buttons carry tooltips');
     t.match(fn, /del\.title = 'Delete this custom style'/);
     t.match(fn, /nameIn\.title = 'Rename this custom style'/);
@@ -1172,7 +1230,7 @@ module.exports = ({ suite, test }) => {
 
   test('the sections panel shows one section -- the one the cursor is in', (t) => {
     const fn = /function renderSections\(\)[^]*?\n}/.exec(clientJs)[0];
-    t.match(fn, /No section breaks in this tab\./);
+    t.match(fn, /Click inside a section in the document to edit it here/);
     t.notOk(/secs\.forEach/.test(fn), 'no row per section');
     t.match(fn, /section ' \+ \(at \+ 1\) \+ ' of '/,
       'it says which of the sections is being edited');

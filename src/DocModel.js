@@ -274,11 +274,19 @@ function uiToTextStyle_(ui) {
     style.baselineOffset = ui.baselineOffset || 'NONE';
     fields.push('baselineOffset');
   }
-  if (ui.fontSizePt !== undefined && ui.fontSizePt !== null && ui.fontSizePt !== '') {
+  // As with baselineOffset above: an explicit null names the field in the
+  // mask and sends no value, which is how the API is told to put the
+  // property back to whatever it inherits. undefined still means "not part
+  // of this edit" and is left out entirely.
+  if (ui.fontSizePt === null) {
+    fields.push('fontSize');
+  } else if (ui.fontSizePt !== undefined && ui.fontSizePt !== '') {
     style.fontSize = ptDim_(ui.fontSizePt);
     fields.push('fontSize');
   }
-  if (ui.fontFamily) {
+  if (ui.fontFamily === null) {
+    fields.push('weightedFontFamily');
+  } else if (ui.fontFamily) {
     var w = Number(ui.fontWeight || 400);
     // The API rejects anything that is not a multiple of 100 in [100, 900].
     w = Math.min(900, Math.max(100, Math.round(w / 100) * 100));
@@ -439,7 +447,9 @@ function uiToParagraphStyle_(ui) {
     if (ui[k] === null) { fields.push(k); return; }
     if (ui[k]) { style[k] = ui[k]; fields.push(k); }
   });
-  if (ui.lineSpacing !== undefined && ui.lineSpacing !== null && ui.lineSpacing !== '') {
+  if (ui.lineSpacing === null) {
+    fields.push('lineSpacing');
+  } else if (ui.lineSpacing !== undefined && ui.lineSpacing !== '') {
     // Docs expresses line spacing as a percentage where normal == 100.
     style.lineSpacing = Number(ui.lineSpacing);
     fields.push('lineSpacing');
@@ -449,7 +459,8 @@ function uiToParagraphStyle_(ui) {
   });
   PARA_STYLE_DIMS.forEach(function (k) {
     var v = ui[k + 'Pt'];
-    if (v !== undefined && v !== null && v !== '') { style[k] = ptDim_(v); fields.push(k); }
+    if (v === null) { fields.push(k); return; }
+    if (v !== undefined && v !== '') { style[k] = ptDim_(v); fields.push(k); }
   });
   if (ui.shadingColor !== undefined) {
     style.shading = { backgroundColor: hexToColor_(ui.shadingColor) };
