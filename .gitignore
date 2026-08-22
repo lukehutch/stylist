@@ -2,10 +2,21 @@
 # Copy .clasp.json.example instead.
 .clasp.json
 
-# Credentials: clasp's tokens, and the OAuth client you download from the
-# Cloud console if you set up `gapp-test live`.
+# Credentials. clasp keeps its tokens in ~/.clasprc.json, outside the repo, but
+# `--auth <path>` and clasp_config_auth can put one here, and clasp still reads
+# a legacy .clasprc.json from the project root. Anything matching these holds a
+# refresh token or an OAuth client secret and must never be committed.
 .clasprc.json
+*.clasprc.json
+clasprc*.json
 client_secret*.json
+client_id*.json
+creds*.json
+credentials*.json
+service-account*.json
+*-key.json
+*.pem
+*.p12
 
 node_modules/
 package-lock.json
