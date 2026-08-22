@@ -422,6 +422,16 @@ module.exports = ({ suite, test }) => {
     t.match(fn, /else setTimeout\(tick, ms\)/, 'setTimeout takes over');
   });
 
+  test('the first read is timed and logged to the browser console', (t) => {
+    t.match(clientJs, /var firstReadT0 = Date\.now\(\);/);
+    t.match(clientJs,
+      /console\.log\('Stylist: first document read took ' \+ firstReadMs \+ ' ms'\)/);
+  });
+
+  test('that measurement paces the first wait too', (t) => {
+    t.match(clientJs, /lastFetchMs = firstReadMs;/);
+  });
+
   suite('Stopping when the sidebar is not there');
 
   test('every way back into the loop goes through one flag', (t) => {

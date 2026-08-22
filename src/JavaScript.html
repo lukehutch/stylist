@@ -1561,7 +1561,17 @@ function boot() {
   window.addEventListener('unload', stopPolling);
 
   status('Loading document…', '');
+  // The sidebar is an ordinary page in an iframe, so this reaches the browser
+  // console -- pick the add-on's frame in the console's frame selector to see
+  // it. Server-side Logger.log would go to the Apps Script execution log
+  // instead, which is no help while looking at the sidebar.
+  var firstReadT0 = Date.now();
   reload().then(function (data) {
+    var firstReadMs = Date.now() - firstReadT0;
+    console.log('Stylist: first document read took ' + firstReadMs + ' ms');
+    // It is also a measurement of exactly what the poll pays, so the first
+    // wait is paced by it rather than by the one-second floor.
+    lastFetchMs = firstReadMs;
     document.getElementById('docTitle').textContent = data.documentTitle || 'Untitled';
     var sel = document.getElementById('doctab');
     if (data.tabs.length > 1) {
