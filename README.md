@@ -68,8 +68,19 @@ That opens the Apps Script editor in your browser. In it:
 7. Click **Save test**, select the test's radio button, and click **Execute**.
 
 Your document opens in a new tab. Choose **Extensions → Stylist → Open format
-editor**, and authorise when prompted — Stylist asks to see and edit the
-documents you open it in, and to show a sidebar.
+editor** and click **OK** at *Authorization required*.
+
+Google then shows **"Google hasn't verified this app"**, naming your own email
+as the developer. That is expected and it is not a refusal: the app is your own
+script, and Google only verifies apps that are distributed to other people.
+Click **Advanced** at the bottom left, then the **Go to Stylist (unsafe)** link
+that appears, and **Allow**. Stylist asks to see and edit the documents you
+open it in, and to show a sidebar — nothing else, and you can check that
+against `oauthScopes` in `src/appsscript.json`.
+
+You will see that screen once. If you would rather not see it at all, that
+means publishing the add-on and passing Google's OAuth review, which is
+[DEV.md](DEV.md#publishing) territory and takes weeks.
 
 The test deployment runs the latest code you pushed, so after any later
 `clasp push` just reload the document.
@@ -98,6 +109,7 @@ forces everyone who has authorised the script to authorise it again.
 | `Script ID not set, unable to open IDE.` | No `.clasp.json` — run `create-script`, or copy `.clasp.json.example` and paste your script id in. |
 | `A file with this name already exists in the current project: appsscript` | `create-script` left a stub at `src/src/appsscript.json`. `rm -rf src/src`, push again. |
 | `We're sorry, a server error occurred while reading from storage.` | Reload the document; if it persists, the script and its Cloud project are out of step — re-check step 3. |
+| `Access blocked: Stylist has not completed the Google verification process` — with no **Advanced** link | Different from the warning above, and a real block. Your Cloud project's OAuth consent screen is in **Testing** but your account is not on its test-user list. Add yourself under **Audience → Test users**. |
 
 ## The six tabs
 
