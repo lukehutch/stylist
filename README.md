@@ -73,10 +73,14 @@ editor** and click **OK** at *Authorization required*.
 Google then shows **"Google hasn't verified this app"**, naming your own email
 as the developer. That is expected and it is not a refusal: the app is your own
 script, and Google only verifies apps that are distributed to other people.
-Click **Advanced** at the bottom left, then the **Go to Stylist (unsafe)** link
-that appears, and **Allow**. Stylist asks to see and edit the documents you
-open it in, and to show a sidebar — nothing else, and you can check that
-against `oauthScopes` in `src/appsscript.json`.
+Click **Show advanced**. That reveals *"Continue only if you understand the
+risks and trust the developer"* — naming your own address — and a **Go to
+Stylist (unsafe)** link. Click it, then **Allow**.
+
+Stylist asks to see and edit the documents you open it in, and to show a
+sidebar. Nothing else, and the consent screen should list exactly the two
+scopes in `src/appsscript.json`; if it asks for more, something other than this
+code got pushed.
 
 You will see that screen once. If you would rather not see it at all, that
 means publishing the add-on and passing Google's OAuth review, which is
