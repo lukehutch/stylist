@@ -21,13 +21,14 @@ const ROOT = path.join(__dirname, '..');
 function makeSandbox(doc) {
   const captured = [];
   // DocumentApp reads these; the tests set them through sb.__selection.
-  const state = { selection: null, cursor: null };
+  const state = { selection: null, cursor: null, body: null };
 
   const DocumentApp = {
     getActiveDocument: () => ({
       getId: () => 'DOC_ID',
       getSelection: () => state.selection,
-      getCursor: () => state.cursor
+      getCursor: () => state.cursor,
+      getBody: () => state.body
     }),
     getUi: () => ({ createAddonMenu: () => ({ addItem: () => ({ addToUi() {} }) }) }),
     Attribute: {
@@ -39,7 +40,8 @@ function makeSandbox(doc) {
       SPACING_AFTER: 'SPACING_AFTER', INDENT_START: 'INDENT_START',
       INDENT_END: 'INDENT_END', INDENT_FIRST_LINE: 'INDENT_FIRST_LINE'
     },
-    ElementType: { TEXT: 'TEXT', PARAGRAPH: 'PARAGRAPH', LIST_ITEM: 'LIST_ITEM', BODY: 'BODY' },
+    ElementType: { TEXT: 'TEXT', PARAGRAPH: 'PARAGRAPH', LIST_ITEM: 'LIST_ITEM', BODY: 'BODY',
+                   BODY_SECTION: 'BODY_SECTION', TABLE: 'TABLE', TABLE_CELL: 'TABLE_CELL' },
     HorizontalAlignment: { LEFT: 'LEFT', CENTER: 'CENTER', RIGHT: 'RIGHT', JUSTIFY: 'JUSTIFY' },
     VerticalAlignment: { SUPERSCRIPT: 'SUPERSCRIPT', SUBSCRIPT: 'SUBSCRIPT', NORMAL: 'NORMAL' }
   };
@@ -64,6 +66,9 @@ function makeSandbox(doc) {
 
   Object.defineProperty(sb, '__selection', {
     get: () => state.selection, set: (v) => { state.selection = v; }
+  });
+  Object.defineProperty(sb, '__body', {
+    get: () => state.body, set: (v) => { state.body = v; }
   });
   Object.defineProperty(sb, '__cursor', {
     get: () => state.cursor, set: (v) => { state.cursor = v; }

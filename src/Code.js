@@ -41,6 +41,7 @@ function loadAll(tabId) {
   var flat = flattenTabs_(doc);
   var ctx = resolveTab_(doc, tabId);
   var active = ctx.tabId;
+  var tables = readTables(active);
 
   return {
     documentTitle: doc.title,
@@ -53,7 +54,8 @@ function loadAll(tabId) {
     namedStyles: readNamedStyles(active).styles,
     segments: readSegments(active),
     lists: readLists(active),
-    tables: readTables(active).tables,
+    tables: tables.tables,
+    activeTableIndex: tables.activeIndex,
     footnotes: readFootnotes(active),
     presets: listPresets(),
     stylePresets: listStylePresets(),
@@ -90,7 +92,11 @@ function refresh(tabId, what) {
   if (!what || what === 'sections') out.sections = readSections(tabId).sections;
   if (!what || what === 'lists') out.lists = readLists(tabId);
   if (!what || what === 'segments') out.segments = readSegments(tabId);
-  if (!what || what === 'tables') out.tables = readTables(tabId).tables;
+  if (!what || what === 'tables') {
+    var t = readTables(tabId);
+    out.tables = t.tables;
+    out.activeTableIndex = t.activeIndex;
+  }
   if (!what || what === 'footnotes') out.footnotes = readFootnotes(tabId);
   return out;
 }

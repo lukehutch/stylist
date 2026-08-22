@@ -530,6 +530,22 @@ function group(title) {
  * Collapsible list row. `key` identifies the row across re-renders -- the
  * background poll rebuilds every panel, and rows that were open stay open.
  */
+/**
+ * The short "what you can do here" list at the top of a panel.
+ *
+ * Things the user can actually do, in their own words -- not an inventory of
+ * what the Docs API refuses. A real limitation is worth saying next to the
+ * control it affects, where it is actionable, rather than in a wall of text
+ * someone has to read before reaching the first field.
+ */
+function intro(items) {
+  var box = el('div', 'intro');
+  var ul = el('ul');
+  items.forEach(function (t) { ul.appendChild(el('li', null, t)); });
+  box.appendChild(ul);
+  return box;
+}
+
 function listItem(name, meta, buildBody, key) {
   key = key || name;
   var item = el('div', 'item');
@@ -561,6 +577,12 @@ function renderPage() {
   var host = document.getElementById('panel-page');
   host.innerHTML = '';
   var pf = S.data.pageFormat;
+
+  host.appendChild(intro([
+    'Set the page size, orientation and the four margins.',
+    'Set header and footer margins, and turn on a different first or even page.',
+    'Change margins and columns for one section at a time, further down.'
+  ]));
 
   host.appendChild(el('h2', null, 'Page size'));
   var presets = [{ id: '', label: 'Custom…' }].concat(
@@ -702,9 +724,12 @@ function applyPage(patch) {
 function renderStyles() {
   var host = document.getElementById('panel-styles');
   host.innerHTML = '';
-  host.appendChild(el('p', 'hint',
-    'These are the styles behind the Docs Styles menu. Editing one updates every ' +
-    'paragraph that uses it, everywhere in the document.'));
+  host.appendChild(intro([
+    'Edit any of the nine styles behind the Docs Styles menu. Every paragraph ' +
+      'using one updates everywhere in the document.',
+    'Save a style you like as a custom style, to reuse later.',
+    'Apply a custom style to whatever text is selected, from the list at the bottom.'
+  ]));
 
   S.data.namedStyles.forEach(function (st) {
     var ts = st.textStyle || {};
@@ -802,11 +827,11 @@ function renderCustomStyles(host) {
 function renderBullets() {
   var host = document.getElementById('panel-bullets');
   host.innerHTML = '';
-  var note = el('div', 'note');
-  note.innerHTML = '<b>What the Docs API allows here.</b> Glyph shape and numbering format can only ' +
-    'be set from the 16 built-in presets — there is no request to define a custom glyph or ' +
-    'per-level format. Indentation, spacing and text styling of each nesting level are fully editable.';
-  host.appendChild(note);
+  host.appendChild(intro([
+    'Change the indentation and spacing of each nesting level.',
+    'Change the font, size and colour of the text at each level.',
+    'Swap the glyphs for one of the 16 built-in sets — Docs has no way to define your own.'
+  ]));
 
   if (!S.data.lists.lists.length) {
     host.appendChild(el('p', 'hint', 'This tab has no lists.'));
@@ -875,16 +900,12 @@ function listBody(list) {
 function renderNotes() {
   var host = document.getElementById('panel-notes');
   host.innerHTML = '';
-  var caps = S.data.footnotes.capabilities;
-
-  var note = el('div', 'note');
-  note.innerHTML = '<b>Footnote placement and pagination.</b> Verified against the Docs API v1 ' +
-    'schema: there is no endnote mode, no control over a footnote splitting across pages, and no ' +
-    'numbering-format setting. Nothing in the API model touches footnote layout at all.';
-  var ul = el('ul');
-  caps.notes.forEach(function (t) { ul.appendChild(el('li', null, t)); });
-  note.appendChild(ul);
-  host.appendChild(note);
+  host.appendChild(intro([
+    'Style every footnote at once — formatting already inside them is left alone.',
+    'Style the superscript callout marks separately from the note text.',
+    'Convert footnotes to endnotes, collecting them into a Notes section at the end.',
+    'Style headers and footers, individually or all together.'
+  ]));
 
   host.appendChild(el('h2', null, 'Style all footnote text'));
   var fnCount = (S.data.footnotes.footnotes || []).length;
@@ -996,20 +1017,49 @@ function currentSegmentStyle(target) {
 function renderTables() {
   var host = document.getElementById('panel-tables');
   host.innerHTML = '';
+
+  host.appendChild(intro([
+    'Click inside a table in the document, and this panel edits that table.',
+    'Set cell padding, background colour, borders and vertical alignment — for ' +
+      'every cell, or just the header row.',
+    'Set column widths, row heights, and how many rows repeat as headers across pages.'
+  ]));
+
   if (!S.data.tables.length) {
-    host.appendChild(el('p', 'hint', 'This tab has no tables.'));
+    host.appendChild(el('p', 'hint', 'This document has no tables.'));
     return;
   }
-  host.appendChild(el('p', 'hint',
-    '"Prevent overflow" is the only page-break control the Docs API exposes anywhere: ' +
-    'it stops a row splitting across pages.'));
 
-  S.data.tables.forEach(function (t) {
-    host.appendChild(listItem(
-      'Table ' + (t.index + 1),
-      t.rows + '×' + t.columns + (t.preview ? ' · ' + t.preview : ''),
-      function () { return tableBody(t); }));
-  });
+  var active = S.data.activeTableIndex;
+  var chosen = (active === null || active === undefined) ? null : S.data.tables[active];
+
+  if (!chosen) {
+    // Every table is still listed, because a document with one table should
+    // not make you click into it first. With several, the list is how you
+    // reach the one you have not put the cursor in.
+    host.appendChild(el('p', 'hint',
+      'Click inside a table in the document to edit it here. Until then, every table ' +
+      'in this tab is listed below.'));
+    S.data.tables.forEach(function (t) {
+      host.appendChild(listItem(
+        'Table ' + (t.index + 1),
+        t.rows + '×' + t.columns + (t.preview ? ' · ' + t.preview : ''),
+        function () { return tableBody(t); }));
+    });
+    return;
+  }
+
+  host.appendChild(el('p', 'hint',
+    'Editing the table your cursor is in — table ' + (chosen.index + 1) + ' of ' +
+    S.data.tables.length + '. Click inside a different table to switch.'));
+  var row = listItem(
+    'Table ' + (chosen.index + 1),
+    chosen.rows + '×' + chosen.columns + (chosen.preview ? ' · ' + chosen.preview : ''),
+    function () { return tableBody(chosen); });
+  host.appendChild(row);
+  // The one table on screen starts open. listItem restores whatever state the
+  // row was last left in, so only open it if it came back closed.
+  if (!row.classList.contains('open')) row.querySelector('.head').click();
 }
 
 function tableBody(t) {
@@ -1121,13 +1171,12 @@ function renderPresets() {
   var host = document.getElementById('panel-presets');
   host.innerHTML = '';
 
-  var note = el('div', 'note');
-  note.innerHTML = '<b>About custom styles.</b> The Docs API cannot add a new entry to the Styles ' +
-    'menu — NamedStyleType is a closed enum of Normal text, Title, Subtitle and Heading 1-6, with ' +
-    'no request to define another. The workable route is below: define a style once, save it, then ' +
-    'bind it to a heading level you are not otherwise using. It then appears on the Styles menu ' +
-    'under that heading\'s name.';
-  host.appendChild(note);
+  host.appendChild(intro([
+    'Save the whole document\'s formatting as a preset, and apply it to another document.',
+    'Export a preset as JSON to keep in version control, and import one back.',
+    'Bind a custom style to a heading level you are not using, and it appears on ' +
+      'the Docs Styles menu under that heading\'s name.'
+  ]));
 
   host.appendChild(el('h2', null, 'Whole-document presets'));
   var saveRow = el('div', 'btnrow');
@@ -1305,7 +1354,6 @@ function poll() {
       S.tabId = data.activeTabId;
       S.fingerprint = JSON.stringify(data);
       renderAll();
-      status('Updated from the document ✓', 'ok');
     })
     .catch(function () { /* transient: the next tick tries again */ });
 }

@@ -361,6 +361,62 @@ test('tables are found with their geometry and header row', (t) => {
   t.equal(tbl.startIndex, 70);
 });
 
+/* A body whose children are the given types, with a working getChildIndex. */
+function fakeBody(types) {
+  const children = types.map((type, i) => {
+    const node = {
+      getType: () => type,
+      getParent: () => body,
+      __i: i
+    };
+    return node;
+  });
+  const body = {
+    getType: () => 'BODY_SECTION',
+    getParent: () => null,
+    getNumChildren: () => children.length,
+    getChild: (i) => children[i],
+    getChildIndex: (c) => c.__i
+  };
+  body.__children = children;
+  return body;
+}
+
+test('the table the cursor sits in is reported by its position in the body', (t) => {
+  S.__reset();
+  const body = fakeBody(['PARAGRAPH', 'TABLE', 'PARAGRAPH']);
+  S.__body = body;
+  const cell = { getType: () => 'TABLE_CELL', getParent: () => body.__children[1] };
+  S.__cursor = { getElement: () => cell };
+
+  t.equal(S.readTables(null).activeIndex, 0, 'the fixture has exactly one table');
+});
+
+test('a cursor outside any table selects none', (t) => {
+  S.__reset();
+  const body = fakeBody(['PARAGRAPH', 'TABLE', 'PARAGRAPH']);
+  S.__body = body;
+  S.__cursor = { getElement: () => body.__children[0] };
+  t.equal(S.readTables(null).activeIndex, null);
+});
+
+test('a body that disagrees about how many tables there are is not trusted', (t) => {
+  // DocumentApp reads the document's own active tab, which need not be the tab
+  // the sidebar is showing. A differing count means they have diverged.
+  S.__reset();
+  const body = fakeBody(['TABLE', 'TABLE']);
+  S.__body = body;
+  S.__cursor = { getElement: () => body.__children[0] };
+  t.equal(S.readTables(null).activeIndex, null);
+});
+
+test('no cursor at all is not an error', (t) => {
+  S.__reset();
+  S.__body = null;
+  S.__cursor = null;
+  t.equal(S.readTables(null).activeIndex, null);
+});
+
 test('cell styling without a range targets every cell in the table', (t) => {
   S.__reset();
   S.writeTableFormat({ startIndex: 70, cell: { paddingTopPt: 5 }, applyCellsTo: 'all' });

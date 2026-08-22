@@ -141,6 +141,13 @@
           padding: 6px 8px; font-size: var(--fs-sm); margin: 6px 0; }
   .note ul { margin: 4px 0 0 16px; padding: 0; }
 
+  /* The "what you can do here" list at the top of a panel. Deliberately quiet:
+     it is orientation, not a warning, so it gets none of .note's yellow. */
+  .intro { background: var(--band); border: 1px solid var(--line); border-radius: 4px;
+           padding: 6px 8px 6px 0; margin: 0 0 8px; }
+  .intro ul { margin: 0 0 0 22px; padding: 0; }
+  .intro li { font-size: var(--fs-sm); color: var(--muted); margin: 2px 0; }
+
   #status {
     position: fixed; left: 0; right: 0; bottom: 0; padding: 5px 10px; font-size: var(--fs-sm);
     border-top: 1px solid var(--line); background: #f8f9fa; color: var(--muted);

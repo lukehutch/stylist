@@ -204,6 +204,49 @@ module.exports = ({ suite, test }) => {
     t.match(clientJs, /window\.addEventListener\('focus', function \(\) \{ setTimeout\(poll, 0\); \}\)/);
   });
 
+  suite('What you can do here');
+
+  test('every panel opens with a short list of what it does', (t) => {
+    ['renderPage', 'renderStyles', 'renderBullets', 'renderNotes', 'renderTables',
+     'renderPresets'].forEach((fn) => {
+      const body = new RegExp('function ' + fn + '\\(\\)[^]*?\\n}').exec(clientJs)[0];
+      t.match(body, /appendChild\(intro\(\[/, fn);
+    });
+  });
+
+  test('the tables list says to click into a table first', (t) => {
+    const body = /function renderTables\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(body, /intro\(\[\s*'Click inside a table in the document/);
+  });
+
+  test('the footnote wall of API limitations is gone', (t) => {
+    t.notOk(/Footnote placement and pagination/.test(clientJs));
+    t.notOk(/capabilities/.test(clientJs), 'and the server-supplied caveat list with it');
+  });
+
+  test('the panel intro is styled apart from the yellow warning box', (t) => {
+    t.match(css, /\.intro \{/);
+    t.match(css, /\.intro li \{/);
+  });
+
+  suite('Tables');
+
+  test('a document with no tables says so, not "this tab"', (t) => {
+    t.match(clientJs, /This document has no tables\./);
+    t.notOk(/This tab has no tables/.test(clientJs));
+  });
+
+  test('the table under the cursor is the one shown, and it starts open', (t) => {
+    const fn = /function renderTables\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /S\.data\.activeTableIndex/);
+    t.match(fn, /classList\.contains\('open'\)[^]*?\.head'\)\.click\(\)/);
+  });
+
+  test('with no table under the cursor, the panel says to click into one', (t) => {
+    const fn = /function renderTables\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /Click inside a table in the document to edit it here/);
+  });
+
   suite('Grouped controls');
 
   test('a group is a fieldset with its heading in the top edge', (t) => {

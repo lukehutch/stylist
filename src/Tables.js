@@ -115,10 +115,67 @@ function tableLocations_(content, tabId) {
   return tables;
 }
 
+/**
+ * Which top-level table the cursor or selection is inside, as an ordinal into
+ * the list tableLocations_ builds, or null if it is not inside one.
+ *
+ * The two halves of this add-on see the document through different APIs: the
+ * Docs API knows character indexes, DocumentApp knows the cursor. Nothing maps
+ * one to the other, so the join is position in the body -- the nth top-level
+ * table by either route is the same table. The count check below is what keeps
+ * that honest: DocumentApp's legacy Body methods read the document's own
+ * active tab, which is not necessarily the tab the sidebar is showing, and a
+ * differing table count is the cheap signal that they have diverged.
+ *
+ * The outermost table ancestor is the one that counts, because a table nested
+ * inside a cell is not in the list at all.
+ */
+function activeTableIndex_(tables) {
+  try {
+    var doc = DocumentApp.getActiveDocument();
+    var sel = doc.getSelection();
+    var start = null;
+    if (sel) {
+      var res = sel.getRangeElements();
+      if (res && res.length) start = res[0].getElement();
+    } else {
+      var cursor = doc.getCursor();
+      if (cursor) start = cursor.getElement();
+    }
+    if (!start) return null;
+
+    var body = doc.getBody();
+    if (body.getNumChildren === undefined) return null;
+
+    var outermost = null;
+    for (var node = start; node; node = node.getParent()) {
+      if (node.getType() === DocumentApp.ElementType.TABLE) outermost = node;
+      if (node.getType() === DocumentApp.ElementType.BODY_SECTION ||
+          node.getType() === DocumentApp.ElementType.BODY) break;
+    }
+    if (!outermost) return null;
+
+    var target = body.getChildIndex(outermost);
+    var found = null, total = 0;
+    for (var i = 0; i < body.getNumChildren(); i++) {
+      if (body.getChild(i).getType() !== DocumentApp.ElementType.TABLE) continue;
+      if (i === target) found = total;
+      total++;
+    }
+    if (total !== (tables || []).length) return null;
+    return found;
+  } catch (e) {
+    // No cursor, a mocked DocumentApp, a document shape this cannot walk:
+    // none of those are errors, they just mean "no table is selected".
+    return null;
+  }
+}
+
 function readTables(tabId) {
   var doc = fetchDoc_();
   var ctx = resolveTab_(doc, tabId);
-  return { tabId: ctx.tabId, tables: tableLocations_(ctx.content, ctx.tabId) };
+  var tables = tableLocations_(ctx.content, ctx.tabId);
+  return { tabId: ctx.tabId, tables: tables, activeIndex: activeTableIndex_(tables) };
 }
 
 function tableLoc_(startIndex, tabId) {
