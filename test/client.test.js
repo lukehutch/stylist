@@ -59,6 +59,86 @@ module.exports = ({ suite, test }) => {
     });
   });
 
+  suite('Units');
+
+  // The sidebar's script block is function declarations plus one
+  // DOMContentLoaded hook, so it runs in a bare context given a stub document.
+  // That gives the real fromPt to test against, rather than a copy of it.
+  const client = (() => {
+    const code = /<script>([\s\S]*?)<\/script>/.exec(clientJs)[1];
+    const ctx = { document: { addEventListener() {} } };
+    vm.createContext(ctx);
+    new vm.Script(code).runInContext(ctx);
+    return ctx;
+  })();
+
+  test('points and millimetres round to a tenth', (t) => {
+    t.equal(client.fromPt(12.34, 'PT'), 12.3);
+    t.equal(client.fromPt(12.36, 'PT'), 12.4);
+    t.equal(client.fromPt(28.3465, 'MM'), 10);       // exactly 10mm
+    t.equal(client.fromPt(1, 'MM'), 0.4);            // 0.3527mm
+  });
+
+  test('inches and centimetres round to three decimals', (t) => {
+    t.equal(client.fromPt(100, 'IN'), 1.389);        // 1.38888...
+    t.equal(client.fromPt(100, 'CM'), 3.528);        // 3.52777...
+  });
+
+  test('a value near a tenth or an eighth snaps to it', (t) => {
+    t.equal(client.fromPt(36, 'IN'), 0.5);           // half an inch, not 0.5000001
+    t.equal(client.fromPt(72, 'IN'), 1);
+    t.equal(client.fromPt(9, 'IN'), 0.125);          // an eighth
+    t.equal(client.fromPt(0.125 * 72 + 0.00003, 'IN'), 0.125);
+    t.equal(client.fromPt(0.1 * 72 + 0.00003, 'IN'), 0.1);
+  });
+
+  test('a value that is near neither grid keeps three decimals', (t) => {
+    t.equal(client.fromPt(0.1234 * 72, 'IN'), 0.123);
+  });
+
+  test('negative values round the same way', (t) => {
+    t.equal(client.fromPt(-36, 'IN'), -0.5);
+    t.equal(client.fromPt(-12.34, 'PT'), -12.3);
+  });
+
+  suite('Tab scope');
+
+  test('every write covers all tabs', (t) => {
+    t.equal(client.S.scope, 'all');
+  });
+
+  test('there is no Apply-to control to get out of step with that', (t) => {
+    t.notOk(/id="scope"/.test(sidebar), 'the scope selector should be gone');
+    t.notOk(/getElementById\('scope'\)/.test(clientJs), 'nothing should read it');
+  });
+
+  test('switching units re-renders, so summary lines convert too', (t) => {
+    t.match(clientJs, /if \(S\.data\) renderAll\(\);/);
+  });
+
+  suite('Expanders');
+
+  const css = read('Stylesheet.html');
+
+  test('the open and closed states are animated', (t) => {
+    t.match(css, /transition:\s*grid-template-rows/);
+    t.match(css, /\.item\.open\s*\{[^}]*grid-template-rows:\s*auto 1fr/);
+  });
+
+  test('the collapsed row has no leftover padding or divider', (t) => {
+    t.match(css, /\.item > \.body \{[^}]*padding: 0 8px/);
+    t.match(css, /\.item > \.body \{[^}]*border-top: 0 solid/);
+  });
+
+  test('nothing toggles an expander with display, which cannot animate', (t) => {
+    t.notOk(/\.item[^{]*>\s*\.body\s*\{[^}]*display:\s*none/.test(css));
+    t.notOk(/body\.style\.display = 'block'/.test(clientJs));
+  });
+
+  test('reduced motion turns the animation off', (t) => {
+    t.match(css, /prefers-reduced-motion: reduce/);
+  });
+
   suite('Staying in step with the document');
 
   test('the sidebar polls the document instead of waiting to be asked', (t) => {

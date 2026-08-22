@@ -5,7 +5,7 @@
 var S = {
   data: null,          // last full loadAll payload
   unit: 'IN',          // display unit for dimension fields
-  scope: 'current',    // 'current' | 'all' tabs
+  scope: 'all',        // every write covers all tabs; not user-selectable
   tabId: null,
   unitFields: [],      // dimension inputs to re-render when the unit changes
   open: {},            // which list items are expanded, so a re-render can restore them
@@ -15,9 +15,28 @@ var S = {
 
 var UNIT_TO_PT = { PT: 1, IN: 72, CM: 72 / 2.54, MM: 72 / 25.4 };
 function toPt(v, u) { return Number(v) * UNIT_TO_PT[u]; }
+/**
+ * Points -> display value in unit `u`.
+ *
+ * Points and millimetres are fine-grained enough that a tenth is the useful
+ * resolution. Inches and centimetres are not: three decimals there, except
+ * that a value sitting within 0.0005 of a tenth or an eighth snaps to it, so
+ * a half-inch margin reads 0.5 and not 0.499 or 0.5001.
+ */
+var SNAP_GRIDS = [0.1, 0.125];
+var SNAP_TOL = 0.0005;
+
 function fromPt(v, u) {
   if (v === null || v === undefined) return '';
-  return Math.round((Number(v) / UNIT_TO_PT[u]) * 10000) / 10000;
+  var raw = Number(v) / UNIT_TO_PT[u];
+  if (!isFinite(raw)) return '';
+  if (u === 'PT' || u === 'MM') return Math.round(raw * 10) / 10;
+  for (var i = 0; i < SNAP_GRIDS.length; i++) {
+    var g = SNAP_GRIDS[i];
+    var snapped = Math.round(raw / g) * g;
+    if (Math.abs(raw - snapped) <= SNAP_TOL) return Math.round(snapped * 1000) / 1000;
+  }
+  return Math.round(raw * 1000) / 1000;
 }
 
 /* =================================================================
@@ -1120,7 +1139,7 @@ function renderPresets() {
     head.appendChild(meta);
     item.appendChild(head);
     var body = el('div', 'body');
-    body.style.display = 'block';
+    item.classList.add('open');   // this row has no head to click; it is always open
     body.appendChild(fieldRow('Bind to', selectField(
       [{ id: '', label: 'Choose a named style…' }].concat(S.data.constants.namedStyleTypes),
       '', function (v) {
@@ -1251,14 +1270,16 @@ function switchTab(name) {
 function boot() {
   document.getElementById('unit').addEventListener('change', function (e) {
     S.unit = e.target.value;
-    // Re-render every dimension field in the new unit without a server call.
+    // Every dimension field, and every summary line that quotes one, is
+    // rebuilt from the cached payload -- no server call, and nothing is left
+    // showing the old unit.
     S.unitFields.forEach(function (f) {
       f.input.value = fromPt(f.input._pt, S.unit);
       f.input.setLive(f.input._pt);
       f.tag.textContent = S.unit.toLowerCase();
     });
+    if (S.data) renderAll();
   });
-  document.getElementById('scope').addEventListener('change', function (e) { S.scope = e.target.value; });
   document.getElementById('doctab').addEventListener('change', function (e) {
     S.tabId = e.target.value || null;
     status('Loading tab…', '');
