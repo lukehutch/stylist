@@ -326,6 +326,35 @@ test('an empty style change issues nothing', (t) => {
   t.equal(allRequests(S).length, 0);
 });
 
+test('the load reports where its own time went', (t) => {
+  // A sandbox of its own: loadAll seeds a new user's default styles, which
+  // the preset tests below count.
+  const d = makeSandbox(makeDoc()).loadAll('t.0');
+  // The browser can only see the total. Splitting it is what tells the
+  // difference between a slow Docs API read and a slow cursor lookup, which
+  // are fixed in completely different places.
+  t.ok(d.timings, 'a breakdown comes back with the payload');
+  ['docsGet', 'page', 'styles', 'lists', 'tables', 'footnotes', 'serverTotal']
+    .forEach((k) => t.equal(typeof d.timings[k], 'number', k + ' is timed'));
+});
+
+test('the cursor lookups are timed apart from the read they accompany', (t) => {
+  const d = makeSandbox(makeDoc()).loadAll('t.0');
+  t.equal(typeof d.timings.cursorList, 'number');
+  t.equal(typeof d.timings.cursorTable, 'number');
+});
+
+test('the body walk asks for the child count once, not once per child', (t) => {
+  // Every DocumentApp accessor is a call across the service boundary, so a
+  // getNumChildren() in the loop condition is one extra round trip per child.
+  const src = require('fs').readFileSync(
+    require('path').join(__dirname, '..', 'src', 'Bullets.js'), 'utf8') +
+    require('fs').readFileSync(
+      require('path').join(__dirname, '..', 'src', 'Tables.js'), 'utf8');
+  t.notOk(/for \([^)]*getNumChildren\(\)/.test(src),
+    'the child count must be hoisted out of the loop');
+});
+
 /* ------------------------------------------------------------------ */
 suite('Lists and bullets');
 
@@ -1059,6 +1088,75 @@ test('its report is TAP, so live mode can read it back', (t) => {
   const tap = S.gappTap(S.gappRun());
   t.match(tap.split('\n')[0], /^TAP version 13$/);
   t.match(tap, /# pass \d+/);
+});
+
+/* ------------------------------------------------------------------ */
+suite('The smallest edit that says what you meant');
+
+test('a write targets the tabs the sidebar already knows, without reading the document', (t) => {
+  const M = multi();
+  M.docCache_ = null;
+  M.writeNamedStyle({
+    tabId: 't.0', tabIds: ['t.0'], namedStyleType: 'NORMAL_TEXT', textStyle: { bold: true }
+  });
+  t.equal(M.timings_.docsGet, undefined, 'no document read was paid for');
+  const reqs = allRequests(M).filter((r) => r.updateNamedStyle);
+  t.equal(reqs.length, 1);
+  // The parent path is there because the API requires it alongside the leaf;
+  // what matters for minimality is that no other leaf is named.
+  t.equal(reqs[0].updateNamedStyle.fields, 'namedStyleType,textStyle,textStyle.bold',
+    'and it names only the one property it changed');
+  t.deepEqual(reqs[0].updateNamedStyle.namedStyle.textStyle, { bold: true });
+});
+
+test('a caller that knows nothing still gets the right tabs, by reading', (t) => {
+  const M = multi();
+  M.writeNamedStyle({ tabId: 't.0', namedStyleType: 'NORMAL_TEXT', textStyle: { bold: true } });
+  t.equal(allRequests(M).filter((r) => r.updateNamedStyle).length, 1);
+});
+
+test('scope "all" reaches every known tab; anything unrecognised falls back to the first', (t) => {
+  const M = multi();
+  t.deepEqual(M.knownTargetTabIds_(['a', 'b'], 'b', 'all'), ['a', 'b']);
+  t.deepEqual(M.knownTargetTabIds_(['a', 'b'], 'b'), ['b']);
+  t.deepEqual(M.knownTargetTabIds_(['a', 'b'], 'nope'), ['a'], 'a tab id we do not have is not trusted');
+  t.equal(M.knownTargetTabIds_([], 't.0'), null, 'knowing nothing says so, rather than guessing');
+  t.equal(M.knownTargetTabIds_(undefined, 't.0'), null);
+});
+
+/* ------------------------------------------------------------------ */
+suite('Taking markers off one nesting level');
+
+test('only the paragraphs at that depth lose their markers', (t) => {
+  const M = multi();
+  M.removeBullets({ tabId: 't.0', listId: 'list.2', level: 1 });
+  const reqs = allRequests(M).filter((r) => r.deleteParagraphBullets);
+  t.equal(reqs.length, 1, 'one range, not the whole list');
+  t.equal(reqs[0].deleteParagraphBullets.range.startIndex, 210, 'the level-1 item');
+  t.equal(reqs[0].deleteParagraphBullets.range.endIndex, 220);
+});
+
+test('level 0 of the same list is a different range', (t) => {
+  const M = multi();
+  M.removeBullets({ tabId: 't.0', listId: 'list.2', level: 0 });
+  const reqs = allRequests(M).filter((r) => r.deleteParagraphBullets);
+  t.equal(reqs.length, 1);
+  t.equal(reqs[0].deleteParagraphBullets.range.startIndex, 200);
+});
+
+test('no level named means the whole list, as before', (t) => {
+  const M = multi();
+  M.removeBullets({ tabId: 't.0', listId: 'list.2' });
+  const reqs = allRequests(M).filter((r) => r.deleteParagraphBullets);
+  t.equal(reqs.length, 1, 'the two items are adjacent, so they merge into one range');
+  t.equal(reqs[0].deleteParagraphBullets.range.startIndex, 200);
+  t.equal(reqs[0].deleteParagraphBullets.range.endIndex, 220);
+});
+
+test('a level with no paragraphs in it asks for nothing', (t) => {
+  const M = multi();
+  M.removeBullets({ tabId: 't.0', listId: 'list.2', level: 5 });
+  t.equal(allRequests(M).filter((r) => r.deleteParagraphBullets).length, 0);
 });
 
 };

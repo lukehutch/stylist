@@ -47,8 +47,8 @@ function readPageFormat(tabId) {
  */
 function writePageFormat(payload) {
   payload = payload || {};
-  var doc = fetchDoc_();
-  var tabIds = targetTabIds_(doc, payload.tabId, payload.scope);
+  var tabIds = knownTargetTabIds_(payload.tabIds, payload.tabId, payload.scope) ||
+    targetTabIds_(fetchDoc_(), payload.tabId, payload.scope);
   var warnings = [];
 
   var requests = [];

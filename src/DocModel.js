@@ -25,9 +25,31 @@ function activeDocId_() {
  */
 var docCache_ = null;
 
+/**
+ * Where the time went, in milliseconds, for the execution now running.
+ *
+ * loadAll is slow enough on a real document to be worth complaining about,
+ * and the browser can only see the total. This splits the total into the
+ * parts that can each be fixed separately -- above all the Docs API read
+ * against the DocumentApp body walks the cursor lookups do, which are two
+ * quite different costs that the one number hides.
+ */
+var timings_ = {};
+
+function timed_(label, fn) {
+  var t0 = Date.now();
+  try {
+    return fn();
+  } finally {
+    timings_[label] = (timings_[label] || 0) + (Date.now() - t0);
+  }
+}
+
 function fetchDoc_() {
   if (!docCache_) {
-    docCache_ = Docs.Documents.get(activeDocId_(), { includeTabsContent: true });
+    docCache_ = timed_('docsGet', function () {
+      return Docs.Documents.get(activeDocId_(), { includeTabsContent: true });
+    });
   }
   return docCache_;
 }
@@ -118,6 +140,21 @@ function resolveTab_(doc, tabId) {
 }
 
 /** Every tab id to operate on for a given scope ('current' or 'all'). */
+/**
+ * The tabs a write targets, worked out from a tab list the caller already
+ * has. The sidebar was handed the whole list when it loaded, so passing it
+ * back saves re-reading the document just to learn the tab ids -- which on a
+ * long document is the difference between a write that lands at once and one
+ * that takes seconds. Returns null when the caller knows nothing useful, in
+ * which case the caller falls back to reading.
+ */
+function knownTargetTabIds_(known, tabId, scope) {
+  if (!known || !known.length) return null;
+  if (scope === 'all') return known.slice();
+  return [known.indexOf(tabId) !== -1 ? tabId : known[0]];
+}
+
+/** As above, but paying for a full read of the document to find them out. */
 function targetTabIds_(doc, tabId, scope) {
   var flat = flattenTabs_(doc);
   if (!flat.length) return [null];

@@ -130,7 +130,13 @@ function tableLocations_(content, tabId) {
  * The outermost table ancestor is the one that counts, because a table nested
  * inside a cell is not in the list at all.
  */
+/** Timed, because on a long document this body walk costs more than the
+ *  Docs API read it accompanies. */
 function activeTableIndex_(tables) {
+  return timed_('cursorTable', function () { return activeTableIndex_inner_(tables); });
+}
+
+function activeTableIndex_inner_(tables) {
   try {
     var doc = DocumentApp.getActiveDocument();
     var sel = doc.getSelection();
@@ -157,7 +163,10 @@ function activeTableIndex_(tables) {
 
     var target = body.getChildIndex(outermost);
     var found = null, total = 0;
-    for (var i = 0; i < body.getNumChildren(); i++) {
+    // Hoisted for the same reason as in activeListId_: each accessor is a
+    // call across the service boundary.
+    var n = body.getNumChildren();
+    for (var i = 0; i < n; i++) {
       if (body.getChild(i).getType() !== DocumentApp.ElementType.TABLE) continue;
       if (i === target) found = total;
       total++;

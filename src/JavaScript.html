@@ -43,11 +43,18 @@ function fromPt(v, u) {
 /* =================================================================
  * Server bridge
  *
- * google.script.run calls are serialised: live apply fires on every field
- * blur, and overlapping batchUpdate calls against one document race in
- * ways that are painful to debug. One in flight at a time.
+ * Writes are serialised: live apply fires on every field blur, and overlapping
+ * batchUpdate calls against one document race in ways that are painful to
+ * debug. One write in flight at a time.
+ *
+ * Reads are not in that queue. The poll re-reads the whole document, which on
+ * a long one takes seconds, and a write that had to wait its turn behind one
+ * would take seconds to reach the document -- so a click landing mid-poll goes
+ * out immediately and the read it overtook is thrown away as stale.
  * ================================================================= */
 var chain = Promise.resolve();
+/** Bumped by every write, so a read issued before one lands is known stale. */
+var writes = 0;
 
 function rawCall(fn, args) {
   return new Promise(function (resolve, reject) {
@@ -60,11 +67,17 @@ function rawCall(fn, args) {
 
 function call(fn, args) {
   S.busy++;
+  writes++;
   var p = chain.catch(function () {}).then(function () { return rawCall(fn, args); });
   chain = p.catch(function () {});
   p.then(done, done);
   function done() { S.busy--; }
   return p;
+}
+
+/** A read, which waits for nothing and holds nothing else up. */
+function callRead(fn, args) {
+  return rawCall(fn, args);
 }
 
 /**
@@ -185,7 +198,7 @@ function numUnit(valuePt, commitPt, opts) {
   input.value = fromPt(valuePt, S.unit);
   // An empty dimension box means the value comes from somewhere else -- the
   // named style, the document default -- so say so rather than looking unset.
-  input.placeholder = opts.placeholder || 'inherited';
+  input.placeholder = opts.placeholder || 'inherit';
   input._pt = valuePt;
   var unitTag = el('span', 'unit', S.unit.toLowerCase());
 
@@ -212,7 +225,7 @@ function numPt(value, commit, opts) {
   var input = el('input');
   input.type = 'text';
   input.value = (value === null || value === undefined) ? '' : value;
-  input.placeholder = opts.placeholder || 'inherited';
+  input.placeholder = opts.placeholder || 'inherit';
   var tag = el('span', 'unit', 'pt');
   bindCommit(input, function (i) {
     var raw = i.value.trim();
@@ -265,7 +278,11 @@ function selectField(options, value, commit) {
   return combo;
 }
 
-function checkField(labelText, value, commit) {
+/**
+ * `face` is a class put on the label text, so a checkbox that turns an
+ * effect on can show its own name wearing that effect.
+ */
+function checkField(labelText, value, commit, face) {
   var wrap = el('label');
   var box = el('input');
   box.type = 'checkbox';
@@ -273,7 +290,13 @@ function checkField(labelText, value, commit) {
   bindCommit(box, function (i) { return { value: i.checked }; }, commit);
   box.setLive(!!value);
   wrap.appendChild(box);
-  wrap.appendChild(document.createTextNode(labelText));
+  if (face) {
+    var span = el('span', 'face ' + face);
+    span.textContent = labelText;
+    wrap.appendChild(span);
+  } else {
+    wrap.appendChild(document.createTextNode(labelText));
+  }
   return wrap;
 }
 
@@ -299,7 +322,7 @@ function colorField(hex, commit, opts) {
   input.setLive(hex || blank);
 
   var clear = el('button', 'act', 'none');
-  clear.title = opts.noneTitle || 'Clear the colour (transparent / inherited)';
+  clear.title = opts.noneTitle || 'Clear the colour (transparent / inherit)';
   clear.addEventListener('click', function () {
     input.value = blank;
     input.setLive(null);
@@ -320,7 +343,7 @@ function colorField(hex, commit, opts) {
  * resets the property: the write names the field in its mask but sends no
  * value, which is how the Docs API asks for the inherited value back.
  */
-var INHERIT = { id: '', label: 'Inherited' };
+var INHERIT = { id: '', label: 'Inherit' };
 
 var ALIGNMENTS = [
   { id: 'START', label: 'Left / start' }, { id: 'CENTER', label: 'Centre' },
@@ -355,11 +378,12 @@ var BORDER_SIDES = [
 /* =================================================================
  * Style editor: every character and paragraph attribute the API exposes
  *
- * `model` is mutated in place. `commit` receives either the whole model
- * (opts.sparse false -- used for named styles, where re-asserting every
- * value avoids any ambiguity in the field mask) or only the fields the
- * user has actually touched (opts.sparse true -- used when styling
- * existing content, where stomping untouched attributes would be wrong).
+ * `model` is mutated in place. `commit` receives only the one field you just
+ * changed, because that is the smallest edit that says what you meant: the
+ * field mask is built from the keys present, so a payload of one key changes
+ * one property and leaves every other attribute of the target alone. Sending
+ * the whole model instead would rewrite attributes nobody touched, and would
+ * turn values that were merely inherited into values explicitly set.
  * ================================================================= */
 var FIELD_LABELS = {
   fontFamily: 'font', fontWeight: 'weight', fontSizePt: 'size',
@@ -381,11 +405,29 @@ var FIELD_LABELS = {
 };
 function fieldLabel(key) { return FIELD_LABELS[key] || key; }
 
+/**
+ * The one property that just changed, and nothing else.
+ *
+ * The server builds its field mask from the keys present, so a payload of one
+ * key changes one property and leaves every other attribute of the target
+ * exactly as it was -- including the ones that are inherited rather than set,
+ * which sending a whole model would freeze into place.
+ */
+function stylePayload(model, where, key) {
+  var payload = { textStyle: {}, paragraphStyle: {} };
+  payload[where][key] = model[where][key];
+  // Family and weight are one message to the API, so neither travels alone.
+  if (where === 'textStyle' && (key === 'fontFamily' || key === 'fontWeight')) {
+    payload.textStyle.fontFamily = model.textStyle.fontFamily;
+    payload.textStyle.fontWeight = model.textStyle.fontWeight || 400;
+  }
+  return payload;
+}
+
 function buildStyleEditor(model, commit, opts) {
   opts = opts || {};
   model.textStyle = model.textStyle || {};
   model.paragraphStyle = model.paragraphStyle || {};
-  var touchedT = {}, touchedP = {};
   var root = el('div');
 
   // The fields below show the document's current values. Where the content
@@ -398,23 +440,9 @@ function buildStyleEditor(model, commit, opts) {
     root.appendChild(m);
   }
 
-  function fire() {
-    var payload;
-    if (opts.sparse) {
-      payload = { textStyle: {}, paragraphStyle: {} };
-      Object.keys(touchedT).forEach(function (k) { payload.textStyle[k] = model.textStyle[k]; });
-      Object.keys(touchedP).forEach(function (k) { payload.paragraphStyle[k] = model.paragraphStyle[k]; });
-      // The API models family and weight as one message, so send both.
-      if (payload.textStyle.fontFamily !== undefined) {
-        payload.textStyle.fontWeight = model.textStyle.fontWeight || 400;
-      }
-    } else {
-      payload = { textStyle: model.textStyle, paragraphStyle: model.paragraphStyle };
-    }
-    return commit(payload);
-  }
-  function setT(k, v) { model.textStyle[k] = v; touchedT[k] = 1; return fire(); }
-  function setP(k, v) { model.paragraphStyle[k] = v; touchedP[k] = 1; return fire(); }
+  function fire(where, k) { return commit(stylePayload(model, where, k)); }
+  function setT(k, v) { model.textStyle[k] = v; return fire('textStyle', k); }
+  function setP(k, v) { model.paragraphStyle[k] = v; return fire('paragraphStyle', k); }
 
   /* ---- character ---- */
   if (opts.character !== false) {
@@ -425,7 +453,7 @@ function buildStyleEditor(model, commit, opts) {
     fontInput.type = 'text';
     fontInput.setAttribute('list', 'fontlist');
     fontInput.value = model.textStyle.fontFamily || '';
-    fontInput.placeholder = 'inherited';
+    fontInput.placeholder = 'inherit';
     bindCommit(fontInput, function (i) {
       var v = i.value.trim();
       if (v === '') return { skip: true };
@@ -444,13 +472,39 @@ function buildStyleEditor(model, commit, opts) {
     var effects = el('div', 'checks');
     [['bold', 'Bold'], ['italic', 'Italic'], ['underline', 'Underline'],
      ['strikethrough', 'Strikethrough'], ['smallCaps', 'Small caps']].forEach(function (p) {
-      effects.appendChild(checkField(p[1], model.textStyle[p[0]], function (v) { return setT(p[0], v); }));
+      effects.appendChild(checkField(p[1], model.textStyle[p[0]],
+        function (v) { return setT(p[0], v); }, p[0]));
+    });
+
+    // Superscript and subscript are two values of one API property, so the
+    // boxes exclude each other and the Offset select shows the same thing.
+    // Whichever control you use moves the others, so they never disagree --
+    // and the select stays because it is the only one of them that can say
+    // "inherit", which is a different thing from "normal".
+    var offsetSel = null;
+    var offsetBoxes = {};
+    function setOffset(v) {
+      if (offsetSel) offsetSel.value = v || '';
+      Object.keys(offsetBoxes).forEach(function (k) {
+        var b = offsetBoxes[k];
+        b.checked = (k === v);
+        b.setLive(b.checked);
+      });
+      return setT('baselineOffset', v || null);
+    }
+    [['SUPERSCRIPT', 'Superscript', 'sup'], ['SUBSCRIPT', 'Subscript', 'sub']].forEach(function (p) {
+      var f = checkField(p[1], model.textStyle.baselineOffset === p[0], function (on) {
+        return setOffset(on ? p[0] : 'NONE');
+      }, p[2]);
+      offsetBoxes[p[0]] = f.querySelector('input');
+      effects.appendChild(f);
     });
     gChar.appendChild(effects);
 
-    gChar.appendChild(fieldRow('Offset', selectField([INHERIT].concat(BASELINES),
+    offsetSel = selectField([INHERIT].concat(BASELINES),
       model.textStyle.baselineOffset || '',
-      function (v) { return setT('baselineOffset', v || null); })));
+      function (v) { return setOffset(v); }).querySelector('select');
+    gChar.appendChild(fieldRow('Offset', offsetSel.parentNode));
 
     gChar.appendChild(fieldRow('Text colour', colorField(model.textStyle.foregroundColor,
       function (v) { return setT('foregroundColor', v); })));
@@ -471,7 +525,7 @@ function buildStyleEditor(model, commit, opts) {
     gPara.appendChild(fieldRow('Line spacing', numPlain(
       model.paragraphStyle.lineSpacing === undefined ? '' : model.paragraphStyle.lineSpacing / 100,
       function (v) { return setP('lineSpacing', v * 100); },
-      { min: 0.1, placeholder: 'inherited' })));
+      { min: 0.1, placeholder: 'inherit' })));
 
     gPara.appendChild(fieldRow('Space above', numUnit(model.paragraphStyle.spaceAbovePt,
       function (v) { return setP('spaceAbovePt', v); }, { min: 0 })));
@@ -521,8 +575,9 @@ function buildStyleEditor(model, commit, opts) {
       function setB(k, v) {
         var b = model.paragraphStyle[side.key] || (model.paragraphStyle[side.key] = {});
         b[k] = v;
-        touchedP[side.key] = 1;
-        return fire();
+        // A border is one paragraphStyle field, so the whole side travels
+        // together; that is already the smallest edit the API can express.
+        return fire('paragraphStyle', side.key);
       }
       gSide.appendChild(fieldRow('Width', numPt(cur.widthPt,
         function (v) { return setB('widthPt', v); }, { min: 0 })));
@@ -681,10 +736,17 @@ function renderPage() {
   }
   S.data.sections.forEach(function (sec) {
     host.appendChild(listItem(
-      'Section ' + (sec.index + 1) + (sec.isFirst ? ' (first)' : ''),
-      sec.sectionType + ' · ' + sec.columnCount + ' col',
+      'Section ' + (sec.index + 1),
+      sectionMeta(sec),
       function () { return sectionBody(sec); }));
   });
+}
+
+/** Where a section starts and how it is laid out, in words rather than enums. */
+function sectionMeta(sec) {
+  var starts = sec.sectionType === 'NEXT_PAGE' ? 'starts a new page' : 'same page';
+  var n = sec.columnCount || 1;
+  return starts + ' · ' + n + (n === 1 ? ' column' : ' columns');
 }
 
 function sectionBody(sec) {
@@ -740,9 +802,19 @@ function sectionBody(sec) {
   return box;
 }
 
+/**
+ * The tab ids this sidebar was handed when it loaded. Passing them with a
+ * write lets the server target the right tabs without re-reading the whole
+ * document first, which is most of what a write costs on a long document.
+ */
+function knownTabIds() {
+  return ((S.data && S.data.tabs) || []).map(function (t) { return t.tabId; });
+}
+
 function applyPage(patch) {
   patch.tabId = S.tabId;
   patch.scope = S.scope;
+  patch.tabIds = knownTabIds();
   return call('writePageFormat', [patch]);
 }
 
@@ -767,12 +839,12 @@ function renderStyles() {
       var box = el('div');
       box.appendChild(buildStyleEditor(model, function (payload) {
         return call('writeNamedStyle', [{
-          tabId: S.tabId, scope: S.scope,
+          tabId: S.tabId, scope: S.scope, tabIds: knownTabIds(),
           namedStyleType: st.namedStyleType,
           textStyle: payload.textStyle,
           paragraphStyle: payload.paragraphStyle
         }]);
-      }, { sparse: false }));
+      }));
 
       var row = el('div', 'btnrow');
       var save = el('button', 'act', 'Save as style preset');
@@ -1001,30 +1073,40 @@ function markerPicker(list) {
   return box;
 }
 
-/** `list` of null edits every list in the tab at once. */
+/**
+ * `list` of null edits every list in the tab at once.
+ *
+ * The nesting levels are the view: a list is a stack of levels, and almost
+ * everything you would want to change -- indent, spacing, the text style of
+ * the items -- belongs to one level rather than to the list.
+ *
+ * The one thing that does not is the marker. createParagraphBullets takes a
+ * preset that fixes the glyph for all three levels together, and no request
+ * in the API edits a level's glyph, so the marker style is chosen once for
+ * the whole list and each level shows what that choice gives it. Taking a
+ * marker off is different: that works on paragraphs, so a level can drop its
+ * markers on its own.
+ */
 function listBody(list) {
   var box = el('div');
+  box.appendChild(el('h2', null, 'Marker style'));
+  box.appendChild(el('p', 'hint',
+    'A marker style covers all three levels at once -- that is how the Docs API ' +
+    'defines them, and no level can be given a different one. A level can drop ' +
+    'its markers on its own, with the \u2298 inside it.'));
   box.appendChild(markerPicker(list));
 
-  var rm = el('button', 'act danger', list ? 'Remove markers' : 'Remove markers from every list');
-  rm.addEventListener('click', function () {
-    return call('removeBullets', [listTarget(list)]).then(reload);
-  });
-  var row = el('div', 'btnrow');
-  row.appendChild(rm);
-  box.appendChild(row);
-
-  box.appendChild(el('h2', null, 'Nesting levels'));
   var levels = (list || S.data.lists.lists[0]).levels;
   var key = list ? list.listId : 'all';
   levels.forEach(function (lv) {
     if (!lv.inUse && lv.level > 2) return;   // Docs always defines 9; show the useful ones
     var glyph = list ? (glyphExample(lv) || 'no marker') : 'level ' + (lv.level + 1);
-    box.appendChild(listItem(
+    var row = listItem(
       'Level ' + (lv.level + 1) + (lv.inUse ? '' : ' (unused)'),
       glyph + (lv.indentStartPt != null ? ' \u00b7 indent ' + fromPt(lv.indentStartPt, S.unit) + S.unit.toLowerCase() : ''),
       function () {
         var inner = el('div');
+        inner.appendChild(levelMarker(list, lv));
         var cur = lv.style || { textStyle: {}, paragraphStyle: {}, mixed: [] };
         var model = { textStyle: copy(cur.textStyle), paragraphStyle: copy(cur.paragraphStyle) };
         inner.appendChild(buildStyleEditor(model, function (payload) {
@@ -1033,12 +1115,44 @@ function listBody(list) {
           t.textStyle = payload.textStyle;
           t.paragraphStyle = payload.paragraphStyle;
           return call('writeListLevelStyle', [t]);
-        }, { sparse: true, mixed: cur.mixed }));
+        }, { mixed: cur.mixed }));
         return inner;
       },
-      'lvl:' + key + ':' + lv.level));
+      'lvl:' + key + ':' + lv.level);
+    // A level's depth is the point of the panel, so the heading is set in by
+    // its own depth: one ex per level, with level 1 flush at the margin.
+    var name = row.querySelector('.name');
+    if (name) name.style.marginLeft = lv.level + 'ex';
+    box.appendChild(row);
   });
   return box;
+}
+
+/**
+ * What this one level's marker is, and the one thing that can be done to it
+ * on its own: taken away. \u2298 rather than a word, so it sits beside the
+ * glyphs in the picker above as one more thing a marker can be.
+ */
+function levelMarker(list, lv) {
+  var wrap = el('div', 'glyphs');
+  var cur = list ? glyphExample(lv) : '';
+  if (cur) {
+    var shown = el('button', 'glyph on');
+    shown.textContent = cur;
+    shown.disabled = true;
+    shown.title = 'The marker this level gets from the list\u2019s marker style';
+    wrap.appendChild(shown);
+  }
+  var none = el('button', 'glyph none', '\u2298');
+  none.title = 'No marker on this level';
+  if (!cur) none.classList.add('on');
+  none.addEventListener('click', function () {
+    var t = listTarget(list);
+    t.level = lv.level;
+    return call('removeBullets', [t]).then(reload);
+  });
+  wrap.appendChild(none);
+  return wrap;
 }
 </script>
 <script>
@@ -1067,7 +1181,9 @@ function renderNotes() {
   if (!segs.length) host.appendChild(el('p', 'hint', 'This tab has no headers or footers.'));
   segs.forEach(function (seg) {
     host.appendChild(listItem(seg.role,
-      (seg.empty ? '(empty) ' : '') + (seg.preview || seg.segmentId),
+      // Not the segment id: h.default is Google's internal name for it and
+      // means nothing to anyone reading the sidebar.
+      seg.preview || (seg.empty ? 'empty' : ''),
       function () {
         var box = el('div');
         var cur = seg.style || { textStyle: {}, paragraphStyle: {}, mixed: [] };
@@ -1077,7 +1193,7 @@ function renderNotes() {
             tabId: S.tabId, scope: S.scope, target: 'segment', segmentId: seg.segmentId,
             textStyle: payload.textStyle, paragraphStyle: payload.paragraphStyle
           }]);
-        }, { sparse: true, noPageBreak: true, mixed: cur.mixed }));
+        }, { noPageBreak: true, mixed: cur.mixed }));
         return box;
       },
       'seg:' + seg.segmentId));
@@ -1117,7 +1233,7 @@ function segmentEditor(target, label, opts) {
       tabId: S.tabId, scope: S.scope, target: target,
       textStyle: payload.textStyle, paragraphStyle: payload.paragraphStyle
     }]);
-  }, { sparse: true, noPageBreak: true, mixed: cur.mixed,
+  }, { noPageBreak: true, mixed: cur.mixed,
        paragraph: opts.paragraph, character: opts.character });
 }
 
@@ -1454,6 +1570,9 @@ function reload() {
 var POLL_MIN_MS = 1000;
 var POLL_MAX_MS = 5000;
 var POLL_DUTY = 20;
+/** The --fs the stylesheet is written against; the scale control multiplies it. */
+var BASE_FS = 14.5;
+
 var lastFetchMs = 0;
 
 function nextPollDelay() {
@@ -1549,12 +1668,16 @@ function poll() {
   // Skipped whole, not just the render: fetching here would move the
   // fingerprint on, and the change would then never be drawn at all.
   if (pickerOpen()) { pollDeferred = true; return Promise.resolve(); }
-  // call() bails above when anything else is in flight, so the queue is empty
-  // here and this is the server round trip rather than time spent waiting.
+  // Nothing else is in flight -- S.busy is checked above and this read joins
+  // no queue -- so this measures the server round trip, not time spent waiting.
   var t0 = Date.now();
-  return call('loadAll', [S.tabId])
+  var at = writes;
+  return callRead('loadAll', [S.tabId])
     .then(function (data) {
       lastFetchMs = Date.now() - t0;
+      // A write went out while this read was in the air, so what came back
+      // predates it. Drawing it would put the old value back on screen.
+      if (at !== writes) return;
       var fresh = JSON.stringify(data);
       if (fresh === S.fingerprint) return;
       S.data = data;
@@ -1647,6 +1770,26 @@ function switchTab(name) {
 }
 
 function boot() {
+  // Google fixes every script sidebar at 300 pixels and setWidth() applies
+  // only to dialogs, so the pane cannot be widened. What can change is how
+  // much fits inside it: the whole stylesheet derives from --fs, so scaling
+  // that one number scales the entire panel, and 77% fits about 30% more.
+  var scaleSel = document.getElementById('scale');
+  function applyScale(v) {
+    document.documentElement.style.setProperty('--fs', (BASE_FS * Number(v)).toFixed(2) + 'px');
+  }
+  try {
+    // The sidebar is a sandboxed frame; localStorage is there in practice but
+    // is not something to fall over for if a browser withholds it.
+    var saved = window.localStorage.getItem('stylist.scale');
+    if (saved) { scaleSel.value = saved; }
+  } catch (e) { /* no persistence, just this session's choice */ }
+  applyScale(scaleSel.value);
+  scaleSel.addEventListener('change', function (e) {
+    applyScale(e.target.value);
+    try { window.localStorage.setItem('stylist.scale', e.target.value); } catch (err) { /* as above */ }
+  });
+
   document.getElementById('unit').addEventListener('change', function (e) {
     S.unit = e.target.value;
     // Every dimension field, and every summary line that quotes one, is
@@ -1703,7 +1846,8 @@ function boot() {
   var firstReadT0 = Date.now();
   reload().then(function (data) {
     var firstReadMs = Date.now() - firstReadT0;
-    console.log('Stylist: first document read took ' + firstReadMs + ' ms');
+    console.log('Stylist: first load took ' + firstReadMs + ' ms round trip' +
+      (data.timings ? ' — server ' + JSON.stringify(data.timings) : ''));
     // It is also a measurement of exactly what the poll pays, so the first
     // wait is paced by it rather than by the one-second floor.
     lastFetchMs = firstReadMs;

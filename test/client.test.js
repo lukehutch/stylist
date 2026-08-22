@@ -159,19 +159,19 @@ module.exports = ({ suite, test }) => {
 
   test('an empty box says where its value comes from', (t) => {
     // Both dimension builders -- the one with a unit menu and the plain point
-    // box -- say "inherited"; the unitless numbers say "default".
-    const inherited = clientJs.match(/placeholder = opts\.placeholder \|\| 'inherited'/g) || [];
+    // box -- say "inherit"; the unitless numbers say "default".
+    const inherited = clientJs.match(/placeholder = opts\.placeholder \|\| 'inherit'/g) || [];
     t.equal(inherited.length, 2);
     t.match(clientJs, /placeholder = opts\.placeholder \|\| 'default'/);
-    t.match(clientJs, /fontInput\.placeholder = 'inherited'/);
+    t.match(clientJs, /fontInput\.placeholder = 'inherit'/);
   });
 
   test('the placeholder is grey, not mistakable for a value', (t) => {
     t.match(css, /::placeholder \{[^}]*color:/);
   });
 
-  test('style selects offer Inherited first', (t) => {
-    t.match(clientJs, /var INHERIT = \{ id: '', label: 'Inherited' \}/);
+  test('style selects offer Inherit first', (t) => {
+    t.match(clientJs, /var INHERIT = \{ id: '', label: 'Inherit' \}/);
     ['ALIGNMENTS', 'SPACING_MODES', 'DIRECTIONS', 'BASELINES'].forEach((e) => {
       t.match(clientJs, new RegExp('\\[INHERIT\\]\\.concat\\(' + e + '\\)'), e);
     });
@@ -190,7 +190,12 @@ module.exports = ({ suite, test }) => {
   });
 
   test('the scrollbar is always there, so the layout never jumps', (t) => {
-    t.match(css, /html \{ overflow-y: scroll; \}/);
+    t.match(css, /html \{[^}]*overflow-y: scroll/);
+  });
+
+  test('the sidebar fills the viewport all the way to the bottom', (t) => {
+    t.match(css, /html \{[^}]*height: 100%/, 'the root element is full height');
+    t.match(css, /body \{[^}]*min-height: 100%/, 'and the body fills it');
   });
 
   suite('What you can do here');
@@ -418,8 +423,9 @@ module.exports = ({ suite, test }) => {
 
   test('the first read is timed and logged to the browser console', (t) => {
     t.match(clientJs, /var firstReadT0 = Date\.now\(\);/);
-    t.match(clientJs,
-      /console\.log\('Stylist: first document read took ' \+ firstReadMs \+ ' ms'\)/);
+    t.match(clientJs, /console\.log\('Stylist: first load took ' \+ firstReadMs/);
+    t.match(clientJs, /JSON\.stringify\(data\.timings\)/,
+      'the server breakdown comes back with it, so the total can be split up');
   });
 
   test('that measurement paces the first wait too', (t) => {
@@ -751,11 +757,13 @@ module.exports = ({ suite, test }) => {
     t.match(css, /\.wrap \{ padding:[^}]*\}/, 'the panels still clear it');
   });
 
-  test('the tip row opens upwards, into the space above its heading', (t) => {
-    t.match(css, /\.tip > \.head \{ order: 2; \}/, 'the heading is ordered last');
-    t.match(css, /\.tip > \.body \{ order: 1;/, 'the panel is ordered first');
-    t.match(css, /\.tip \{[^}]*grid-template-rows: 0fr auto/);
-    t.match(css, /\.tip\.open \{ grid-template-rows: 1fr auto; \}/);
+  test('the tip heading sits on top of the panel it opens', (t) => {
+    t.notOk(/\.tip > \.head \{[^}]*order:/.test(css), 'nothing reorders it below the body');
+    t.notOk(/\.tip > \.body \{[^}]*order:/.test(css), 'and nothing reorders the body above it');
+  });
+
+  test('a bar across the top of the tip heading separates it from the add-on', (t) => {
+    t.match(css, /\.tip > \.head \{[^}]*border-top: 3px solid var\(--line\)/);
   });
 
   test('an opened tip row cannot grow taller than the sidebar', (t) => {
@@ -821,7 +829,7 @@ module.exports = ({ suite, test }) => {
   test('a poll is skipped while a picker has focus, not merely re-rendered', (t) => {
     const fn = /function poll\(\)[^]*?\n}/.exec(clientJs)[0];
     t.match(fn, /if \(pickerOpen\(\)\) \{ pollDeferred = true; return Promise\.resolve\(\); \}/);
-    t.ok(fn.indexOf('pickerOpen()') < fn.indexOf("call('loadAll'"),
+    t.ok(fn.indexOf('pickerOpen()') < fn.indexOf("callRead('loadAll'"),
       'the check comes before the read, so the fingerprint cannot move on without a render');
   });
 
@@ -845,5 +853,160 @@ module.exports = ({ suite, test }) => {
   test('the deferred read happens as soon as the picker is done with', (t) => {
     t.match(clientJs, /document\.addEventListener\('blur', function \(\) \{[^]*?pollDeferred = false;[^]*?\}, true\);/,
       'on capture, because blur does not bubble');
+  });
+
+  suite('One setting changed, one property written');
+
+  const payload = evalFromClient(['stylePayload'], 'return stylePayload;');
+
+  test('changing one field sends that field and nothing else', (t) => {
+    const model = { textStyle: { bold: true, italic: false, fontSizePt: 12 },
+                    paragraphStyle: { alignment: 'START', lineSpacing: 115 } };
+    t.deepEqual(payload(model, 'textStyle', 'bold'),
+      { textStyle: { bold: true }, paragraphStyle: {} });
+    t.deepEqual(payload(model, 'paragraphStyle', 'alignment'),
+      { textStyle: {}, paragraphStyle: { alignment: 'START' } });
+  });
+
+  test('a field already touched earlier is not sent again', (t) => {
+    const model = { textStyle: { bold: true, italic: true }, paragraphStyle: {} };
+    const second = payload(model, 'textStyle', 'italic');
+    t.equal(second.textStyle.bold, undefined,
+      'the earlier change is already in the document; re-sending it would rewrite it');
+  });
+
+  test('a value cleared back to inherit still travels, because null is the instruction', (t) => {
+    const model = { textStyle: { baselineOffset: null }, paragraphStyle: {} };
+    const p = payload(model, 'textStyle', 'baselineOffset');
+    t.ok('baselineOffset' in p.textStyle, 'the key is present');
+    t.equal(p.textStyle.baselineOffset, null);
+  });
+
+  test('family and weight are one message to the API, so neither goes alone', (t) => {
+    const model = { textStyle: { fontFamily: 'Lato', fontWeight: 700 }, paragraphStyle: {} };
+    t.deepEqual(payload(model, 'textStyle', 'fontFamily').textStyle,
+      { fontFamily: 'Lato', fontWeight: 700 });
+    t.deepEqual(payload(model, 'textStyle', 'fontWeight').textStyle,
+      { fontFamily: 'Lato', fontWeight: 700 });
+  });
+
+  test('a weight nobody set defaults rather than travelling as undefined', (t) => {
+    const model = { textStyle: { fontFamily: 'Lato' }, paragraphStyle: {} };
+    t.equal(payload(model, 'textStyle', 'fontFamily').textStyle.fontWeight, 400);
+  });
+
+  test('a border is one field, so the whole side travels together', (t) => {
+    t.match(clientJs, /return fire\('paragraphStyle', side\.key\);/);
+  });
+
+  suite('A click does not wait for a poll');
+
+  test('reads are not in the write queue', (t) => {
+    t.match(clientJs, /function callRead\(fn, args\) \{\s*return rawCall\(fn, args\);\s*\}/,
+      'a read goes straight out');
+    const call = /function call\(fn, args\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(call, /chain = p/, 'writes are still serialised against each other');
+    t.match(call, /writes\+\+;/, 'and each one is counted');
+  });
+
+  test('a read that was overtaken by a write is thrown away, not drawn', (t) => {
+    const fn = /function poll\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /var at = writes;/);
+    t.match(fn, /if \(at !== writes\) return;/);
+    t.ok(fn.indexOf('if (at !== writes) return;') < fn.indexOf('S.data = data'),
+      'the check comes before anything is put on screen');
+  });
+
+  test('a write carries the tab list the sidebar already has', (t) => {
+    t.match(clientJs, /function knownTabIds\(\)/);
+    t.match(clientJs, /patch\.tabIds = knownTabIds\(\);/, 'page format');
+    t.match(clientJs, /tabId: S\.tabId, scope: S\.scope, tabIds: knownTabIds\(\),/, 'named styles');
+  });
+
+  suite('Effects wear the effect they name');
+
+  test('each effect checkbox labels itself in its own face', (t) => {
+    t.match(clientJs, /function checkField\(labelText, value, commit, face\)/);
+    t.match(clientJs, /el\('span', 'face ' \+ face\)/);
+    ['bold', 'italic', 'underline', 'strikethrough', 'smallCaps'].forEach((k) => {
+      t.match(css, new RegExp('\\.face\\.' + k + ' \\{'), k + ' has a face rule');
+    });
+    t.match(css, /\.face\.bold \{ font-weight: 700; \}/);
+    t.match(css, /\.face\.smallCaps \{ font-variant: small-caps; \}/);
+  });
+
+  test('superscript and subscript sit with the other effects', (t) => {
+    t.match(clientJs, /\['SUPERSCRIPT', 'Superscript', 'sup'\], \['SUBSCRIPT', 'Subscript', 'sub'\]/);
+    t.match(css, /\.face\.sup \{ vertical-align: super;/);
+    t.match(css, /\.face\.sub \{ vertical-align: sub;/);
+  });
+
+  test('they are one property, so the two boxes and the Offset select move together', (t) => {
+    const fn = /function setOffset\(v\)[^]*?\n    \}/.exec(clientJs)[0];
+    t.match(fn, /offsetSel\.value = v \|\| '';/, 'the select follows');
+    t.match(fn, /b\.checked = \(k === v\);/, 'and only the chosen box stays ticked');
+    t.match(fn, /return setT\('baselineOffset', v \|\| null\);/, 'one property is written');
+  });
+
+  suite('Lists are a stack of levels');
+
+  test('the levels are the view, with the marker style above them', (t) => {
+    const fn = /function listBody\(list\)[^]*?\n}/.exec(clientJs)[0];
+    t.ok(fn.indexOf("'Marker style'") < fn.indexOf('levels.forEach'),
+      'the marker style comes first, then the levels themselves');
+    t.notOk(/Remove markers from every list/.test(clientJs),
+      'the blunt whole-document button is gone');
+  });
+
+  test('a level can drop its own markers, and says so with a symbol not a word', (t) => {
+    const fn = /function levelMarker\(list, lv\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /el\('button', 'glyph none', '\\u2298'\)/, 'a circle with a cross through it');
+    t.match(fn, /t\.level = lv\.level;/, 'the write names the level');
+    t.match(fn, /call\('removeBullets', \[t\]\)/);
+  });
+
+  test('a level shows the marker it gets, but cannot be given a different one', (t) => {
+    const fn = /function levelMarker\(list, lv\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /shown\.disabled = true;/,
+      'the API has no per-level glyph write, so it is shown rather than offered');
+  });
+
+  test('each level heading is set in by its own depth', (t) => {
+    t.match(clientJs, /name\.style\.marginLeft = lv\.level \+ 'ex';/);
+  });
+
+  suite('Nothing internal reaches the screen');
+
+  test('a section says where it starts in words, not as an enum', (t) => {
+    const fn = /function sectionMeta\(sec\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /'starts a new page' : 'same page'/);
+    t.notOk(/CONTINUOUS/.test(fn), 'no enum constant reaches the label');
+    t.match(fn, /n === 1 \? ' column' : ' columns'/, 'and the count reads as English');
+    t.notOk(/\(first\)/.test(clientJs), '"Section 1" already says it is the first');
+  });
+
+  test('a header with no text does not fall back to its internal id', (t) => {
+    t.notOk(/seg\.preview \|\| seg\.segmentId/.test(clientJs));
+    t.match(clientJs, /seg\.preview \|\| \(seg\.empty \? 'empty' : ''\)/);
+  });
+
+  suite('Sizes that follow their neighbours');
+
+  test('the colour swatch matches the button beside it at any scale', (t) => {
+    t.match(css, /input\[type=color\] \{[^}]*align-self: stretch/);
+    t.notOk(/input\[type=color\] \{[^}]*[^-]height: 24px/.test(css),
+      'no fixed height to fall out of step with the "none" button');
+  });
+
+  test('a unit label is as wide as the unit it shows', (t) => {
+    t.match(css, /\.unit \{ flex: 0 0 auto;/);
+  });
+
+  test('every label that names a setting is muted, checkboxes included', (t) => {
+    t.match(css, /\.checks label \{[^}]*color: var\(--muted\)/);
+    t.match(css, /\.field > label \{[^}]*color: var\(--muted\)/);
+    t.match(css, /\.row > label \{ color: var\(--muted\)/);
+    t.match(css, /\.checks\.applyall label \{[^}]*color: var\(--fg\)/,
+      'except the one that governs a whole panel');
   });
 };

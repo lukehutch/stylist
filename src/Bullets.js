@@ -85,7 +85,13 @@ function listParagraphs_(content) {
  * document's own active tab rather than the one the sidebar is showing -- and
  * then no answer is better than a wrong one.
  */
+/** Timed, because on a long document this body walk costs more than the
+ *  Docs API read it accompanies. */
 function activeListId_(ordered) {
+  return timed_('cursorList', function () { return activeListId_inner_(ordered); });
+}
+
+function activeListId_inner_(ordered) {
   try {
     var doc = DocumentApp.getActiveDocument();
     var sel = doc.getSelection();
@@ -111,7 +117,11 @@ function activeListId_(ordered) {
     var body = doc.getBody();
     if (body.getNumChildren === undefined) return null;
     var seen = [], found = null;
-    for (var i = 0; i < body.getNumChildren(); i++) {
+    // Hoisted: every DocumentApp accessor is a call across the service
+    // boundary, so re-asking the child count once per child triples the cost
+    // of this walk on a long document.
+    var n = body.getNumChildren();
+    for (var i = 0; i < n; i++) {
       var child = body.getChild(i);
       if (child.getType() !== DocumentApp.ElementType.LIST_ITEM) continue;
       var id = child.getListId();
@@ -234,6 +244,15 @@ function applyBulletPreset(payload) {
 }
 
 /** payload: { tabId, listId | allLists } -- strips markers, keeping the text. */
+/**
+ * Take the markers off a list, or off one nesting level of it.
+ *
+ * A level is not a thing the API can address -- there is no request that
+ * edits a list's levels -- but it is a set of paragraphs, and
+ * deleteParagraphBullets works on paragraphs. So `payload.level` narrows the
+ * paragraphs to those sitting at that depth and leaves the rest of the list
+ * with its markers.
+ */
 function removeBullets(payload) {
   payload = payload || {};
   var doc = fetchDoc_();
@@ -241,7 +260,11 @@ function removeBullets(payload) {
   var byList = listParagraphs_(ctx.content);
   var requests = [];
   targetLists_(byList, payload).forEach(function (id) {
-    mergeRanges_(byList[id] || []).forEach(function (r) {
+    var items = byList[id] || [];
+    if (payload.level !== undefined && payload.level !== null) {
+      items = items.filter(function (it) { return it.nestingLevel === payload.level; });
+    }
+    mergeRanges_(items).forEach(function (r) {
       if (ctx.tabId) r.tabId = ctx.tabId;
       requests.push({ deleteParagraphBullets: { range: r } });
     });

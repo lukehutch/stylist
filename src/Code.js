@@ -37,28 +37,30 @@ function include(filename) {
  * load matters more than keeping this tidy.
  */
 function loadAll(tabId) {
+  timings_ = {};
+  var t0 = Date.now();
   var doc = fetchDoc_();
   var flat = flattenTabs_(doc);
   var ctx = resolveTab_(doc, tabId);
   var active = ctx.tabId;
-  var tables = readTables(active);
+  var tables = timed_('tables', function () { return readTables(active); });
 
-  return {
+  var out = {
     documentTitle: doc.title,
     tabs: flat.map(function (t) {
       return { tabId: t.tabId, title: t.title, depth: t.depth };
     }),
     activeTabId: active,
-    pageFormat: readPageFormat(active),
-    sections: readSections(active).sections,
-    namedStyles: readNamedStyles(active).styles,
-    segments: readSegments(active),
-    lists: readLists(active),
+    pageFormat: timed_('page', function () { return readPageFormat(active); }),
+    sections: timed_('sections', function () { return readSections(active).sections; }),
+    namedStyles: timed_('styles', function () { return readNamedStyles(active).styles; }),
+    segments: timed_('segments', function () { return readSegments(active); }),
+    lists: timed_('lists', function () { return readLists(active); }),
     tables: tables.tables,
     activeTableIndex: tables.activeIndex,
-    footnotes: readFootnotes(active),
-    presets: listPresets(),
-    stylePresets: listStylePresets(),
+    footnotes: timed_('footnotes', function () { return readFootnotes(active); }),
+    presets: timed_('presets', function () { return listPresets(); }),
+    stylePresets: timed_('stylePresets', function () { return listStylePresets(); }),
     constants: {
       units: SUPPORTED_UNITS,
       pageSizePresets: PAGE_SIZE_PRESETS,
@@ -67,6 +69,9 @@ function loadAll(tabId) {
       fonts: FONT_LIST
     }
   };
+  timings_.serverTotal = Date.now() - t0;
+  out.timings = timings_;
+  return out;
 }
 
 /** Fonts offered in the picker. Any Google Fonts family name also works. */

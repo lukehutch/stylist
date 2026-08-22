@@ -22,10 +22,14 @@
   /* Keep the vertical scrollbar present even when there is nothing to scroll.
      Otherwise opening a section makes the bar appear and every control in the
      sidebar shifts left by its width. */
-  html { overflow-y: scroll; }
+  /* Full height, so the page paints its own background right down to the
+     bottom edge of the frame Docs gives it rather than stopping at the last
+     line of content. */
+  html { overflow-y: scroll; height: 100%; }
   body {
     font: var(--fs)/1.45 Roboto, Arial, sans-serif;
     color: var(--fg); margin: 0; background: var(--bg);
+    min-height: 100%;
   }
   /* A placeholder says where the value comes from when the box is empty, so it
      has to read as a hint rather than as a value. opacity: 1 because Firefox
@@ -105,14 +109,29 @@
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0h10L5 6z' fill='%235f6368'/%3E%3C/svg%3E");
     pointer-events: none;   /* the click still belongs to the select underneath */
   }
-  input[type=color] { width: 30px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 3px; background: #fff; }
+  /* No fixed height: the swatch stretches to the row, so it matches the
+     "none" button standing beside it however the scale control is set. */
+  input[type=color] { width: 30px; min-height: 24px; align-self: stretch; padding: 0;
+    border: 1px solid var(--line); border-radius: 3px; background: #fff; }
   input.invalid { border-color: var(--err); background: #fce8e6; }
   input.saving { border-color: var(--accent); }
-  .unit { flex: 0 0 26px; color: var(--muted); font-size: var(--fs-xs); align-self: center; }
+  .unit { flex: 0 0 auto; color: var(--muted); font-size: var(--fs-xs); align-self: center; }
   .checks { display: flex; flex-wrap: wrap; gap: 8px; margin: 5px 0; }
-  .checks label { font-size: var(--fs-sm); display: flex; align-items: center; gap: 3px; color: var(--fg); }
+  /* Muted, like every other label in the sidebar: a checkbox's text names the
+     setting, the same job .field > label and .row > label do. */
+  .checks label { font-size: var(--fs-sm); display: flex; align-items: center; gap: 3px; color: var(--muted); }
   .checks.applyall { margin: 2px 0 10px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
-  .checks.applyall label { font-size: var(--fs-md); font-weight: 500; }
+  /* The exception, deliberately: this one governs the whole panel. */
+  .checks.applyall label { font-size: var(--fs-md); font-weight: 500; color: var(--fg); }
+
+  /* Each effect checkbox shows its own name wearing the effect it turns on. */
+  .face.bold { font-weight: 700; }
+  .face.italic { font-style: italic; }
+  .face.underline { text-decoration: underline; }
+  .face.strikethrough { text-decoration: line-through; }
+  .face.smallCaps { font-variant: small-caps; }
+  .face.sup { vertical-align: super; font-size: 0.78em; }
+  .face.sub { vertical-align: sub; font-size: 0.78em; }
 
   /* ---- marker picker ---- */
   /* The markers are shown as the characters they are, so the grid is sized by
@@ -126,6 +145,8 @@
   .glyph:hover { background: #f1f3f4; }
   .glyph.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
   .glyph.num { font-variant-numeric: tabular-nums; }
+  .glyph:disabled { cursor: default; opacity: 1; }
+  .glyph.none { font-size: calc(var(--fs-md) + 2px); }
 
   /* ---- lists / disclosure ---- */
   /* Expander. The open/closed height is a grid track going 0fr -> 1fr, which
@@ -209,20 +230,18 @@
     max-height: 100vh; display: flex; flex-direction: column;
   }
 
-  /* The tip row is an .item, but it opens upwards: the body is ordered above
-     the head, so the expanding track is the first one and the heading stays
-     put on the bottom edge while the panel grows into the space above it. */
-  .tip { margin: 0; border: 0; border-radius: 0; min-height: 0;
-         grid-template-rows: 0fr auto; }
-  .tip.open { grid-template-rows: 1fr auto; }
-  .tip > .head { order: 2; }
-  .tip > .body { order: 1;
-                 border-top: 0; border-bottom: 0 solid var(--line);
-                 transition: padding 160ms ease, border-bottom-width 160ms ease; }
-  .tip.open > .body { border-top-width: 0; border-bottom-width: 1px; overflow-y: auto; }
-  /* Closed, the turnstile points up at the panel that will appear there. */
-  .tip > .head .tw { transform: rotate(-90deg); }
-  .tip.open > .head .tw { transform: rotate(90deg); }
+  /* The tip row is an ordinary .item -- title bar on top, content below it --
+     living in a footer that is pinned to the bottom. So the panel still grows
+     upwards as a whole, but its own heading stays at its top edge where a
+     heading belongs, rather than underneath what it names.
+
+     The bar across the top of the heading is what separates the footer from
+     whichever panel is scrolling behind it. */
+  .tip { margin: 0; border: 0; border-radius: 0; min-height: 0; }
+  .tip > .head { border-top: 3px solid var(--line); }
+  /* The footer is capped at the viewport, so a tall tip panel scrolls inside
+     itself instead of pushing its own heading off the top of the screen. */
+  .tip.open > .body { overflow-y: auto; }
   .tip .body a { color: var(--accent); }
   /* 80% of the sidebar itself, so vw rather than a percentage of the padded
      box it sits in. The image is square, so height follows. */

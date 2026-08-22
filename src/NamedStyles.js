@@ -87,8 +87,8 @@ function namedStyleRequest_(tabId, namedStyleType, textUi, paraUi) {
 /** payload: { tabId, scope, namedStyleType, textStyle, paragraphStyle } */
 function writeNamedStyle(payload) {
   payload = payload || {};
-  var doc = fetchDoc_();
-  var tabIds = targetTabIds_(doc, payload.tabId, payload.scope);
+  var tabIds = knownTargetTabIds_(payload.tabIds, payload.tabId, payload.scope) ||
+    targetTabIds_(fetchDoc_(), payload.tabId, payload.scope);
   var requests = tabIds.map(function (tid) {
     return namedStyleRequest_(tid, payload.namedStyleType, payload.textStyle, payload.paragraphStyle);
   });
@@ -98,8 +98,8 @@ function writeNamedStyle(payload) {
 /** Apply many named styles in one batch (used by preset import). */
 function writeNamedStyles(payload) {
   payload = payload || {};
-  var doc = fetchDoc_();
-  var tabIds = targetTabIds_(doc, payload.tabId, payload.scope);
+  var tabIds = knownTargetTabIds_(payload.tabIds, payload.tabId, payload.scope) ||
+    targetTabIds_(fetchDoc_(), payload.tabId, payload.scope);
   var requests = [];
   tabIds.forEach(function (tid) {
     (payload.styles || []).forEach(function (s) {
