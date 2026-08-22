@@ -864,6 +864,27 @@ module.exports = ({ suite, test }) => {
     t.match(clientJs, /if \(!on\) \{ renderAll\(\); return; \}/);
   });
 
+  suite('Writing only what changed');
+
+  test('a menu entry that is not a choice leaves no trace', (t) => {
+    // "Custom..." on the page size names what the dimensions already are.
+    // Committing it would make the menu forget what the document last got,
+    // and picking the original entry back would then write it out again.
+    t.match(clientJs, /if \(opts\.skipBlank && !i\.value\) return \{ skip: true \};/);
+    t.match(clientJs, /selectField\(presets, match,[^]*?\{ skipBlank: true \}/,
+      'the page size menu asks for it');
+    t.notOk(/if \(!v\) return;\s*\n\s*var p = S\.data\.constants\.pageSizePresets/.test(clientJs),
+      'so the commit no longer has to guard against the blank itself');
+  });
+
+  test('one veil covers a write and the read that follows it', (t) => {
+    const fn = /function call\(fn, args\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /if \(S\.busy <= 0\) setTimeout\(function \(\) \{ if \(S\.busy <= 0\) disarmBusy\(\); \}, 0\);/,
+      'the veil is dropped a tick later, by which time a chained call has claimed it');
+    t.notOk(/if \(S\.busy <= 0\) disarmBusy\(\);   \/\//.test(fn),
+      'and never straight away, which is what made one change look like two');
+  });
+
   suite('The status line');
 
   /* status() is run for real against a stand-in element, so these are its
@@ -995,6 +1016,21 @@ module.exports = ({ suite, test }) => {
     const clear = /clear\.addEventListener[^]*?\}\);/.exec(fn)[0];
     t.match(clear, /input\.value = blank;/, 'the swatch changes, not only the model');
     t.match(clear, /commit\(''\)/, 'and the write still clears the colour');
+  });
+
+  test('"none" writes nothing when there is no colour to clear', (t) => {
+    const fn = /function colorField\(hex, commit, opts\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /var none = !hex;/, 'it knows whether the document holds a colour');
+    t.match(fn, /if \(none\) return;/, 'and a second press does nothing');
+    t.match(fn, /none = false;\s*\n\s*return commit\(v\);/,
+      'picking a colour puts it back in play');
+  });
+
+  test('a pick is judged against the document, not against the swatch', (t) => {
+    // With nothing set the swatch still has to show a colour. Choosing that
+    // same colour on purpose is a change -- from no colour to that one.
+    const fn = /function colorField\(hex, commit, opts\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /input\.setLive\(hex \|\| null\);/);
   });
 
   test('the page background offers white, because a page cannot be transparent', (t) => {

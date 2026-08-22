@@ -74,7 +74,13 @@ function call(fn, args) {
   p.then(done, done);
   function done() {
     S.busy--;
-    if (S.busy <= 0) disarmBusy();   // queued writes re-arm; one veil covers all of them
+    // Not straight away: a write that is followed by a read -- most of them
+    // are, since the reload comes off the write's own promise -- would drop
+    // the veil in the gap between the two and raise it again half a second
+    // later, which reads as two operations rather than one. The check runs
+    // after the microtasks that queue the next call, so a chain keeps the one
+    // veil it started with.
+    if (S.busy <= 0) setTimeout(function () { if (S.busy <= 0) disarmBusy(); }, 0);
   }
   return p;
 }
@@ -384,7 +390,8 @@ function numPlain(value, commit, opts) {
   return input;
 }
 
-function selectField(options, value, commit) {
+function selectField(options, value, commit, opts) {
+  opts = opts || {};
   var sel = el('select');
   options.forEach(function (o) {
     var opt = el('option', null, o.label);
@@ -392,7 +399,15 @@ function selectField(options, value, commit) {
     sel.appendChild(opt);
   });
   sel.value = value || '';
-  bindCommit(sel, function (i) { return { value: i.value }; }, commit);
+  // Some of these menus open with an entry that is not a choice -- "Custom..."
+  // on the page size, which names what the dimensions already are rather than
+  // anything to apply. Picking it has to leave no trace, or the menu forgets
+  // what the document last got and picking the original entry back writes it
+  // out again for nothing.
+  bindCommit(sel, function (i) {
+    if (opts.skipBlank && !i.value) return { skip: true };
+    return { value: i.value };
+  }, commit);
   sel.setLive(value || '');
   // Wrapped, because the arrow is drawn by .combo::after painting over the top
   // of the control rather than by the browser painting inside it. Callers only
@@ -478,12 +493,22 @@ function colorField(hex, commit, opts) {
   var input = el('input');
   input.type = 'color';
   input.value = hex || blank;
-  bindCommit(input, function (i) { return { value: i.value }; }, commit);
-  input.setLive(hex || blank);
+  // What the document holds, which is not what the swatch shows: with no
+  // colour set the swatch has to show something, and picking that same colour
+  // deliberately is a real change -- from nothing to that colour -- so the
+  // document's null is what a pick is compared against.
+  var none = !hex;
+  bindCommit(input, function (i) { return { value: i.value }; }, function (v) {
+    none = false;
+    return commit(v);
+  });
+  input.setLive(hex || null);
 
   var clear = el('button', 'act', 'none');
   clear.title = opts.noneTitle || 'Clear the color (transparent / inherit)';
   clear.addEventListener('click', function () {
+    if (none) return;              // already no colour: nothing to write
+    none = true;
     input.value = blank;
     input.setLive(null);
     Promise.resolve(commit(''));
@@ -877,10 +902,9 @@ function renderPage() {
     if (Math.abs((pf.pageWidthPt || 0) - p.widthPt) < 1 && Math.abs((pf.pageHeightPt || 0) - p.heightPt) < 1) match = p.id;
   });
   host.appendChild(fieldRow('Preset', selectField(presets, match, function (v) {
-    if (!v) return;
     var p = S.data.constants.pageSizePresets.filter(function (x) { return x.id === v; })[0];
     return applyPage({ pageWidthPt: p.widthPt, pageHeightPt: p.heightPt }).then(reload);
-  })));
+  }, { skipBlank: true })));
   host.appendChild(fieldRow('Width', numUnit(pf.pageWidthPt,
     function (v) { return applyPage({ pageWidthPt: v, pageHeightPt: pf.pageHeightPt }); },
     { min: 1, def: DEFAULTS.pageWidthPt })));
