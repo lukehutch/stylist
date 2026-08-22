@@ -21,54 +21,83 @@ uniform — "all footnotes" when the footnotes differ, or every cell of a table
 when the cells differ — the fields that disagree are left blank and named
 above the editor, rather than one value being picked arbitrarily.
 
-It stays in step with the document. Apps Script has no edit trigger for Docs,
-so the sidebar polls every five seconds: if you change formatting in Docs while
-it is open, the fields follow. A refresh never takes text out from under you —
-while the focus is in any field, the refresh is held (the status line says so)
-and applied the moment you leave it. Expanded rows and scroll position survive
-a refresh.
+It stays in step with the document. Change formatting in Docs while the sidebar
+is open and the fields follow within a few seconds, without disturbing whatever
+you are editing, and without losing your scroll position or expanded rows.
 
 ## Install
 
-Requires [clasp](https://github.com/google/clasp) (`npm i -g @google/clasp`).
+Stylist is not on the Marketplace yet, so you install it into your own Google
+account. Fifteen minutes, and you need [Node.js](https://nodejs.org).
+
+### 1. Get the code onto Google's servers
 
 ```bash
+npm i -g @google/clasp
+git clone https://github.com/lukehutch/stylist.git
+cd stylist
 clasp login
 clasp create-script --type standalone --title "Stylist" --rootDir src
 clasp push --force
+```
+
+`clasp login` opens a browser to authorise clasp against your Google account.
+`create-script` makes the script project and writes `.clasp.json`, which every
+later `clasp` command reads. `push` uploads `src/`.
+
+To use a script project you already have, skip `create-script`: copy
+`.clasp.json.example` to `.clasp.json` and paste in its script id, from
+**Project Settings (⚙) → IDs → Script ID** in the Apps Script editor.
+
+### 2. Install it into a document
+
+```bash
 clasp open-script
 ```
 
-`--force` on that first push: `create-script` leaves a default manifest on the
-server, so clasp asks before overwriting it, and declining skips the whole push
-rather than just the manifest.
+That opens the Apps Script editor in your browser. In it:
 
-Delete `src/src/` before pushing. `create-script --rootDir src` applies
-`rootDir` twice when it downloads the new project's stub manifest, leaving it at
-`src/src/appsscript.json`. Two files then claim the manifest name and the push
-stops with *"A file with this name already exists in the current project:
-appsscript"*. `rm -rf src/src` — the stub is a throwaway; `src/appsscript.json`
-is the real manifest.
+1. **Deploy → Test deployments**.
+2. Next to **Select type**, click the gear (**Enable deployment types**) and
+   tick **Editor add-on**.
+3. Click **Create new test**.
+4. Leave the code version as **Latest Code**.
+5. Under **Config**, choose the authorisation state — **Installed and enabled**.
+6. Under **Test document**, click **No document selected**, pick a Google Doc
+   to try it in, and click **Insert**.
+7. Click **Save test**, select the test's radio button, and click **Execute**.
 
-`--type standalone`, not `--type docs`: an editor add-on is not bound to one
-document, and a test deployment makes you pick the document to try it in. A
-bound script would leave you with a stray Doc you never open.
+Your document opens in a new tab. Choose **Extensions → Stylist → Open format
+editor**, and authorise when prompted — Stylist asks to see and edit the
+documents you open it in, and to show a sidebar.
 
-`create-script` writes `.clasp.json` in the project root, holding the script id
-it just created and `"rootDir": "src"`. That file is what every later `clasp`
-command reads — without it you get *"Script ID not set"*. It is gitignored,
-because the id is specific to your copy.
+The test deployment runs the latest code you pushed, so after any later
+`clasp push` just reload the document.
 
-To attach to a script project you already have, skip `create-script`: copy
-`.clasp.json.example` to `.clasp.json`, paste in its script id, then
-`clasp push`. The id is in the Apps Script editor under **Project Settings (⚙)
-→ IDs → Script ID**, or in the editor URL between `/projects/` and `/edit`.
+### 3. Use your own Cloud project (optional)
 
-In the Apps Script editor: **Deploy > Test deployments > Install**, then open any
-Google Doc and choose **Extensions > Stylist > Open format editor**.
+Skip this unless you intend to run `npm run test:live` or publish the add-on;
+everything above works without it. **The switch cannot be undone**, and it
+forces everyone who has authorised the script to authorise it again.
 
-The Docs advanced service and the required OAuth scopes are already declared in
-`src/appsscript.json`; the first run prompts for authorisation.
+1. In the [Cloud console](https://console.cloud.google.com/cloud-resource-manager),
+   open or create a project, then **More (⋮) → Project settings**, and copy the
+   **Project number** (digits only — not the Project ID).
+2. In the Apps Script editor: **Project Settings (⚙) → Google Cloud Project →
+   Change project**, paste the number, **Set project**.
+3. In the Cloud console for that project, enable the **Google Docs API** —
+   advanced services do not carry over from the default project, and Stylist
+   will not run without it.
+4. Fill in the **OAuth consent screen** for that project, adding yourself as a
+   test user.
+
+### If a command fails
+
+| Message | Fix |
+|---|---|
+| `Script ID not set, unable to open IDE.` | No `.clasp.json` — run `create-script`, or copy `.clasp.json.example` and paste your script id in. |
+| `A file with this name already exists in the current project: appsscript` | `create-script` left a stub at `src/src/appsscript.json`. `rm -rf src/src`, push again. |
+| `We're sorry, a server error occurred while reading from storage.` | Reload the document; if it persists, the script and its Cloud project are out of step — re-check step 3. |
 
 ## The six tabs
 

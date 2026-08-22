@@ -35,14 +35,7 @@ directory, or write `.clasp.json` by hand:
 { "scriptId": "1a2B3c...", "rootDir": "src" }
 ```
 
-Four notes on that first push:
-
-- **`create-script` leaves a stray `src/src/`.** It applies `rootDir` twice
-  when downloading the new project's stub manifest, writing it to
-  `src/src/appsscript.json`. Both that and the real `src/appsscript.json` map
-  to the manifest name, so the push refuses with *"A file with this name
-  already exists in the current project: appsscript"*. `rm -rf src/src` and
-  push again. Observed with clasp 3.4.0.
+Three notes on that first push:
 
 - **`--force` on the first push.** `create-script` leaves a default
   `appsscript.json` on the server, so the first push changes the manifest and
@@ -210,15 +203,26 @@ terminal or in CI, because Google's Execution API asks for a fair amount
    *replaces* clasp's own scopes rather than adding to them, which drops
    `script.projects` and breaks the `clasp push` that runs first. Then put
    `{"live": {"user": "gapp-tests"}}` in `gapp.config.json`.
-4. Deploy once as an **API Executable** (Deploy → New deployment → API
-   Executable). `devMode` runs the code you just pushed rather than the deployed
-   version, but a deployment still has to exist.
-5. Add `"executionApi": {"access": "ANYONE"}` to `src/appsscript.json`.
+4. Add `"executionApi": {"access": "MYSELF"}` to `src/appsscript.json` and
+   `clasp push --force`. The manifest has to declare it before a deployment can
+   be an API Executable.
+5. Deploy once as an **API Executable**: `clasp create-deployment`, or Deploy →
+   New deployment → API Executable. `devMode` runs the code you just pushed
+   rather than the deployed version, but a deployment still has to exist.
+   Without one, `run-function` fails with *"a server error occurred while
+   reading from storage. Error code NOT_FOUND"* — confirmed by adding the
+   deployment and watching that error change.
 
-Step 5 is deliberately **not** committed. `executionApi` is a permanent
+Step 4 is deliberately **not** committed. `executionApi` is a permanent
 execution surface on the add-on, and shipping one for the sake of a test suite
 is the wrong trade for something published to the Marketplace. Add it while
-testing, take it out before publishing.
+testing, take it out before publishing — `git diff src/appsscript.json` is the
+reminder that it is still there.
+
+The other error worth recognising is *"Unable to run script function. Please
+make sure you have permission to run the script function."* That is step 3: the
+token was minted by an OAuth client that does not live in the script's Cloud
+project, or does not carry the script's scopes.
 
 What `src/LiveTests.js` checks, in order: the Docs advanced service is actually
 enabled; `Docs.Documents.get` returns this document; tab resolution works on it
@@ -252,10 +256,11 @@ clasp push
 clasp open-script
 ```
 
-In the editor, **Deploy → Test deployments → Install**, then open a document
-and use **Extensions → Stylist**. A test deployment runs the code at
-`HEAD`, so `clasp push` and reload the sidebar to pick up changes — no
-redeploy needed.
+Then set up a test deployment once, as in the [README](README.md#2-install-it-into-a-document):
+**Deploy → Test deployments**, enable the **Editor add-on** type, **Create new
+test**, code version **Latest Code**, pick a test document, **Save test**,
+**Execute**. After that, `clasp push` and reload the document — a test
+deployment runs the latest code, so there is no redeploy step per change.
 
 `console.log` from server functions goes to **Executions** in the editor.
 Errors thrown inside a `google.script.run` call surface in the sidebar's status
@@ -334,46 +339,85 @@ from a real document with the sidebar open.
 
 ## Publishing
 
-Publishing is only needed to share the add-on beyond your own account. For
-personal use, a test deployment is enough and nothing below applies.
+Only needed to share the add-on beyond your own account. For personal use a
+test deployment is enough and none of this applies.
 
-1. **Attach a standard Cloud project.** Apps Script → Project Settings →
-   Change project, and paste a GCP project **number**. The default per-script
-   project cannot be published. This is the same Cloud project `npm run
-   test:live` needs — see the table under
-   [Setting up your own copy](#what-each-goal-actually-needs) — so if you set
-   that up already, you are done with this step.
-2. **Configure the OAuth consent screen** in that Cloud project. The scopes
-   this add-on requests are in `src/appsscript.json`:
-   `https://www.googleapis.com/auth/documents` and
-   `https://www.googleapis.com/auth/script.container.ui`. `documents` is a
-   sensitive scope, so an external, public listing needs Google's OAuth
-   verification — a security assessment and, typically, several weeks. An
-   internal listing within one Workspace domain does not.
-3. **Create a versioned deployment**: Apps Script → Deploy → New deployment →
-   Add-on. A version is a frozen snapshot of the code; the published add-on
-   runs that snapshot, not your latest push, so every release means a new
-   version here.
-4. **Enable the Google Workspace Marketplace SDK** in the Cloud project, then
-   fill in App Configuration: add-on type *Editor Add-on*, plus two values
-   Google's SDK asks for by name —
-   - the **script id**, from Apps Script → Project Settings → IDs;
-   - the **version number**, from Apps Script → Deploy → Manage deployments,
-     under "Configuration".
+Budget weeks, not days: a public listing that requests a sensitive scope goes
+through Google's OAuth verification, and Stylist requests
+`https://www.googleapis.com/auth/documents`, which is sensitive. A listing
+restricted to your own Workspace domain skips that entirely.
 
-   Editor add-ons are configured by version number. The *deployment id* you may
-   see alongside it is what Google Workspace add-ons use; this is not one.
-5. **Fill in the Store Listing**: name, descriptions, category, the icon and
-   banner, screenshots, a terms-of-service URL and a privacy-policy URL. Both
-   URLs are mandatory and must resolve.
-6. **Choose visibility** — private to your domain, unlisted (link only, good
-   for beta testing), or public. Unlisted is the sensible first step.
-7. **Submit for review.** Public listings are reviewed; domain-internal ones
-   publish immediately.
+### 1. Cloud project and consent screen
 
-Apps Script code is not code-signed — there is no signing step. Trust comes
-from the OAuth consent screen and the Marketplace review, which is why the
-scope list in `src/appsscript.json` should stay as narrow as it is.
+The add-on must belong to a standard Cloud project — the per-script default
+cannot be published. This is the same project step 3 of the README sets up, and
+the same one `npm run test:live` needs, so do it once.
+
+In that project's **OAuth consent screen**, publish the app and list exactly
+the scopes from `src/appsscript.json`:
+
+- `https://www.googleapis.com/auth/documents` — sensitive; needs verification
+- `https://www.googleapis.com/auth/script.container.ui`
+
+Keep this list identical to the manifest and to the Marketplace SDK's scope
+list. A mismatch is the most common reason a submission bounces.
+
+### 2. Cut a version
+
+The published add-on runs a frozen snapshot, not your latest push. In the Apps
+Script editor: **Deploy → New deployment → Add-on**, and note the **version
+number**. Every release means a new version and an updated listing.
+
+### 3. Marketplace SDK app configuration
+
+Enable the **Google Workspace Marketplace SDK** in the Cloud project, then open
+**App Configuration**:
+
+| Field | Value |
+|---|---|
+| App integration | **Editor add-on**, with **Docs** ticked |
+| Project script id | Apps Script → **Project Settings → IDs → Script ID** |
+| Version | the version number from step 2 |
+| OAuth scopes | the two scopes above |
+| App visibility | **Public**, **Unlisted**, or **Private** |
+
+Two traps. Editor add-ons are identified by **script id plus version number** —
+the *deployment id* sitting next to them belongs to Google Workspace add-ons
+and is not what this field wants. And visibility **cannot be changed after you
+save this page**; unlisted is the safe first choice, since it is installable by
+link for beta testers but absent from search.
+
+### 4. Store listing
+
+Required fields, with Google's limits:
+
+| Field | Requirement |
+|---|---|
+| Application name | ≤ 50 characters, must match the OAuth consent screen, cannot contain "Google" |
+| Short description | ≤ 200 characters |
+| Detailed description | < 16,000 characters |
+| Category, language | pick one each |
+| Icons | 32×32 and 128×128 |
+| Card banner | 220×140 |
+| Screenshots | at least one, up to ten; 1280×800 preferred, square corners, full bleed |
+| Terms of service URL | must resolve |
+| Privacy policy URL | must resolve |
+| Support URL | must resolve |
+
+`assets/` already holds the two icon sizes and the banner at the exact required
+dimensions (`icon-32.png`, `icon-128.png`, `banner-220x140.png`). Screenshots
+and the three URLs are the work left; the URLs are mandatory, so a public
+listing needs somewhere to host those three pages.
+
+### 5. Submit
+
+Submit from the SDK once every required field is saved. A domain-internal
+listing goes live immediately; a public one waits on review, plus OAuth
+verification for the `documents` scope.
+
+There is no code-signing step — Apps Script code is not signed. What users see
+is the consent screen, which is why the scope list should stay as narrow as it
+is.
 
 ## Conventions in this codebase
 
