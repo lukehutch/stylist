@@ -374,8 +374,8 @@ module.exports = ({ suite, test }) => {
   suite('Headers and footers have their own panel');
 
   const hfEval = (tail) => evalFromClient(
-    ['HF_SCOPES', 'hfSegments', 'hfAlsoUsedBy', 'humanSections', 'hfDescription',
-     'combineSegmentStyles'], tail);
+    ['HF_SECTION_SCOPES', 'HF_PAGE_SCOPES', 'hfSegments', 'hfAlsoUsedBy',
+     'humanSections', 'hfDescription', 'combineSegmentStyles'], tail);
 
   /**
    * Three sections. The first two share a header, the third broke away and
@@ -430,15 +430,16 @@ module.exports = ({ suite, test }) => {
     t.match(sec, /useFirstPageHeaderFooter/, 'the sections panel still has it');
   });
 
-  test('the six choices are the ones offered', (t) => {
-    t.deepEqual(hfEval('return HF_SCOPES.map(function (s) { return s.label; });'), [
-      'Apply to this section, L+R pages',
-      'Apply to this section, L pages',
-      'Apply to this section, R pages',
-      'Apply to all sections, L+R pages',
-      'Apply to all sections, L pages',
-      'Apply to all sections, R pages'
-    ]);
+  test('the two axes get a menu each, so a closed menu still reads', (t) => {
+    // One menu crossing both axes made every entry a sentence, and the
+    // control is half a narrow sidebar wide, so the chosen entry was cut off.
+    const labels = (name) =>
+      hfEval('return ' + name + '.map(function (s) { return s.label; });');
+    t.deepEqual(labels('HF_SECTION_SCOPES'), ['This section', 'All sections']);
+    t.deepEqual(labels('HF_PAGE_SCOPES'), ['L pages only', 'R pages only', 'L+R pages']);
+    const hf = /function renderHeaders\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(hf, /var scope = fieldRow\('Apply to', menus\);/, 'both sit on one row');
+    t.notOk(hf.indexOf('HF_SCOPES') !== -1, 'and the crossed list is gone');
   });
 
   test('"all sections" covers both kinds, wherever the cursor is', (t) => {
@@ -478,21 +479,73 @@ module.exports = ({ suite, test }) => {
     t.equal(say([0, 2, 3]), '1, 3 and 4');
     const hf = /function renderHeaders\(\)[^]*?\n}/.exec(clientJs)[0];
     t.match(hf, /hfAlsoUsedBy\(segs\)/);
-    t.match(hf, /inherits[^]*?the one before it/,
-      'and says why, so the warning is not a mystery');
+    t.match(hf, /Shared with[^]*?which this will change too/,
+      'named, and no lecture about how inheritance works');
   });
 
   test('a section can take its own header, or hand it back', (t) => {
     const fn = /function hfLinkBox\(\)[^]*?\n}/.exec(clientJs)[0];
     t.match(fn, /\['header', 'footer'\]\.forEach/,
       'the two link independently, so they get a row each');
-    t.match(fn, /Give this section its own ' \+ kind/);
+    t.match(fn, /Give it its own ' \+ kind/);
     t.match(fn, /Continue from section ' \+ \(here - 1\) \+ ' \(deletes this one\)/,
       'the button says what it destroys');
     t.match(fn, /Add a ' \+ kind/, 'and a document with none can get one');
     const set = /function setLink\([^]*?\n}/.exec(clientJs)[0];
     t.match(set, /'setSegmentLink'/);
     t.match(set, /sectionIndex: \(S\.data\.hfLink \|\| \{\}\)\.sectionIndex/);
+  });
+
+  test('the first section is offered nothing, rather than an explanation', (t) => {
+    // Its header is the document's and there is no section before it to hand
+    // one back to, so the row would be a sentence with no button on it.
+    const fn = /function hfLinkBox\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /} else if \(L\.isFirst\) \{[^]*?return;/,
+      'that row is skipped');
+    t.notOk(/Later sections\s*\n?\s*'?\s*continue it/.test(clientJs),
+      'and the explanation it used to carry is gone');
+    const hf = /function renderHeaders\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(hf, /if \(link && link\.childNodes\.length\)/,
+      'so an empty box takes no heading with it');
+  });
+
+  test('"all sections" is a state to put the whole tab into', (t) => {
+    const fn = /function hfLinkBox\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /var all = hfScopePart\(0\) === 'all' && links\.length > 1;/);
+    t.match(fn, /Give each its own ' \+ kind/);
+    t.match(fn, /Share one ' \+ kind \+ ' \(deletes the rest\)/);
+    t.match(fn, /setLink\(kind, 'own', true\)/, 'and both go out as one request');
+    t.match(fn, /setLink\(kind, 'previous', true\)/);
+    const set = /function setLink\([^]*?\n}/.exec(clientJs)[0];
+    t.match(set, /applyAll: !!applyAll/);
+  });
+
+  test('the margins and the per-segment list obey the same choice', (t) => {
+    const hf = /function renderHeaders\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.notOk(hf.indexOf('applyPage({ marginHeaderPt') !== -1,
+      'the margins are no longer written document-wide behind the choice');
+    t.match(hf, /applyHfMargin\(\{ marginHeaderPt: v \}\)/);
+    t.match(hf, /applyHfMargin\(\{ marginFooterPt: v \}\)/);
+    const apply = /function applyHfMargin\([^]*?\n}/.exec(clientJs)[0];
+    t.match(apply, /patch\.applyAll = hfScopePart\(0\) === 'all';/,
+      'this section or all of them, the same as the styling');
+    t.match(apply, /'writeSection'/, 'which means a section write, not a document one');
+    t.match(hf, /'One at a time'\)\);\s*\n\s*segs\.forEach/,
+      'and the list below names the same segments the editor above writes to');
+  });
+
+  test('a lone section is offered no choice of sections', (t) => {
+    const hf = /function renderHeaders\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(hf, /if \(manySections\) \{\s*\n\s*menus\.push\(selectField\(HF_SECTION_SCOPES/,
+      'the headers panel leaves the menu out');
+    t.match(hf, /if \(menus\.length > 1\) scope\.className = 'field tightlabel';/,
+      'and the one menu left gets the whole row');
+    const sec = /function renderSections\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(sec, /if \(total > 1\) \{\s*\n\s*host\.appendChild\(applyAllSwitch\('sections'/,
+      'and the sections panel drops "apply to all" with nothing to apply to');
+    const suffix = /function hfSectionSuffix\([^]*?\n}/.exec(clientJs)[0];
+    t.match(suffix, /if \(!manySections\) return heading;/,
+      'headings stop naming sections too');
   });
 
   test('the editor says how many things it is about to write to', (t) => {
@@ -1016,11 +1069,15 @@ module.exports = ({ suite, test }) => {
   test('every panel that has one offers it, however few things there are', (t) => {
     // With one table in the document the tick is not about unifying anything:
     // it is what lets the panel edit that table without the cursor being in it.
-    ['lists', 'tables', 'sections'].forEach((kind) => {
+    // Sections are the exception: there the tick only means "and the others",
+    // so a lone section gets no tick. A lone list or table still does, because
+    // the tick is also what lets the panel edit one the cursor is not in.
+    ['lists', 'tables'].forEach((kind) => {
       t.match(clientJs, new RegExp(`host\\.appendChild\\(applyAllSwitch\\('${kind}'`),
         `the ${kind} panel appends it unconditionally`);
     });
-    t.notOk(/length > 1[^]*?applyAllSwitch/.test(clientJs), 'no count gates it any more');
+    t.notOk(/length > 1[^]{0,80}?applyAllSwitch/.test(clientJs),
+      'no count of the things themselves gates it');
   });
 
   test('unticking changes nothing in the document', (t) => {

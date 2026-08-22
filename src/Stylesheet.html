@@ -105,6 +105,8 @@
      spends most of the row on white space, so they get only what they need
      and the controls take the rest. */
   .group.narrow .field > label { flex: 0 0 58px; }
+  /* Same bargain for a row carrying two controls instead of one. */
+  .field.tightlabel > label { flex: 0 0 58px; }
   input[type=text], input[type=number], select {
     width: 100%; min-width: 0; padding: 3px 5px; font: inherit; font-size: var(--fs-md);
     border: 1px solid var(--line); border-radius: 3px; background: #fff; color: var(--fg);

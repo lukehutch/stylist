@@ -368,7 +368,13 @@ function readSegmentStyle(tabId, kind, segmentId) {
  * first-page and even-page variants belong to the section as a set, so a
  * section handed back to the one before it gives up all three.
  *
- * payload: { tabId, kind: 'header' | 'footer', sectionIndex, link: 'own' | 'previous' }
+ * payload: { tabId, kind: 'header' | 'footer', sectionIndex, link: 'own' |
+ *            'previous', applyAll }
+ *
+ * applyAll does the same to every section at once, in one batch. Going to
+ * 'previous' everywhere leaves the whole tab on the document's header; the
+ * first section is passed over rather than refused, because it has nothing
+ * before it and that is not a mistake when the request was "all of them".
  *
  * 'own' creates a header or footer for the section. The API can only create
  * the default variant -- HeaderFooterType has no first-page or even-page
@@ -384,31 +390,41 @@ function setSegmentLink(payload) {
   var doc = fetchDoc_();
   var ctx = resolveTab_(doc, payload.tabId);
   var scan = sectionsScan_(ctx);
-  var sec = scan.sections[payload.sectionIndex];
-  if (!sec) throw new Error('There is no section ' + (payload.sectionIndex + 1) + ' in this tab.');
   var isHeader = payload.kind !== 'footer';
-  var own = isHeader ? sec.ownHeaderIds : sec.ownFooterIds;
-
-  if (payload.link === 'previous') {
-    if (sec.isFirst) {
-      throw new Error('The first section has nothing before it to continue from.');
-    }
-    if (!own.length) return { applied: 0 };
-    return batchUpdate_(own.map(function (id) {
-      return isHeader
-        ? { deleteHeader: { headerId: id, tabId: ctx.tabId } }
-        : { deleteFooter: { footerId: id, tabId: ctx.tabId } };
-    }));
+  var targets = scan.sections;
+  if (!payload.applyAll) {
+    var one = scan.sections[payload.sectionIndex];
+    if (!one) throw new Error('There is no section ' + (payload.sectionIndex + 1) + ' in this tab.');
+    targets = [one];
   }
 
-  // The first section's header is the document's, so what counts as already
-  // having one there is the document naming one at all.
-  var has = sec.isFirst ? !!(isHeader ? sec.headerId : sec.footerId) : own.length;
-  if (has) return { applied: 0 };
-  // An unset location, or the first section break, means the document rather
-  // than a section -- which is the right answer for the first section.
-  var loc = { index: sec.startIndex };
-  if (ctx.tabId) loc.tabId = ctx.tabId;
-  var req = { type: 'DEFAULT', sectionBreakLocation: loc };
-  return batchUpdate_([isHeader ? { createHeader: req } : { createFooter: req }]);
+  var requests = [];
+  var refusedFirst = false;
+  targets.forEach(function (sec) {
+    var own = isHeader ? sec.ownHeaderIds : sec.ownFooterIds;
+    if (payload.link === 'previous') {
+      if (sec.isFirst) { refusedFirst = true; return; }
+      own.forEach(function (id) {
+        requests.push(isHeader
+          ? { deleteHeader: { headerId: id, tabId: ctx.tabId } }
+          : { deleteFooter: { footerId: id, tabId: ctx.tabId } });
+      });
+      return;
+    }
+    // The first section's header is the document's, so what counts as already
+    // having one there is the document naming one at all.
+    if (sec.isFirst ? !!(isHeader ? sec.headerId : sec.footerId) : own.length) return;
+    // An unset location, or the first section break, means the document rather
+    // than a section -- which is the right answer for the first section.
+    var loc = { index: sec.startIndex };
+    if (ctx.tabId) loc.tabId = ctx.tabId;
+    var req = { type: 'DEFAULT', sectionBreakLocation: loc };
+    requests.push(isHeader ? { createHeader: req } : { createFooter: req });
+  });
+
+  if (refusedFirst && !payload.applyAll) {
+    throw new Error('The first section has nothing before it to continue from.');
+  }
+  if (!requests.length) return { applied: 0 };
+  return batchUpdate_(requests);
 }

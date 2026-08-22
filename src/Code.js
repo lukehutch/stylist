@@ -124,17 +124,23 @@ function refresh(tabId, what, ctx) {
     var hf = sectionsScan_(resolveTab_(fetchDoc_(), tabId));
     out.activeSectionIndex = pickSection_(hf.sections, hf.elements, ctx || {});
     out.sectionCount = hf.sections.length;
-    // Whether that section keeps its own header and footer or continues the
-    // previous section's, which is what the two link buttons act on.
-    var at = hf.sections[out.activeSectionIndex];
-    out.hfLink = at ? {
-      sectionIndex: out.activeSectionIndex,
-      isFirst: at.isFirst,
-      ownHeader: at.ownHeaderIds.length > 0,
-      ownFooter: at.ownFooterIds.length > 0,
-      hasHeader: !!at.headerId,
-      hasFooter: !!at.footerId
-    } : null;
+    // Whether each section keeps its own header and footer or continues the
+    // one before it, which is what the link buttons act on -- every section,
+    // because the panel offers to do it to all of them at once. The section
+    // itself comes back too: its header and footer margins are the ones the
+    // panel shows, and writing them needs its start index.
+    out.hfLinks = hf.sections.map(function (s, i) {
+      return {
+        sectionIndex: i,
+        isFirst: s.isFirst,
+        ownHeader: s.ownHeaderIds.length > 0,
+        ownFooter: s.ownFooterIds.length > 0,
+        hasHeader: !!s.headerId,
+        hasFooter: !!s.footerId
+      };
+    });
+    out.hfLink = out.hfLinks[out.activeSectionIndex] || null;
+    out.section = hf.sections[out.activeSectionIndex] || null;
   }
   if (!what || what === 'lists') out.lists = readLists(tabId);
   if (!what || what === 'segments') out.segments = readSegments(tabId);

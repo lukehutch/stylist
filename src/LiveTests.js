@@ -162,6 +162,10 @@ test('the headers slice says whether this section keeps its own', function (t) {
   if (slice.hfLink) {
     t.equal(slice.hfLink.sectionIndex, slice.activeSectionIndex,
       'and it describes the section the panel is showing');
+    t.equal(slice.hfLinks.length, slice.sectionCount,
+      'with one for every section, which is what "all sections" acts on');
+    t.equal(typeof slice.section.startIndex, 'number',
+      'and the section itself, whose margins the panel writes');
   } else {
     t.ok(true, 'no sections in this tab');
   }

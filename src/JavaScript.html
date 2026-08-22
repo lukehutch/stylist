@@ -1029,8 +1029,13 @@ function renderSections() {
     return;
   }
 
-  host.appendChild(applyAllSwitch('sections', 'Apply to all sections', 'unifySections',
-    { fromStartIndex: secs[0].startIndex }));
+  // Unlike the lists and tables switches, which also stand in for a cursor
+  // that is not in the thing being edited, this one only means "and the
+  // others" -- and a lone section has no others.
+  if (total > 1) {
+    host.appendChild(applyAllSwitch('sections', 'Apply to all sections', 'unifySections',
+      { fromStartIndex: secs[0].startIndex }));
+  }
   if (S.all.sections) {
     // Every section now carries the same formatting, so the shown one's
     // values are all of their values, and writes fan out to every section.
@@ -1554,22 +1559,39 @@ function currentSegmentStyle(target) {
  * in a header but not in which header. So the set is chosen here rather
  * than guessed.
  *
- * The two axes are the section and the side of the spread. A section names
- * its own headers and footers, or inherits them, so "this section" is the
- * one the cursor is in -- found from the body paragraph the cursor sits in,
+ * The two axes are the section and the side of the spread, and they get a
+ * menu each: crossing them into one menu made every entry long enough that
+ * the closed control could not show which was chosen. A section names its
+ * own headers and footers, or inherits them, so "this section" is the one
+ * the cursor is in -- found from the body paragraph the cursor sits in,
  * exactly as the sections panel finds it, which is why styling a section's
  * header does not need the cursor to be inside the header. R pages are the
  * right-hand ones, covered by the default and first-page segments; L pages
  * are the left-hand ones, covered by the even-page segments.
+ *
+ * The choice is still carried as one value, "<sections>:<pages>", because
+ * that is what names a set of segments.
  */
-var HF_SCOPES = [
-  { id: 'sec:both',  label: 'Apply to this section, L+R pages' },
-  { id: 'sec:left',  label: 'Apply to this section, L pages' },
-  { id: 'sec:right', label: 'Apply to this section, R pages' },
-  { id: 'all:both',  label: 'Apply to all sections, L+R pages' },
-  { id: 'all:left',  label: 'Apply to all sections, L pages' },
-  { id: 'all:right', label: 'Apply to all sections, R pages' }
+var HF_SECTION_SCOPES = [
+  { id: 'sec', label: 'This section' },
+  { id: 'all', label: 'All sections' }
 ];
+
+var HF_PAGE_SCOPES = [
+  { id: 'left',  label: 'L pages only' },
+  { id: 'right', label: 'R pages only' },
+  { id: 'both',  label: 'L+R pages' }
+];
+
+/** Part 0 is the sections axis, part 1 the pages one. */
+function hfScopePart(i) {
+  return String(S.hfScope).split(':')[i];
+}
+
+function setHfScope(sections, pages) {
+  S.hfScope = sections + ':' + pages;
+  renderAll();
+}
 
 /**
  * The segments the current choice names.
@@ -1667,49 +1689,103 @@ function combineSegmentStyles(segs) {
  * together: handing the header back gives up all three, and breaking away
  * gets the default one, which is the only kind the Docs API can create.
  */
+/** "Margins" alone in a one-section tab, and where they land in any other. */
+function hfSectionSuffix(heading, manySections) {
+  if (!manySections) return heading;
+  return heading + (hfScopePart(0) === 'all' ? ', in every section' : ', in this section');
+}
+
+/**
+ * A header or footer margin, from the section the panel is showing.
+ *
+ * A section that sets neither is positioned by the document's, so that is
+ * what the field shows until the section has one of its own.
+ */
+function hfMargin(key) {
+  var sec = S.data.section;
+  if (sec && sec[key] !== null && sec[key] !== undefined) return sec[key];
+  return S.data.pageFormat[key];
+}
+
+function applyHfMargin(patch) {
+  var sec = S.data.section;
+  // Before the first poll answers there is no section to write to, and the
+  // document's margin is the one in force anyway.
+  if (!sec) return applyPage(patch);
+  patch.tabId = S.tabId;
+  patch.startIndex = sec.startIndex;
+  patch.applyAll = hfScopePart(0) === 'all';
+  return call('writeSection', [patch]);
+}
+
 function hfLinkBox() {
+  var links = S.data.hfLinks || [];
   var L = S.data.hfLink;
   if (!L) return null;
+  var all = hfScopePart(0) === 'all' && links.length > 1;
   var box = el('div', 'linkbox');
 
   ['header', 'footer'].forEach(function (kind) {
-    var has = kind === 'header' ? L.hasHeader : L.hasFooter;
-    var own = kind === 'header' ? L.ownHeader : L.ownFooter;
-    var here = L.sectionIndex + 1;
     var row = el('div', 'btnrow');
     var say = el('span', 'linkstate');
-    var btn = null;
+    var buttons = [];
 
-    if (!has) {
-      say.textContent = 'No ' + kind + ' yet.';
-      btn = el('button', 'act', 'Add a ' + kind);
-      btn.addEventListener('click', function () { setLink(kind, 'own'); });
-    } else if (L.isFirst) {
-      say.textContent = 'The ' + kind + ' here is the document’s. Later sections ' +
-        'continue it until one breaks away.';
-    } else if (own) {
-      say.textContent = 'Section ' + here + ' has its own ' + kind + '.';
-      btn = el('button', 'act danger',
-        'Continue from section ' + (here - 1) + ' (deletes this one)');
-      btn.addEventListener('click', function () { setLink(kind, 'previous'); });
+    if (all) {
+      // Both directions are on offer at once here: "all sections" is a state
+      // to put the tab into, not a switch on what any one section happens to
+      // be doing now.
+      var own = links.filter(function (x) {
+        return !x.isFirst && (kind === 'header' ? x.ownHeader : x.ownFooter);
+      }).length;
+      say.textContent = own
+        ? own + ' of ' + (links.length - 1) + ' later sections have their own ' + kind + '.'
+        : 'Every section shares one ' + kind + '.';
+      var give = el('button', 'act', 'Give each its own ' + kind);
+      give.addEventListener('click', function () { setLink(kind, 'own', true); });
+      buttons.push(give);
+      if (own) {
+        var share = el('button', 'act danger', 'Share one ' + kind + ' (deletes the rest)');
+        share.addEventListener('click', function () { setLink(kind, 'previous', true); });
+        buttons.push(share);
+      }
     } else {
-      say.textContent = 'Section ' + here + ' continues the ' + kind +
-        ' from the section before it.';
-      btn = el('button', 'act', 'Give this section its own ' + kind);
-      btn.addEventListener('click', function () { setLink(kind, 'own'); });
+      var has = kind === 'header' ? L.hasHeader : L.hasFooter;
+      var mine = kind === 'header' ? L.ownHeader : L.ownFooter;
+      var here = L.sectionIndex + 1;
+      if (!has) {
+        say.textContent = 'No ' + kind + ' yet.';
+        var add = el('button', 'act', 'Add a ' + kind);
+        add.addEventListener('click', function () { setLink(kind, 'own', false); });
+        buttons.push(add);
+      } else if (L.isFirst) {
+        // Nothing to offer: the first section's is the document's, and it has
+        // no section before it to hand it back to.
+        return;
+      } else if (mine) {
+        say.textContent = 'Section ' + here + ' has its own ' + kind + '.';
+        var back = el('button', 'act danger',
+          'Continue from section ' + (here - 1) + ' (deletes this one)');
+        back.addEventListener('click', function () { setLink(kind, 'previous', false); });
+        buttons.push(back);
+      } else {
+        say.textContent = 'Section ' + here + ' continues the ' + kind + ' before it.';
+        var own1 = el('button', 'act', 'Give it its own ' + kind);
+        own1.addEventListener('click', function () { setLink(kind, 'own', false); });
+        buttons.push(own1);
+      }
     }
 
     row.appendChild(say);
-    if (btn) row.appendChild(btn);
+    buttons.forEach(function (b) { row.appendChild(b); });
     box.appendChild(row);
   });
   return box;
 }
 
-function setLink(kind, link) {
+function setLink(kind, link, applyAll) {
   status(link === 'own' ? 'Adding…' : 'Removing…', '');
   call('setSegmentLink', [{
-    tabId: S.tabId, kind: kind, link: link,
+    tabId: S.tabId, kind: kind, link: link, applyAll: !!applyAll,
     sectionIndex: (S.data.hfLink || {}).sectionIndex
   }]).then(function () { status('', ''); return reload(); })
     .catch(function (e) { status(String(e.message || e), 'err'); });
@@ -1720,42 +1796,49 @@ function renderHeaders() {
   host.innerHTML = '';
   var pf = S.data.pageFormat;
 
-  host.appendChild(el('h2', null, 'Style headers and footers'));
-  host.appendChild(fieldRow('Apply to', selectField(HF_SCOPES, S.hfScope, function (v) {
-    S.hfScope = v;
-    renderAll();
-  })));
-  host.appendChild(el('p', 'hint',
-    'R pages are the right-hand ones — the default header and footer, and the ' +
-    'first page. L pages are the left-hand ones, which only exist while ' +
-    '“Different even pages” is on.'));
+  var total = S.data.sectionCount || 0;
+  var at = S.data.activeSectionIndex || 0;
+  var manySections = total > 1;
 
+  host.appendChild(el('h2', null, 'Style headers and footers'));
+  // One section means there is no choice of sections to make, so that menu
+  // is left out and hfSegments ignores which half of it is set.
+  var menus = [];
+  if (manySections) {
+    menus.push(selectField(HF_SECTION_SCOPES, hfScopePart(0), function (v) {
+      setHfScope(v, hfScopePart(1));
+    }));
+  }
+  menus.push(selectField(HF_PAGE_SCOPES, hfScopePart(1), function (v) {
+    setHfScope(hfScopePart(0), v);
+  }));
+  var scope = fieldRow('Apply to', menus);
+  // Two menus sharing the row leaves neither wide enough to show its choice
+  // unless the label gives up most of its column.
+  if (menus.length > 1) scope.className = 'field tightlabel';
+  host.appendChild(scope);
   // Only the even-page switch is document-wide; the first-page one belongs to
   // a section, and lives on the Sections tab where a section can be picked.
   var checks = el('div', 'checks');
-  checks.appendChild(checkField('Different even pages', pf.useEvenPageHeaderFooter,
+  checks.appendChild(checkField('Different L/R pages', pf.useEvenPageHeaderFooter,
     function (v) { return applyPage({ useEvenPageHeaderFooter: v }); }));
   host.appendChild(checks);
   host.appendChild(el('p', 'hint',
     '“Different first page” is set one section at a time, on the Sections tab.'));
 
-  var total = S.data.sectionCount || 0;
-  var at = S.data.activeSectionIndex || 0;
-  var perSection = String(S.hfScope).split(':')[0] === 'sec' && total > 1;
-  if (total > 1) {
+  var perSection = hfScopePart(0) === 'sec' && manySections;
+  if (manySections) {
     host.appendChild(el('p', 'hint',
-      'Section ' + (at + 1) + ' of ' + total + ' — the one your cursor is in. ' +
+      'Section ' + (at + 1) + ' of ' + total + ', where your cursor is' +
       ((S.ctx || {}).segmentKind === 'header' || (S.ctx || {}).segmentKind === 'footer'
-        ? 'Your cursor is in a header or footer, which belongs to no section on its ' +
-          'own, so this is still the last section you were in. Click in the body to ' +
-          'switch sections.'
-        : 'Click inside a different section to switch.')));
+        ? ' — or was, before you clicked into a header. Click in the body to switch.'
+        : '.')));
   }
 
   var link = hfLinkBox();
-  if (link && (total > 1 || !((S.data.hfLink || {}).hasHeader &&
-                              (S.data.hfLink || {}).hasFooter))) {
-    host.appendChild(el('h2', null, 'This section’s own header and footer'));
+  if (link && link.childNodes.length) {
+    host.appendChild(el('h2', null, hfSectionSuffix(
+      'Own header and footer', manySections)));
     host.appendChild(link);
   }
 
@@ -1769,10 +1852,9 @@ function renderHeaders() {
       var shared = hfAlsoUsedBy(segs);
       if (shared.length) {
         var w = el('div', 'note');
-        w.textContent = 'Some of these are used by ' +
+        w.textContent = 'Shared with ' +
           (shared.length === 1 ? 'section ' : 'sections ') + humanSections(shared) +
-          ' as well — a section that does not name its own header or footer inherits ' +
-          'the one before it, so a change here shows up there too.';
+          ', which this will change too.';
         host.appendChild(w);
       }
     }
@@ -1787,26 +1869,25 @@ function renderHeaders() {
     }, { noPageBreak: true, mixed: cur.mixed, what: hfDescription(segs) }));
   }
 
-  // Not governed by the choice above: Docs positions every header on a page
-  // by the same margin, so there is no per-header one to set.
-  host.appendChild(el('h2', null, 'Margins, for every header and footer'));
-  host.appendChild(fieldRow('Header margin', numUnit(pf.marginHeaderPt,
-    function (v) { return applyPage({ marginHeaderPt: v }); },
+  // The section half of the choice governs these; the L/R half cannot,
+  // because Docs keeps one header margin per section and positions every
+  // header on the page by it, L and R alike.
+  host.appendChild(el('h2', null, hfSectionSuffix('Margins', manySections)));
+  host.appendChild(fieldRow('Header margin', numUnit(hfMargin('marginHeaderPt'),
+    function (v) { return applyHfMargin({ marginHeaderPt: v }); },
     { min: 0, def: DEFAULTS.headerFooterMarginPt })));
-  host.appendChild(fieldRow('Footer margin', numUnit(pf.marginFooterPt,
-    function (v) { return applyPage({ marginFooterPt: v }); },
+  host.appendChild(fieldRow('Footer margin', numUnit(hfMargin('marginFooterPt'),
+    function (v) { return applyHfMargin({ marginFooterPt: v }); },
     { min: 0, def: DEFAULTS.headerFooterMarginPt })));
   if (!pf.useCustomHeaderFooterMargins) {
     var n = el('div', 'note');
-    n.textContent = 'This document has custom header/footer margins turned off, and that flag is ' +
-      'read-only in the Docs API. Set a header or footer margin once in the document ' +
-      '(Format > Headers & footers) to switch it on; after that these two fields take effect.';
+    n.textContent = 'Custom header/footer margins are off here, and the flag is read-only ' +
+      'in the Docs API. Set one once in Docs (Format > Headers & footers) and these ' +
+      'two fields take effect.';
     host.appendChild(n);
   }
   host.appendChild(el('h2', null, 'One at a time'));
-  var all = S.data.segments.headers.concat(S.data.segments.footers);
-  if (!all.length) host.appendChild(el('p', 'hint', 'This tab has no headers or footers.'));
-  all.forEach(function (seg) {
+  segs.forEach(function (seg) {
     // Not the segment id: h.default is Google's internal name for it and
     // means nothing to anyone reading the sidebar. With more than one
     // section, which sections it serves is the thing that tells two

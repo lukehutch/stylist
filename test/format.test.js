@@ -1606,6 +1606,31 @@ test('handing a header back deletes the ones that section named', (t) => {
   t.equal(allRequests(M).length, 0, 'the footer was never its own, so nothing to undo');
 });
 
+test('every section can take its own header in one go', (t) => {
+  const M = makeSandbox(withThreeSections());
+  M.__reset();
+  M.setSegmentLink({ tabId: null, kind: 'header', link: 'own', applyAll: true });
+  const made = allRequests(M);
+  t.equal(made.length, 1,
+    'sections 1 and 3 already have one, so only section 2 is short of it');
+  t.equal(made[0].createHeader.sectionBreakLocation.index, 200);
+  M.__reset();
+  M.setSegmentLink({ tabId: null, kind: 'footer', link: 'own', applyAll: true });
+  t.deepEqual(allRequests(M).map((r) => r.createFooter.sectionBreakLocation.index),
+    [200, 300], 'the footer runs on from the document, so both later ones break away');
+});
+
+test('and every section can be put back onto one', (t) => {
+  const M = makeSandbox(withThreeSections());
+  M.__reset();
+  M.setSegmentLink({ tabId: null, kind: 'header', link: 'previous', applyAll: true });
+  t.deepEqual(allRequests(M).map((r) => r.deleteHeader.headerId), ['h.s3'],
+    'the first section is passed over rather than refused');
+  M.__reset();
+  const none = M.setSegmentLink({ tabId: null, kind: 'footer', link: 'previous', applyAll: true });
+  t.equal(none.applied, 0, 'and nothing is sent when they already share one');
+});
+
 test('the first section has nothing before it to continue from', (t) => {
   const M = makeSandbox(withThreeSections());
   t.throws(() => M.setSegmentLink({ tabId: null, kind: 'header', sectionIndex: 0, link: 'previous' }),
@@ -1636,5 +1661,12 @@ test('the headers panel gets its segments and its two margins in one read', (t) 
     { sectionIndex: 0, isFirst: true, ownHeader: false, ownFooter: false,
       hasHeader: true, hasFooter: true },
     'plus whether that section keeps its own, which the link buttons act on');
+  t.equal(slice.section.startIndex, 0,
+    'and the section itself, whose margins the panel shows and writes');
+
+  const many = makeSandbox(withThreeSections()).refresh(null, 'hf', {});
+  t.deepEqual(many.hfLinks.map((L) => L.ownHeader), [false, false, true],
+    'every section, because the buttons also offer to do it to all of them');
+  t.equal(many.hfLinks.length, 3);
 });
 };
