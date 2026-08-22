@@ -1,0 +1,10 @@
+{
+  "src": "src",
+  "serverFiles": [
+    "Units.js", "DocModel.js", "PageFormat.js", "NamedStyles.js",
+    "Segments.js", "Bullets.js", "Tables.js", "Footnotes.js",
+    "Presets.js", "CustomStyles.js", "GappTester.js", "LiveTests.js", "Code.js"
+  ],
+  "local": ["test"],
+  "live": { "entry": "gappRunInGas" }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "gdoc-format-config",
+  "version": "1.0.0",
+  "description": "Fine-grained format configuration for Google Docs",
+  "private": true,
+  "scripts": {
+    "test": "gapp-test",
+    "test:live": "gapp-test live",
+    "test:all": "gapp-test all",
+    "push": "clasp push",
+    "open": "clasp open"
+  },
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "gapp-tester": "github:lukehutch/gapp-tester"
+  }
+}

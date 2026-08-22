@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 140" width="220" height="140">
+  <title>Doc Format Config</title>
+  <rect width="220" height="140" fill="#0b3d91"/>
+  <g stroke="#3f6fc4" stroke-width="1.4" opacity="0.35">
+    <path d="M36 0V140M72 0V140M108 0V140M144 0V140M180 0V140"/>
+    <path d="M0 35H220M0 70H220M0 105H220"/>
+  </g>
+  <g transform="translate(46 6) scale(1)">
+    <g transform="scale(1)">
+  <!-- Blueprint ground -->
+  <rect width="128" height="128" rx="20" fill="#0b3d91"/>
+  <g stroke="#3f6fc4" stroke-width="1.4" opacity="0.4">
+    <path d="M32 0V128M64 0V128M96 0V128"/>
+    <path d="M0 32H128M0 64H128M0 96H128"/>
+  </g>
+
+  <!-- Gear -->
+  <g fill="#ffffff">
+    <path d="M46.00 30.24 L54.00 30.24 L56.15 39.25 L63.15 42.15 L71.05 37.30 L76.70 42.95 L71.85 50.85 L74.75 57.85 L83.76 60.00 L83.76 68.00 L74.75 70.15 L71.85 77.15 L76.70 85.05 L71.05 90.70 L63.15 85.85 L56.15 88.75 L54.00 97.76 L46.00 97.76 L43.85 88.75 L36.85 85.85 L28.95 90.70 L23.30 85.05 L28.15 77.15 L25.25 70.15 L16.24 68.00 L16.24 60.00 L25.25 57.85 L28.15 50.85 L23.30 42.95 L28.95 37.30 L36.85 42.15 L43.85 39.25 Z" fill-rule="evenodd"/>
+  </g>
+  <circle cx="50.0" cy="64.0" r="11.5" fill="#0b3d91"/>
+
+  <!-- Dimension measurement: extension line, tick, double-ended arrow, tick -->
+  <g stroke="#7fd4ff" stroke-width="3.6" stroke-linecap="round" fill="none">
+    <path d="M86 31H112"/>              <!-- top tick -->
+    <path d="M86 97H112"/>              <!-- bottom tick -->
+    <path d="M99 41V87"/>               <!-- dimension line -->
+  </g>
+  <g fill="#7fd4ff">
+    <path d="M99 31l7 13h-14z"/>        <!-- arrowhead up -->
+    <path d="M99 97l-7-13h14z"/>        <!-- arrowhead down -->
+  </g>
+</g>
+  </g>
+</svg>
