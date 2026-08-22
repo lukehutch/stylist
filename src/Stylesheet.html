@@ -131,9 +131,10 @@
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0h10L5 6z' fill='%235f6368'/%3E%3C/svg%3E");
     pointer-events: none;   /* the click still belongs to the select underneath */
   }
-  /* No fixed height: the swatch stretches to the row, so it matches the
-     "none" button standing beside it however the scale control is set. */
-  input[type=color] { width: 30px; min-height: 28px; align-self: stretch; padding: 0;
+  /* Chrome will not stretch a colour input to its flex row -- align-self is
+     ignored on it -- so the height that matches the "none" button beside it
+     has to be stated. 31px is that button, measured. */
+  input[type=color] { width: 30px; min-height: 31px; align-self: stretch; padding: 0;
     border: 1px solid var(--line); border-radius: 3px; background: #fff; }
   input.invalid { border-color: var(--err); background: #fce8e6; }
   input.saving { border-color: var(--accent); }
