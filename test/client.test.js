@@ -371,14 +371,126 @@ module.exports = ({ suite, test }) => {
     t.match(css, /fieldset\.group > legend \{/);
   });
 
+  suite('Headers and footers have their own panel');
+
+  const hfEval = (tail) => evalFromClient(
+    ['HF_SCOPES', 'hfSegments', 'hfDescription', 'combineSegmentStyles'], tail);
+
+  /** Two headers and two footers, one of each on either side of the spread. */
+  const fourSegments = `[
+    { kind: 'header', segmentId: 'h.default', parity: 'right' },
+    { kind: 'header', segmentId: 'h.even',    parity: 'left'  },
+    { kind: 'footer', segmentId: 'f.default', parity: 'right' },
+    { kind: 'footer', segmentId: 'f.even',    parity: 'left'  }
+  ]`;
+  const pick = (scope, segmentKind) => hfEval(
+    `var all = ${fourSegments};
+     var S = { hfScope: '${scope}', ctx: ${segmentKind ? `{ segmentKind: '${segmentKind}' }` : '{}'},
+       data: { segments: {
+         headers: all.filter(function (s) { return s.kind === 'header'; }),
+         footers: all.filter(function (s) { return s.kind === 'footer'; }) } } };
+     var got = hfSegments();
+     return got && got.map(function (s) { return s.segmentId; });`);
+
+  test('the tab is in the strip, and the panel it opens is empty for the client to fill', (t) => {
+    t.match(sidebar, /<button id="tab-hf">/);
+    t.match(sidebar, /<div id="panel-hf"\s+class="panel"><\/div>/);
+    t.match(clientJs, /\['page', 'styles', 'lists', 'tables', 'sections', 'hf', 'notes', 'presets'\]/);
+  });
+
+  test('the header and footer settings left the page panel', (t) => {
+    const page = /function renderPage\(\)[^]*?\n}/.exec(clientJs)[0];
+    ['marginHeaderPt', 'marginFooterPt', 'useFirstPageHeaderFooter',
+     'useEvenPageHeaderFooter'].forEach((k) => {
+      t.notOk(page.indexOf(k) !== -1, k + ' belongs to the headers panel now');
+    });
+    const hf = /function renderHeaders\(\)[^]*?\n}/.exec(clientJs)[0];
+    ['marginHeaderPt', 'marginFooterPt', 'useFirstPageHeaderFooter',
+     'useEvenPageHeaderFooter'].forEach((k) => t.ok(hf.indexOf(k) !== -1, k + ' arrived'));
+  });
+
+  test('the six choices are the ones offered', (t) => {
+    t.deepEqual(hfEval('return HF_SCOPES.map(function (s) { return s.label; });'), [
+      'Apply to current, L+R pages',
+      'Apply to current, L pages',
+      'Apply to current, R pages',
+      'Apply to all, L+R pages',
+      'Apply to all, L pages',
+      'Apply to all, R pages'
+    ]);
+  });
+
+  test('"all" needs no cursor and covers both kinds', (t) => {
+    t.deepEqual(pick('all:both', null),
+      ['h.default', 'h.even', 'f.default', 'f.even']);
+    t.deepEqual(pick('all:left', null), ['h.even', 'f.even'],
+      'left-hand pages are the even-page ones');
+    t.deepEqual(pick('all:right', null), ['h.default', 'f.default']);
+  });
+
+  test('"current" is whichever kind the cursor is in', (t) => {
+    t.deepEqual(pick('current:both', 'header'), ['h.default', 'h.even']);
+    t.deepEqual(pick('current:both', 'footer'), ['f.default', 'f.even']);
+    t.deepEqual(pick('current:right', 'header'), ['h.default'],
+      'and the side narrows it further');
+  });
+
+  test('"current" with the cursor outside a header or footer names nothing', (t) => {
+    // Which is what puts the "click inside one" hint on screen, exactly as the
+    // lists panel does when the cursor is not in a list.
+    t.equal(pick('current:both', null), null);
+    t.equal(pick('current:both', 'footnote'), null, 'a footnote is not one of these');
+    const hf = /function renderHeaders\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(hf, /Click inside a header or footer in the document/);
+  });
+
+  test('the editor says how many things it is about to write to', (t) => {
+    const say = hfEval('return hfDescription;');
+    t.equal(say([{ kind: 'header' }]), '1 header');
+    t.equal(say([{ kind: 'header' }, { kind: 'header' }, { kind: 'footer' }]),
+      '2 headers and 1 footer');
+  });
+
+  test('values seeded from a set are the ones the whole set agrees on', (t) => {
+    const combine = hfEval('return combineSegmentStyles;');
+    const seg = (fontSize, mixed) => ({
+      empty: false,
+      style: { textStyle: { fontSize: fontSize, bold: true }, paragraphStyle: {},
+               mixed: mixed || [] }
+    });
+    t.deepEqual(combine([seg(9), seg(9)]).textStyle, { fontSize: 9, bold: true });
+    const differ = combine([seg(9), seg(10)]);
+    t.deepEqual(differ.textStyle, { bold: true }, 'the field they disagree on drops out');
+    t.deepEqual(differ.mixed, ['fontSize'], 'and is named as disagreed');
+    t.deepEqual(combine([seg(9), seg(9, ['bold'])]).mixed, ['bold'],
+      "one segment's own disagreement is the whole set's");
+    t.deepEqual(combine([{ empty: true, style: { textStyle: { fontSize: 30 } } }, seg(9)]).textStyle,
+      { fontSize: 9, bold: true }, 'an empty segment has no text, so no style to count');
+  });
+
+  test('the panel writes to exactly the segments it named', (t) => {
+    const hf = /function renderHeaders\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(hf, /target: 'segments', segmentIds: ids/);
+    t.match(hf, /var ids = segs\.map\(function \(s\) \{ return s\.segmentId; \}\);/);
+  });
+
+  test('the panel follows the cursor, and re-draws when it crosses into a header', (t) => {
+    t.match(clientJs, /sections: 'context', hf: 'context'/);
+    const fn = /function poll\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /if \(activePanel === 'hf' && S\.ctx\.segmentKind !== kindBefore\) ctxRedraw = true;/,
+      'a read would come back identical, so the probe alone has to trigger the re-draw');
+    t.match(fn, /if \(changed \|\| ctxRedraw\) renderKeepingEdits\(\);/);
+  });
+
   suite('Footnotes');
 
   test('footnotes are styled as one set, with no row per footnote', (t) => {
     const notes = /function renderNotes\(\)[^]*?\n}/.exec(clientJs)[0];
     t.match(notes, /segmentEditor\('footnotes'/, 'the style-them-all editor stays');
     t.notOk(/segments\.footnotes/.test(notes),
-      'no per-footnote row: the individual list is headers and footers only');
-    t.match(notes, /Individual headers and footers/);
+      'no per-footnote row: footnotes are one set, not a list');
+    t.notOk(/segments\.headers/.test(notes),
+      'headers and footers moved out to their own panel');
   });
 
   test('the panel no longer lectures about what a change touches', (t) => {
@@ -403,7 +515,7 @@ module.exports = ({ suite, test }) => {
     // Every panel is an empty div the client fills in, so being after the
     // last of them is enough to be outside all of them.
     const panels = sidebar.match(/<div id="panel-[^"]*"[^>]*>[^]*?<\/div>/g) || [];
-    t.equal(panels.length, 7);
+    t.equal(panels.length, 8);
     panels.forEach(p => t.notOk(/id="tipItem"/.test(p), 'not nested in ' + p.slice(0, 24)));
   });
 

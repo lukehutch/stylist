@@ -115,14 +115,16 @@ forces everyone who has authorised the script to authorise it again.
 | `We're sorry, a server error occurred while reading from storage.` | Reload the document; if it persists, the script and its Cloud project are out of step — re-check step 3. |
 | `Access blocked: Stylist has not completed the Google verification process` — with no **Advanced** link | Different from the warning above, and a real block. Your Cloud project's OAuth consent screen is in **Testing** but your account is not on its test-user list. Add yourself under **Audience → Test users**. |
 
-## The six tabs
+## The eight tabs
 
 | Tab | What it configures |
 |---|---|
-| **Page** | Page size (10 presets or custom W×H), landscape, all four page margins, header and footer margins, page-number start, paged/pageless mode, page background. Plus a per-section editor: section margins, column count/width/gap, column separators, section page numbering, per-section first-page header/footer. |
+| **Page** | Page size (10 presets or custom W×H), landscape, all four page margins, page-number start, paged/pageless mode, page background. |
 | **Text** | All nine named styles — Normal text, Title, Subtitle, Heading 1–6. Each opens a full editor: font family, weight 100–900, size, bold/italic/underline/strikethrough/small-caps, superscript/subscript, text and highlight colour; alignment, line spacing, space above/below, spacing mode, left/right/first-line indents, direction, keep-lines-together, keep-with-next, widow/orphan control, page-break-before, shading, and all five paragraph borders (width, padding, colour, dash). Below them, a second list of your own custom styles, applied to whatever you have selected. |
 | **Lists** | The list your cursor is in, bulleted or numbered, or all of them grouped by kind when the cursor is elsewhere. Pick a marker by the character it is from the 15 presets, remove the markers, and style each nesting level's indentation, spacing and text. Tick "apply to all lists" to bring every list into line with the formatting most of them already have, and to keep every later change going to all of them. |
-| **Footnotes** | Style all footnote text at once, restyle every footnote callout mark in the document in one pass, style all headers and all footers, or drill into any individual segment. Also converts footnotes to an emulated endnote section. |
+| **Sections** | The section your cursor is in: section margins, column count/width/gap, column separators, section page numbering, landscape, per-section first-page and even-page headers and footers. "Apply to all sections" works the same way it does for lists. |
+| **Headers & footers** | Header and footer margins, "different first page" and "different even pages". Then a style editor over whichever headers and footers you name: the ones like the one your cursor is in, or all of them, narrowed to left-hand pages, right-hand pages, or both. Below that, every header and footer listed individually. |
+| **Footnotes** | Style all footnote text at once, restyle every footnote callout mark in the document in one pass. Also converts footnotes to an emulated endnote section. |
 | **Tables** | The table your cursor is in, or all of them listed: cell padding, borders, fill and vertical alignment (all cells or header row); row minimum height, header row, prevent-overflow; column width and sizing mode; pinned header rows. "Apply to all tables" works the same way it does for lists. |
 | **Presets** | Save the whole configuration under a name and re-apply it to any document. Save individual style presets and bind them to a named style. Export/import the configuration as JSON for version control. |
 
@@ -198,8 +200,14 @@ each one where you would otherwise expect the control:
 - **`useCustomHeaderFooterMargins` is read-only.** When a document has it off,
   `marginHeader`/`marginFooter` are accepted by the API but ignored by the
   renderer, and the API cannot switch it on. Set a header or footer margin once
-  by hand (Format > Headers & footers) to enable it. The Page tab detects this
-  and says so.
+  by hand (Format > Headers & footers) to enable it. The Headers & footers tab
+  detects this and says so.
+- **The cursor can say it is in a header, but not in which header.**
+  DocumentApp models a document as having at most one header section, so the
+  cursor probe reports header/footer/footnote and nothing finer -- the default,
+  first-page and even-page headers are indistinguishable from it. That is why
+  the Headers & footers tab asks which side of the spread you mean rather than
+  working it out.
 
 ## Footnote recipes
 

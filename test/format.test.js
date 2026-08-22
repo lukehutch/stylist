@@ -1424,4 +1424,107 @@ test('whatever goes wrong up there, the answer stays an object', (t) => {
   M.__selection = { getRangeElements: () => { throw new Error('no ui'); } };
   t.deepEqual(M.cursorContext(), {});
 });
+
+test('the climb says when the cursor is in a header, a footer or a note', (t) => {
+  const M = makeSandbox(makeDoc());
+  ['HEADER_SECTION', 'FOOTER_SECTION', 'FOOTNOTE_SECTION'].forEach((top, i) => {
+    M.__selection = selectionOf(chainOf(top, 'PARAGRAPH'));
+    t.equal(M.cursorContext().segmentKind,
+      ['header', 'footer', 'footnote'][i], top + ' should be recognised');
+  });
+});
+
+test('the ordinary case -- the body -- is not reported as anything', (t) => {
+  // Saying so would only make the probe's answer differ from itself for no
+  // reason, and every panel that reads it treats absent as "in the body".
+  const M = makeSandbox(makeDoc());
+  M.__selection = selectionOf(chainOf('BODY_SECTION', 'PARAGRAPH'));
+  t.equal(M.cursorContext().segmentKind, undefined);
+});
+
+test('a list inside a header is still a list, and still in the header', (t) => {
+  // The climb used to stop at the first thing it recognised; it has to carry
+  // on to the top, or a list item would hide the header holding it.
+  const M = makeSandbox(makeDoc());
+  M.__selection = selectionOf(chainOf('HEADER_SECTION', 'LIST_ITEM'));
+  t.deepEqual(M.cursorContext(),
+    { listId: 'list.X', paraKind: 'li', paraHead: 'Item one', segmentKind: 'header' });
+});
+
+/* ------------------------------------------------------------------ */
+suite('Which headers and footers a change goes to');
+
+/** makeDoc plus an even-page header and footer, i.e. a left-hand spread. */
+function withEvenPages() {
+  const doc = makeDoc();
+  const tab = doc.tabs[0].documentTab;
+  tab.documentStyle.evenPageHeaderId = 'h.even';
+  tab.documentStyle.evenPageFooterId = 'f.even';
+  const para = (text) => [{ startIndex: 0, endIndex: text.length + 1,
+    paragraph: { paragraphStyle: {}, elements: [
+      { startIndex: 0, endIndex: text.length + 1, textRun: { content: text } }] } }];
+  tab.headers['h.even'] = { headerId: 'h.even', content: para('Even header') };
+  tab.footers['f.even'] = { footerId: 'f.even', content: para('Even footer') };
+  return doc;
+}
+
+test('every header and footer says which side of the spread it prints on', (t) => {
+  const M = makeSandbox(withEvenPages());
+  const seg = M.readSegments(null);
+  const side = {};
+  seg.headers.concat(seg.footers).forEach((s) => { side[s.segmentId] = s.parity; });
+  t.deepEqual(side,
+    { 'h.default': 'right', 'f.default': 'right', 'h.even': 'left', 'f.even': 'left' },
+    'the default and first-page ones print on right-hand pages, even-page ones on left');
+});
+
+test('a header a section break introduces is placed the same way', (t) => {
+  const doc = makeDoc();
+  const tab = doc.tabs[0].documentTab;
+  tab.body.content.unshift({ sectionBreak: { sectionStyle: { evenPageHeaderId: 'h.s2' } } });
+  tab.headers['h.s2'] = { headerId: 'h.s2', content: [
+    { startIndex: 0, endIndex: 3, paragraph: { paragraphStyle: {}, elements: [
+      { startIndex: 0, endIndex: 3, textRun: { content: 'S2' } }] } }] };
+  const M = makeSandbox(doc);
+  const found = M.readSegments(null).headers.filter((h) => h.segmentId === 'h.s2')[0];
+  t.equal(found.parity, 'left');
+});
+
+test('the sidebar can name the exact segments to style', (t) => {
+  // Which segments "the left-hand pages" means is a question the panel has
+  // already answered on screen, so it sends the answer rather than the rule.
+  const M = makeSandbox(withEvenPages());
+  M.__reset();
+  M.writeSegmentStyle({ tabId: null, target: 'segments',
+    segmentIds: ['h.even', 'f.even'], textStyle: { bold: true } });
+  const ids = allRequests(M).map((r) => r.updateTextStyle.range.segmentId).sort();
+  t.deepEqual(ids, ['f.even', 'h.even'], 'and nothing else was touched');
+});
+
+test('naming no segments at all writes nothing', (t) => {
+  // "L pages" on a document that has none is an empty set, not an error.
+  const M = makeSandbox(makeDoc());
+  M.__reset();
+  const res = M.writeSegmentStyle({ tabId: null, target: 'segments',
+    segmentIds: [], textStyle: { bold: true } });
+  t.equal(res.applied, 0);
+  t.equal(allRequests(M).length, 0);
+});
+
+test('a segment id that belongs to another tab is skipped, not fatal', (t) => {
+  const M = makeSandbox(withEvenPages());
+  M.__reset();
+  M.writeSegmentStyle({ tabId: null, target: 'segments',
+    segmentIds: ['h.even', 'h.nosuch'], textStyle: { bold: true } });
+  const ids = allRequests(M).map((r) => r.updateTextStyle.range.segmentId);
+  t.deepEqual(ids, ['h.even']);
+});
+
+test('the headers panel gets its segments and its two margins in one read', (t) => {
+  const M = makeSandbox(makeDoc());
+  const slice = M.refresh(null, 'hf');
+  t.ok(slice.segments && slice.segments.headers.length, 'the segments themselves');
+  t.equal(slice.pageFormat.marginHeaderPt, 36, 'and the margin that positions them');
+  t.equal(slice.lists, undefined, 'and nothing the panel does not show');
+});
 };

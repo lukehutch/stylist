@@ -10,6 +10,8 @@ var S = {
   unitFields: [],      // dimension inputs to re-render when the unit changes
   open: {},            // which list items are expanded, so a re-render can restore them
   all: { lists: false, tables: false, sections: false },   // panels editing everything at once
+  hfScope: 'all:both', // which headers and footers the headers panel writes to
+  ctx: {},             // last cursorContext answer, for panels that key off it
   fingerprint: null,   // JSON of the last payload, to spot document-side changes
   busy: 0              // server calls in flight; polling stands aside while any are
 };
@@ -925,27 +927,6 @@ function renderPage() {
     }, { min: 0, def: DEFAULTS.pageMarginPt })));
   });
 
-  host.appendChild(el('h2', null, 'Header & footer'));
-  host.appendChild(fieldRow('Header margin', numUnit(pf.marginHeaderPt,
-    function (v) { return applyPage({ marginHeaderPt: v }); },
-    { min: 0, def: DEFAULTS.headerFooterMarginPt })));
-  host.appendChild(fieldRow('Footer margin', numUnit(pf.marginFooterPt,
-    function (v) { return applyPage({ marginFooterPt: v }); },
-    { min: 0, def: DEFAULTS.headerFooterMarginPt })));
-  if (!pf.useCustomHeaderFooterMargins) {
-    var n = el('div', 'note');
-    n.textContent = 'This document has custom header/footer margins turned off, and that flag is ' +
-      'read-only in the Docs API. Set a header or footer margin once in the document ' +
-      '(Format > Headers & footers) to switch it on; after that these two fields take effect.';
-    host.appendChild(n);
-  }
-  var hf = el('div', 'checks');
-  hf.appendChild(checkField('Different first page', pf.useFirstPageHeaderFooter,
-    function (v) { return applyPage({ useFirstPageHeaderFooter: v }); }));
-  hf.appendChild(checkField('Different even pages', pf.useEvenPageHeaderFooter,
-    function (v) { return applyPage({ useEvenPageHeaderFooter: v }); }));
-  host.appendChild(hf);
-
   host.appendChild(el('h2', null, 'Document'));
   host.appendChild(fieldRow('Page numbers from', numPlain(pf.pageNumberStart,
     function (v) { return applyPage({ pageNumberStart: v }); },
@@ -1486,7 +1467,7 @@ function levelMarker(list, lv) {
 </script>
 <script>
 /* =================================================================
- * Panel: Footnotes, headers, footers
+ * Panel: Footnotes
  * ================================================================= */
 function renderNotes() {
   var host = document.getElementById('panel-notes');
@@ -1503,40 +1484,6 @@ function renderNotes() {
     paragraph: false,
     caveat: 'The small number in the body text, not the note itself.'
   }));
-
-  host.appendChild(el('h2', null, 'All headers'));
-  host.appendChild(segmentEditor('headers', 'Headers', {
-    caveat: 'Every header in the tab at once — first page and even pages included.'
-  }));
-  host.appendChild(el('h2', null, 'All footers'));
-  host.appendChild(segmentEditor('footers', 'Footers', {
-    caveat: 'Every footer in the tab at once — first page and even pages included.'
-  }));
-
-  // Footnotes are deliberately absent here: they are styled as one set
-  // above, not one row per footnote.
-  host.appendChild(el('h2', null, 'Individual headers and footers'));
-  var segs = S.data.segments.headers.concat(S.data.segments.footers);
-  if (!segs.length) host.appendChild(el('p', 'hint', 'This tab has no headers or footers.'));
-  segs.forEach(function (seg) {
-    host.appendChild(listItem(seg.role,
-      // Not the segment id: h.default is Google's internal name for it and
-      // means nothing to anyone reading the sidebar.
-      seg.preview || (seg.empty ? 'empty' : ''),
-      function () {
-        var box = el('div');
-        var cur = seg.style || { textStyle: {}, paragraphStyle: {}, mixed: [] };
-        var model = { textStyle: copy(cur.textStyle), paragraphStyle: copy(cur.paragraphStyle) };
-        box.appendChild(buildStyleEditor(model, function (payload) {
-          return call('writeSegmentStyle', [{
-            tabId: S.tabId, scope: S.scope, target: 'segment', segmentId: seg.segmentId,
-            textStyle: payload.textStyle, paragraphStyle: payload.paragraphStyle
-          }]);
-        }, { noPageBreak: true, mixed: cur.mixed, what: seg.role }));
-        return box;
-      },
-      'seg:' + seg.segmentId));
-  });
 
   host.appendChild(el('h2', null, 'Convert footnotes to endnotes'));
   var headingIn = el('input');
@@ -1591,6 +1538,179 @@ function currentSegmentStyle(target) {
   };
 }
 
+</script>
+<script>
+/* =================================================================
+ * Panel: Headers and footers
+ * ================================================================= */
+
+/**
+ * Which headers and footers a change goes to.
+ *
+ * Docs keeps up to three headers and three footers per section -- the
+ * default one, the first-page one and the even-page one -- and a script
+ * cannot ask which of them the cursor is in: DocumentApp models a document
+ * as having at most one header section, so the probe can say the cursor is
+ * in a header but not in which header. So the set is chosen here rather
+ * than guessed.
+ *
+ * "Current" is whichever of the two kinds the cursor is in, headers or
+ * footers, and is the one choice that needs the cursor to be inside one.
+ * "All" is both kinds. L and R are the two sides of a spread: R covers the
+ * default and first-page ones, which print on right-hand pages, and L the
+ * even-page ones.
+ */
+var HF_SCOPES = [
+  { id: 'current:both',  label: 'Apply to current, L+R pages' },
+  { id: 'current:left',  label: 'Apply to current, L pages' },
+  { id: 'current:right', label: 'Apply to current, R pages' },
+  { id: 'all:both',      label: 'Apply to all, L+R pages' },
+  { id: 'all:left',      label: 'Apply to all, L pages' },
+  { id: 'all:right',     label: 'Apply to all, R pages' }
+];
+
+/**
+ * The segments the current choice names, or null when it names the one the
+ * cursor is in and the cursor is not in one.
+ */
+function hfSegments() {
+  var segs = S.data.segments;
+  var parts = String(S.hfScope).split(':');
+  var pool;
+  if (parts[0] === 'all') pool = segs.headers.concat(segs.footers);
+  else if ((S.ctx || {}).segmentKind === 'header') pool = segs.headers.slice();
+  else if ((S.ctx || {}).segmentKind === 'footer') pool = segs.footers.slice();
+  else return null;
+  return pool.filter(function (s) { return parts[1] === 'both' || s.parity === parts[1]; });
+}
+
+/** "2 headers and 1 footer", so the editor's heading says what it will write to. */
+function hfDescription(segs) {
+  var h = 0, f = 0;
+  segs.forEach(function (s) { if (s.kind === 'header') h++; else f++; });
+  var bits = [];
+  if (h) bits.push(h + (h === 1 ? ' header' : ' headers'));
+  if (f) bits.push(f + (f === 1 ? ' footer' : ' footers'));
+  return bits.join(' and ');
+}
+
+/**
+ * One set of values for a set of segments, agreeing where they agree.
+ *
+ * Each segment arrives already summarised: a value per field, plus the names
+ * of the fields its own paragraphs disagree about. Rolling several of those
+ * together is the same rule one level up -- a field survives only if every
+ * segment reports it and every segment reports the same thing. Empty
+ * segments are left out, because there is no text in them to have a style.
+ */
+function combineSegmentStyles(segs) {
+  var out = { textStyle: {}, paragraphStyle: {}, mixed: [] };
+  var live = segs.filter(function (s) { return !s.empty && s.style; });
+  if (!live.length) return out;
+  var mixed = {};
+  live.forEach(function (s) {
+    (s.style.mixed || []).forEach(function (k) { mixed[k] = true; });
+  });
+  ['textStyle', 'paragraphStyle'].forEach(function (half) {
+    var keys = {};
+    live.forEach(function (s) {
+      Object.keys(s.style[half] || {}).forEach(function (k) { keys[k] = true; });
+    });
+    Object.keys(keys).forEach(function (k) {
+      var head = JSON.stringify(live[0].style[half][k]);
+      var agreed = head !== undefined && live.every(function (s) {
+        return JSON.stringify((s.style[half] || {})[k]) === head;
+      });
+      if (agreed) out[half][k] = JSON.parse(head);
+      else mixed[k] = true;
+    });
+  });
+  out.mixed = Object.keys(mixed).sort();
+  return out;
+}
+
+function renderHeaders() {
+  var host = document.getElementById('panel-hf');
+  host.innerHTML = '';
+  var pf = S.data.pageFormat;
+
+  host.appendChild(el('h2', null, 'Style headers and footers'));
+  host.appendChild(fieldRow('Apply to', selectField(HF_SCOPES, S.hfScope, function (v) {
+    S.hfScope = v;
+    renderAll();
+  })));
+  host.appendChild(el('p', 'hint',
+    'R pages are the right-hand ones — the default header and footer, and the ' +
+    'first page. L pages are the left-hand ones, which only exist while ' +
+    '“Different even pages” is on.'));
+
+  var checks = el('div', 'checks');
+  checks.appendChild(checkField('Different first page', pf.useFirstPageHeaderFooter,
+    function (v) { return applyPage({ useFirstPageHeaderFooter: v }); }));
+  checks.appendChild(checkField('Different even pages', pf.useEvenPageHeaderFooter,
+    function (v) { return applyPage({ useEvenPageHeaderFooter: v }); }));
+  host.appendChild(checks);
+
+  var segs = hfSegments();
+  if (!segs) {
+    host.appendChild(el('p', 'hint',
+      'Click inside a header or footer in the document to style the ones like it. ' +
+      'Or choose one of the “Apply to all” entries, which needs no cursor.'));
+  } else if (!segs.length) {
+    host.appendChild(el('p', 'hint',
+      'Nothing in this tab matches that choice. Headers and footers are added in ' +
+      'the document itself, under Insert > Headers & footers.'));
+  } else {
+    var cur = combineSegmentStyles(segs);
+    var model = { textStyle: copy(cur.textStyle), paragraphStyle: copy(cur.paragraphStyle) };
+    var ids = segs.map(function (s) { return s.segmentId; });
+    host.appendChild(buildStyleEditor(model, function (payload) {
+      return call('writeSegmentStyle', [{
+        tabId: S.tabId, scope: S.scope, target: 'segments', segmentIds: ids,
+        textStyle: payload.textStyle, paragraphStyle: payload.paragraphStyle
+      }]);
+    }, { noPageBreak: true, mixed: cur.mixed, what: hfDescription(segs) }));
+  }
+
+  // Not governed by the choice above: Docs positions every header on a page
+  // by the same margin, so there is no per-header one to set.
+  host.appendChild(el('h2', null, 'Margins, for every header and footer'));
+  host.appendChild(fieldRow('Header margin', numUnit(pf.marginHeaderPt,
+    function (v) { return applyPage({ marginHeaderPt: v }); },
+    { min: 0, def: DEFAULTS.headerFooterMarginPt })));
+  host.appendChild(fieldRow('Footer margin', numUnit(pf.marginFooterPt,
+    function (v) { return applyPage({ marginFooterPt: v }); },
+    { min: 0, def: DEFAULTS.headerFooterMarginPt })));
+  if (!pf.useCustomHeaderFooterMargins) {
+    var n = el('div', 'note');
+    n.textContent = 'This document has custom header/footer margins turned off, and that flag is ' +
+      'read-only in the Docs API. Set a header or footer margin once in the document ' +
+      '(Format > Headers & footers) to switch it on; after that these two fields take effect.';
+    host.appendChild(n);
+  }
+  host.appendChild(el('h2', null, 'One at a time'));
+  var all = S.data.segments.headers.concat(S.data.segments.footers);
+  if (!all.length) host.appendChild(el('p', 'hint', 'This tab has no headers or footers.'));
+  all.forEach(function (seg) {
+    host.appendChild(listItem(seg.role,
+      // Not the segment id: h.default is Google's internal name for it and
+      // means nothing to anyone reading the sidebar.
+      seg.preview || (seg.empty ? 'empty' : ''),
+      function () {
+        var box = el('div');
+        var one = seg.style || { textStyle: {}, paragraphStyle: {}, mixed: [] };
+        var m = { textStyle: copy(one.textStyle), paragraphStyle: copy(one.paragraphStyle) };
+        box.appendChild(buildStyleEditor(m, function (payload) {
+          return call('writeSegmentStyle', [{
+            tabId: S.tabId, scope: S.scope, target: 'segment', segmentId: seg.segmentId,
+            textStyle: payload.textStyle, paragraphStyle: payload.paragraphStyle
+          }]);
+        }, { noPageBreak: true, mixed: one.mixed, what: seg.role }));
+        return box;
+      },
+      'seg:' + seg.segmentId));
+  });
+}
 /* =================================================================
  * Panel: Tables
  * ================================================================= */
@@ -1845,6 +1965,7 @@ function renderAll() {
   renderLists();
   renderTables();
   renderSections();
+  renderHeaders();
   renderNotes();
   renderPresets();
   window.scrollTo(0, scroll);
@@ -2000,7 +2121,7 @@ function renderKeepingEdits() {
  * ------------------------------------------------------------------ */
 var PANEL_SYNC = {
   page: 'meta', styles: 'meta',
-  lists: 'context', tables: 'context', sections: 'context',
+  lists: 'context', tables: 'context', sections: 'context', hf: 'context',
   notes: 'static', presets: 'static'
 };
 var activePanel = 'page';
@@ -2011,6 +2132,7 @@ var lastCtx = null;
 var lastCtxObj = null;
 var probeWaitUntil = 0;
 var probing = false;
+var ctxRedraw = false;
 
 function poll() {
   if (!S.data || S.busy || document.hidden) return Promise.resolve();
@@ -2035,12 +2157,19 @@ function poll() {
     // them, so one at a time.
     if (probing) return Promise.resolve();
     probing = true;
+    var kindBefore = S.ctx.segmentKind;
     prep = callRead('cursorContext').then(function (ctx) {
       probing = false;
       var now = JSON.stringify(ctx || {});
       if (now === lastCtx) return null;
       lastCtx = now;
       lastCtxObj = ctx || {};
+      S.ctx = ctx || {};
+      // The headers panel draws itself from the probe rather than from the
+      // document -- whether the cursor is in a header decides what it offers.
+      // A read would come back byte-identical and be discarded, so moving in
+      // or out of one is a reason to re-draw in its own right.
+      if (activePanel === 'hf' && S.ctx.segmentKind !== kindBefore) ctxRedraw = true;
       return activePanel;
     }, function (e) {
       probing = false;
@@ -2069,7 +2198,10 @@ function poll() {
         return true;
       });
     })
-    .then(function (changed) { if (changed) renderKeepingEdits(); })
+    .then(function (changed) {
+      if (changed || ctxRedraw) renderKeepingEdits();
+      ctxRedraw = false;
+    })
     .catch(function () {
       /* transient: the next tick tries again -- after a pause, so a failing
          probe does not hammer the server at the fast tick rate. */
@@ -2152,7 +2284,7 @@ function stopPolling() {
 }
 
 function switchTab(name) {
-  ['page', 'styles', 'lists', 'tables', 'sections', 'notes', 'presets'].forEach(function (n) {
+  ['page', 'styles', 'lists', 'tables', 'sections', 'hf', 'notes', 'presets'].forEach(function (n) {
     document.getElementById('panel-' + n).classList.toggle('active', n === name);
     document.getElementById('tab-' + n).classList.toggle('active', n === name);
   });
@@ -2182,7 +2314,7 @@ function boot() {
     status('Loading tab…', '');
     reload().then(function () { status('', ''); });
   });
-  ['page', 'styles', 'lists', 'tables', 'sections', 'notes', 'presets'].forEach(function (n) {
+  ['page', 'styles', 'lists', 'tables', 'sections', 'hf', 'notes', 'presets'].forEach(function (n) {
     document.getElementById('tab-' + n).addEventListener('click', function () { switchTab(n); });
   });
 

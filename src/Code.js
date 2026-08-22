@@ -114,6 +114,12 @@ function refresh(tabId, what, ctx) {
   } else if (!what) {
     out.sections = readSections(tabId).sections;
   }
+  // The headers/footers panel shows the segments themselves and the two
+  // margins that position them, so it wants both in one answer.
+  if (what === 'hf') {
+    out.segments = readSegments(tabId);
+    out.pageFormat = readPageFormat(tabId);
+  }
   if (!what || what === 'lists') out.lists = readLists(tabId);
   if (!what || what === 'segments') out.segments = readSegments(tabId);
   if (!what || what === 'tables') {
@@ -141,6 +147,15 @@ function refresh(tabId, what, ctx) {
  * against the body, because DocumentApp cannot see section breaks at all.
  * It is recorded on the way up even inside a table cell, and the climb
  * carries on so a table holding that paragraph is still reported.
+ *
+ * The climb runs all the way to the root rather than stopping at the first
+ * thing it recognises, because the outermost element is the one that says
+ * whether the cursor is in a header, a footer or a footnote rather than in
+ * the body. That is reported as segmentKind, and only for those three: the
+ * body is the ordinary case and saying so would only make the answer differ
+ * from itself for no reason. It is a kind and not an identity -- DocumentApp
+ * models a document as having at most one header section, so it cannot tell
+ * the default header from the first-page or even-page one.
  */
 function cursorContext() {
   var out = {};
@@ -163,14 +178,16 @@ function cursorContext() {
         out.paraKind = type === DocumentApp.ElementType.LIST_ITEM ? 'li' : 'p';
         out.paraHead = String(el.getText() || '').slice(0, 80);
       }
-      if (type === DocumentApp.ElementType.LIST_ITEM) {
+      if (type === DocumentApp.ElementType.LIST_ITEM && out.listId === undefined) {
         // getListId is the identity of the list this item belongs to. Some
         // service versions expose it only via getList(); prefer the direct one.
         out.listId = el.getListId !== undefined ? el.getListId()
           : (el.getList && el.getList() ? el.getList().getId() : null);
-        break;
       }
-      if (type === DocumentApp.ElementType.TABLE) { out.inTable = true; break; }
+      if (type === DocumentApp.ElementType.TABLE) out.inTable = true;
+      if (type === DocumentApp.ElementType.HEADER_SECTION) { out.segmentKind = 'header'; break; }
+      if (type === DocumentApp.ElementType.FOOTER_SECTION) { out.segmentKind = 'footer'; break; }
+      if (type === DocumentApp.ElementType.FOOTNOTE_SECTION) { out.segmentKind = 'footnote'; break; }
       el = el.getParent();
     }
   } catch (e) { /* nothing selected yet, or no cursor: an empty context */ }

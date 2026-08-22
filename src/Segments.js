@@ -56,6 +56,36 @@ function headerFooterRoles_(content) {
   return roles;
 }
 
+/**
+ * Which side of the spread each header/footer is printed on.
+ *
+ * Docs keeps at most three of each per section: the default one, the
+ * first-page one and the even-page one. With "different even pages" turned
+ * on the default is the odd-page header, so it lands on right-hand pages;
+ * the even-page one lands on left-hand pages. The first page is page one,
+ * which is a right-hand page too. With even pages turned off there is no
+ * even-page header at all and the default covers both sides -- calling it
+ * 'right' is still true of every page it prints on.
+ */
+function headerFooterParity_(content) {
+  var parity = {};
+  function tag(id, side) { if (id) parity[id] = side; }
+  function tagStyle(s) {
+    s = s || {};
+    tag(s.defaultHeaderId, 'right');
+    tag(s.firstPageHeaderId, 'right');
+    tag(s.evenPageHeaderId, 'left');
+    tag(s.defaultFooterId, 'right');
+    tag(s.firstPageFooterId, 'right');
+    tag(s.evenPageFooterId, 'left');
+  }
+  tagStyle(content.documentStyle);
+  (((content.body || {}).content) || []).forEach(function (el) {
+    if (el.sectionBreak) tagStyle(el.sectionBreak.sectionStyle);
+  });
+  return parity;
+}
+
 /** Plain-text preview of a segment, for the segment list in the sidebar. */
 function segmentPreview_(content) {
   var text = '';
@@ -73,6 +103,7 @@ function readSegments(tabId) {
   var ctx = resolveTab_(doc, tabId);
   var content = ctx.content;
   var roles = headerFooterRoles_(content);
+  var parity = headerFooterParity_(content);
   var out = { tabId: ctx.tabId, headers: [], footers: [], footnotes: [], footnoteReferenceCount: 0 };
 
   function collect(map, kind, list) {
@@ -82,6 +113,7 @@ function readSegments(tabId) {
       list.push({
         kind: kind,
         segmentId: id,
+        parity: parity[id] || 'right',
         role: roles[id] || ('Unreferenced ' + kind),
         preview: segmentPreview_(seg.content),
         empty: !range,
@@ -145,8 +177,10 @@ function findFootnoteReferences_(content) {
  *
  * payload: {
  *   tabId, scope,
- *   target: 'footnotes' | 'headers' | 'footers' | 'footnoteRefs' | 'body' | 'segment',
+ *   target: 'footnotes' | 'headers' | 'footers' | 'footnoteRefs' | 'body' |
+ *           'segment' | 'segments',
  *   segmentId,                      // only for target === 'segment'
+ *   segmentIds,                     // only for target === 'segments'
  *   textStyle, paragraphStyle       // UI style objects
  * }
  */
@@ -211,11 +245,20 @@ function writeSegmentStyle(payload) {
       });
     } else if (payload.target === 'body') {
       styleSegment('', (content.body || {}).content);
-    } else if (payload.target === 'segment') {
-      var map = (content.headers || {})[payload.segmentId] ||
-                (content.footers || {})[payload.segmentId] ||
-                (content.footnotes || {})[payload.segmentId];
-      if (map) styleSegment(payload.segmentId, map.content);
+    } else if (payload.target === 'segment' || payload.target === 'segments') {
+      // The sidebar names the segments itself when it has narrowed a set down
+      // by hand -- the headers/footers panel does, since which ones "the left
+      // pages" means is a question it has already answered on screen. Ids
+      // belong to one tab, so a segment named here is simply absent from the
+      // others and skipped.
+      var ids = payload.target === 'segments'
+        ? (payload.segmentIds || []) : [payload.segmentId];
+      ids.forEach(function (id) {
+        var map = (content.headers || {})[id] ||
+                  (content.footers || {})[id] ||
+                  (content.footnotes || {})[id];
+        if (map) styleSegment(id, map.content);
+      });
     } else if (payload.target === 'footnoteRefs') {
       // Reference marks are inline in the body; only text styling applies.
       findFootnoteReferences_(content).forEach(function (r) {

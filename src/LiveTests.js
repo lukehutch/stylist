@@ -124,11 +124,69 @@ test('styling every footnote callout is accepted', function (t) {
   t.comment(res.segments + ' callout(s) restyled, values unchanged');
 });
 
+suite('Headers and footers');
+
+/**
+ * The one thing only a real document can answer.
+ *
+ * DocumentApp is documented to hand back a cursor, and to model a header as
+ * a HeaderSection, but nothing in the reference says whether the cursor is
+ * reachable at all while it sits inside one -- and the whole "apply to
+ * current" half of the headers panel rests on it being reachable. So this
+ * test reports what the probe actually sees rather than asserting a
+ * particular answer: put the cursor in a header and run the suite again to
+ * see it change.
+ */
+test('the cursor probe can see into a header or footer', function (t) {
+  var ctx = cursorContext();
+  t.comment('cursorContext() = ' + JSON.stringify(ctx));
+  if (ctx.segmentKind) {
+    t.ok(true, 'the cursor is in a ' + ctx.segmentKind);
+  } else {
+    t.ok(true, 'cursor is in the body — put it in a header and run again to ' +
+      'confirm the probe reports segmentKind');
+  }
+});
+
+test('every header and footer is placed on a side of the spread', function (t) {
+  var segs = readSegments(null);
+  var all = segs.headers.concat(segs.footers);
+  if (!all.length) {
+    t.comment('this document has no headers or footers');
+    t.ok(true, 'nothing to place');
+    return;
+  }
+  all.forEach(function (s) {
+    t.ok(s.parity === 'left' || s.parity === 'right',
+      s.role + ' has no side: ' + s.parity);
+  });
+  t.comment(all.map(function (s) { return s.role + ' -> ' + s.parity; }).join(', '));
+});
+
+test('styling a named set of segments is accepted', function (t) {
+  var segs = readSegments(null);
+  var live = segs.headers.concat(segs.footers).filter(function (s) { return !s.empty; });
+  if (!live.length) {
+    t.comment('this document has no header or footer with text in it');
+    t.ok(true, 'nothing to style');
+    return;
+  }
+  var res = writeSegmentStyle({
+    target: 'segments',
+    segmentIds: live.map(function (s) { return s.segmentId; }),
+    textStyle: live[0].style.textStyle,
+    paragraphStyle: live[0].style.paragraphStyle
+  });
+  t.equal(res.warnings.length, 0, (res.warnings || []).join('; '));
+  t.comment(res.applied + ' request(s) across ' + res.segments + ' segment(s)');
+});
+
 suite('Sidebar');
 
 test('the sidebar template renders', function (t) {
   var html = HtmlService.createTemplateFromFile('Sidebar').evaluate().getContent();
   t.match(html, /panel-page/, 'the page panel is missing from the output');
+  t.match(html, /panel-hf/, 'the headers and footers panel is missing from the output');
   t.match(html, /startPolling\(\)/, 'the document poll is missing');
   t.comment(html.length + ' bytes');
 });
