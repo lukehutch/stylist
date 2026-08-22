@@ -155,6 +155,33 @@ module.exports = ({ suite, test }) => {
     t.match(css, /\.tw \{[^}]*transition: transform/);
   });
 
+  suite('Grouped controls');
+
+  test('a group is a fieldset with its heading in the top edge', (t) => {
+    t.match(clientJs, /function group\(title\)[^]*?el\('fieldset', 'group'\)/);
+    t.match(clientJs, /appendChild\(el\('legend', null, title\)\)/);
+  });
+
+  test('character and paragraph settings each get their own box', (t) => {
+    t.match(clientJs, /var gChar = group\('Character'\)/);
+    t.match(clientJs, /var gPara = group\('Paragraph'\)/);
+    t.match(clientJs, /gChar\.appendChild\(fieldRow\('Font'/, 'the font row goes in the box');
+    t.match(clientJs, /gPara\.appendChild\(fieldRow\('Alignment'/);
+  });
+
+  test('every heading inside a panel is a group heading now', (t) => {
+    t.notOk(/el\('h3'/.test(clientJs), 'no bare sub-headings left');
+    const groups = clientJs.match(/group\('[^']+'\)/g) || [];
+    t.ok(groups.length >= 8, 'grouped everywhere, not just the style editor: ' + groups.length);
+  });
+
+  test('the box is rounded and can shrink to the sidebar', (t) => {
+    t.match(css, /fieldset\.group \{[^}]*border-radius: 6px/);
+    t.match(css, /fieldset\.group \{[^}]*min-width: 0/,
+      'a fieldset that cannot shrink gives the sidebar a horizontal scrollbar');
+    t.match(css, /fieldset\.group > legend \{/);
+  });
+
   suite('Footnotes');
 
   test('footnotes are styled as one set, with no row per footnote', (t) => {

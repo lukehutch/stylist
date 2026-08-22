@@ -31,7 +31,15 @@
        margin: 14px -10px 8px; padding: 6px 10px;
        background: var(--band); border-top: 1px solid var(--line);
        border-bottom: 1px solid var(--line); }
-  h3 { font-size: var(--fs-md); margin: 10px 0 4px; font-weight: 500; color: var(--muted); }
+  /* Related controls sit in a rounded box with the heading in its top edge.
+     A fieldset already draws exactly that, gap in the border included.
+     min-width: 0 is not optional: a fieldset otherwise refuses to shrink
+     below its widest child, which in a 300px sidebar means a horizontal
+     scrollbar. */
+  fieldset.group { border: 1px solid var(--line); border-radius: 6px; min-width: 0;
+                   margin: 10px 0 0; padding: 2px 8px 8px; }
+  fieldset.group > legend { padding: 0 4px; font-size: var(--fs-md); font-weight: 500;
+                            color: var(--muted); }
   p.hint { color: var(--muted); font-size: var(--fs-sm); margin: 4px 0 8px; }
 
   /* ---- top bar ---- */
