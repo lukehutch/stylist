@@ -10,15 +10,33 @@ function activeDocId_() {
   return DocumentApp.getActiveDocument().getId();
 }
 
-/** Full document including tab contents. */
+/**
+ * Full document including tab contents, fetched at most once per execution.
+ *
+ * Every read* function needs the whole document, and loadAll calls seven of
+ * them, so without this one sidebar refresh was eight full downloads of the
+ * document -- the single largest cost in the add-on, paid again every time the
+ * poll ticked. One Apps Script execution is short enough that a document
+ * fetched at its start is still the document at its end; a write is the one
+ * thing that makes that untrue, so batchUpdate_ clears the cache.
+ *
+ * Callers treat the result as read-only. Nothing here copies it, because
+ * copying a large document is most of the cost this avoids.
+ */
+var docCache_ = null;
+
 function fetchDoc_() {
-  return Docs.Documents.get(activeDocId_(), { includeTabsContent: true });
+  if (!docCache_) {
+    docCache_ = Docs.Documents.get(activeDocId_(), { includeTabsContent: true });
+  }
+  return docCache_;
 }
 
 function batchUpdate_(requests) {
   var reqs = (requests || []).filter(function (r) { return !!r; });
   if (!reqs.length) return { applied: 0 };
   Docs.Documents.batchUpdate({ requests: reqs }, activeDocId_());
+  docCache_ = null;   // the document just changed under us
   return { applied: reqs.length };
 }
 

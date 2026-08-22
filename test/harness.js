@@ -46,9 +46,10 @@ function makeSandbox(doc) {
     VerticalAlignment: { SUPERSCRIPT: 'SUPERSCRIPT', SUBSCRIPT: 'SUBSCRIPT', NORMAL: 'NORMAL' }
   };
 
+  const counts = { get: 0 };
   const Docs = {
     Documents: {
-      get: () => JSON.parse(JSON.stringify(doc)),
+      get: () => { counts.get++; return JSON.parse(JSON.stringify(doc)); },
       batchUpdate: (resource, id) => {
         captured.push({ documentId: id, requests: resource.requests });
         return { replies: [] };
@@ -67,6 +68,7 @@ function makeSandbox(doc) {
   Object.defineProperty(sb, '__selection', {
     get: () => state.selection, set: (v) => { state.selection = v; }
   });
+  Object.defineProperty(sb, '__fetches', { get: () => counts.get });
   Object.defineProperty(sb, '__body', {
     get: () => state.body, set: (v) => { state.body = v; }
   });
@@ -74,7 +76,9 @@ function makeSandbox(doc) {
     get: () => state.cursor, set: (v) => { state.cursor = v; }
   });
   sb.__captured = captured;
-  sb.__reset = () => { captured.length = 0; };
+  // fetchDoc_ caches the document for the length of one Apps Script execution;
+  // a test is a fresh execution, so the cache and the fetch count go with it.
+  sb.__reset = () => { captured.length = 0; counts.get = 0; sb.docCache_ = null; };
   return sb;
 }
 

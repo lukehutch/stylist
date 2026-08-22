@@ -382,6 +382,24 @@ function fakeBody(types) {
   return body;
 }
 
+// Own sandbox: loadAll seeds the default custom styles, which the shared one's
+// preset tests count.
+test('one sidebar refresh downloads the document once, not once per section', (t) => {
+  const N = makeSandbox(makeDoc());
+  N.loadAll(null);
+  t.equal(N.__fetches, 1,
+    'loadAll runs seven readers, and each of them used to fetch the whole document');
+});
+
+test('a write invalidates the cached document', (t) => {
+  const N = makeSandbox(makeDoc());
+  N.loadAll(null);
+  N.writeSegmentStyle({ target: 'footnotes', textStyle: { fontSizePt: 9 } });
+  const before = N.__fetches;
+  N.readTables(null);
+  t.ok(N.__fetches > before, 'the next read sees the document as it now is');
+});
+
 test('the table the cursor sits in is reported by its position in the body', (t) => {
   S.__reset();
   const body = fakeBody(['PARAGRAPH', 'TABLE', 'PARAGRAPH']);
