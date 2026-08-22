@@ -103,8 +103,10 @@
   .combo { position: relative; display: flex; flex: 1; min-width: 0; }
   .combo > select { -webkit-appearance: none; appearance: none; }
   .combo::after {
-    content: ''; position: absolute; top: 1px; right: 1px; bottom: 1px; width: 20px;
-    border-radius: 0 3px 3px 0;
+    /* Inset by another pixel past the select's own border, so the strip sits
+       inside it at any zoom rather than painting over it. */
+    content: ''; position: absolute; top: 2px; right: 2px; bottom: 2px; width: 18px;
+    border-radius: 0 2px 2px 0;
     background: #fff no-repeat center;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0h10L5 6z' fill='%235f6368'/%3E%3C/svg%3E");
     pointer-events: none;   /* the click still belongs to the select underneath */
@@ -195,12 +197,14 @@
   .btnrow { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
   .applogo { width: calc(var(--fs) * 3); height: calc(var(--fs) * 3);
              vertical-align: middle; margin-right: 8px; flex: 0 0 auto; }
-  .customstyle { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
-  .customstyle > button.act { flex: 0 1 auto; max-width: 60%; overflow: hidden;
-    text-overflow: ellipsis; white-space: nowrap; }
-  .customstyle > .meta { flex: 1 1 auto; color: var(--muted); font-size: var(--fs-xs);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .customstyle > button.danger { flex: 0 0 auto; }
+  /* A custom-style row is an .item whose heading carries an editable name
+     between the turnstile and the row's icon buttons. */
+  .item > .head input.name {
+    flex: 1 1 auto; min-width: 0; font-weight: 500; font-size: var(--fs-md);
+    padding: 2px 4px;
+  }
+  /* Icon-only action buttons (apply, delete): square, so the glyph centres. */
+  button.iconbtn { flex: 0 0 auto; width: 28px; padding: 5px 0; text-align: center; }
 
   .note { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 4px;
           padding: 6px 8px; font-size: var(--fs-sm); margin: 6px 0; }
@@ -258,7 +262,7 @@
      The bar across the top of the heading is what separates the footer from
      whichever panel is scrolling behind it. */
   .tip { margin: 0; border: 0; border-radius: 0; min-height: 0; }
-  .tip > .head { border-top: 3px solid var(--line); }
+  .tip > .head { border-top: 5px solid var(--line); }
   /* The footer is capped at the viewport, so a tall tip panel scrolls inside
      itself instead of pushing its own heading off the top of the screen. */
   .tip.open > .body { overflow-y: auto; }

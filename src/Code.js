@@ -52,7 +52,6 @@ function loadAll(tabId) {
     }),
     activeTabId: active,
     pageFormat: timed_('page', function () { return readPageFormat(active); }),
-    sections: timed_('sections', function () { return readSections(active).sections; }),
     namedStyles: timed_('styles', function () { return readNamedStyles(active).styles; }),
     segments: timed_('segments', function () { return readSegments(active); }),
     lists: timed_('lists', function () { return readLists(active); }),
@@ -98,12 +97,23 @@ var FONT_LIST = [
  * and pays for a full read; the caller's job is to ask rarely (see
  * cursorContext).
  */
-function refresh(tabId, what) {
+function refresh(tabId, what, ctx) {
   if (what === 'meta') return readDocMeta(tabId);
   var out = {};
   if (!what || what === 'page') out.pageFormat = readPageFormat(tabId);
   if (!what || what === 'styles') out.namedStyles = readNamedStyles(tabId).styles;
-  if (!what || what === 'sections') out.sections = readSections(tabId).sections;
+  if (what === 'sections') {
+    // The one section the cursor is in. `ctx` is the cursorContext answer the
+    // sidebar probed a moment ago; without a usable one the panel falls back
+    // to the section it was last showing.
+    var scan = sectionsScan_(resolveTab_(fetchDoc_(), tabId));
+    var at = pickSection_(scan.sections, scan.elements, ctx || {});
+    out.sections = at >= 0 ? [scan.sections[at]] : [];
+    out.activeSectionIndex = at;
+    out.sectionCount = scan.sections.length;
+  } else if (!what) {
+    out.sections = readSections(tabId).sections;
+  }
   if (!what || what === 'lists') out.lists = readLists(tabId);
   if (!what || what === 'segments') out.segments = readSegments(tabId);
   if (!what || what === 'tables') {
@@ -117,15 +127,20 @@ function refresh(tabId, what) {
 /**
  * What is under the cursor, for the price of a few accessor calls.
  *
- * This is the gate that keeps the lists and tables panels from re-reading
- * the document every second: the panels only show the list or table the
- * cursor sits in, so if this answer has not changed there is nothing for
- * them to learn from a read. Identity comes straight off the element the
- * selection or cursor is in -- no walk over the body, no indices.
+ * This is the gate that keeps the lists, tables and sections panels from
+ * re-reading the document every second: the panels only show what the cursor
+ * sits in, so if this answer has not changed there is nothing for them to
+ * learn from a read. Identity comes straight off the element the selection or
+ * cursor is in -- no walk over the body, no indices.
  *
  * A table has no id in DocumentApp, so it reports presence only; moving
  * between two tables necessarily passes through not-being-in-one, which is
  * change enough.
+ *
+ * The paragraph's leading text is the handle the sections panel matches
+ * against the body, because DocumentApp cannot see section breaks at all.
+ * It is recorded on the way up even inside a table cell, and the climb
+ * carries on so a table holding that paragraph is still reported.
  */
 function cursorContext() {
   var out = {};
@@ -142,6 +157,12 @@ function cursorContext() {
     }
     while (el && el.getType) {
       var type = el.getType();
+      if ((type === DocumentApp.ElementType.PARAGRAPH ||
+           type === DocumentApp.ElementType.LIST_ITEM) &&
+          out.paraHead === undefined) {
+        out.paraKind = type === DocumentApp.ElementType.LIST_ITEM ? 'li' : 'p';
+        out.paraHead = String(el.getText() || '').slice(0, 80);
+      }
       if (type === DocumentApp.ElementType.LIST_ITEM) {
         // getListId is the identity of the list this item belongs to. Some
         // service versions expose it only via getList(); prefer the direct one.

@@ -232,4 +232,65 @@ function makeLegacyDoc() {
   return Object.assign({ title: 'Legacy Doc', documentId: 'DOC_ID' }, t);
 }
 
-module.exports = { makeDoc, makeLegacyDoc, makeMultiDoc };
+/**
+ * Three sections, built to exercise finding the one under the cursor.
+ *
+ * Sections two and three deliberately hold twin paragraphs -- an empty one
+ * each, plus a shared prefix between them -- because twins across sections
+ * are exactly where picking the current section can go wrong. Margins differ
+ * per section so a copied style can be told apart from an original one.
+ */
+function makeSectionedDoc() {
+  function sb(start, style) {
+    return {
+      startIndex: start, endIndex: start,
+      sectionBreak: Object.assign({ sectionStyle: Object.assign({
+        sectionType: 'CONTINUOUS', columnProperties: []
+      }, style) })
+    };
+  }
+  function p(start, end, text, opts) {
+    return {
+      startIndex: start, endIndex: end,
+      paragraph: Object.assign({
+        paragraphStyle: {},
+        elements: [{ startIndex: start, endIndex: end, textRun: { content: text } }]
+      }, opts || {})
+    };
+  }
+  return {
+    title: 'Sectioned Doc',
+    documentId: 'DOC_ID',
+    tabs: [{
+      tabProperties: { tabId: 't.0', title: 'Main', index: 0, nestingLevel: 0 },
+      documentTab: {
+        documentStyle: {},
+        namedStyles: { styles: [] },
+        body: { content: [
+          sb(0, { marginTop: { magnitude: 72, unit: 'PT' } }),
+          p(1, 16, 'First page text'),
+          sb(17, { marginTop: { magnitude: 90, unit: 'PT' }, sectionType: 'NEXT_PAGE' }),
+          p(18, 19, ''),
+          p(20, 31, 'Shared heading'),
+          sb(32, { marginTop: { magnitude: 108, unit: 'PT' } }),
+          p(33, 34, ''),
+          p(35, 44, 'Item one', {
+            paragraphStyle: { namedStyleType: 'NORMAL_TEXT' },
+            bullet: { listId: 'list.9', nestingLevel: 0 }
+          }),
+          {
+            startIndex: 45, endIndex: 90,
+            table: { rows: 1, columns: 1, tableRows: [
+              { startIndex: 46, endIndex: 89, tableRowStyle: {}, tableCells: [
+                { content: [p(47, 57, 'Cell words')] }
+              ] }
+            ] }
+          }
+        ] },
+        lists: {}
+      }
+    }]
+  };
+}
+
+module.exports = { makeDoc, makeLegacyDoc, makeMultiDoc, makeSectionedDoc };

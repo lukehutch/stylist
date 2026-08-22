@@ -46,8 +46,9 @@ test('every panel gets its data from one loadAll call', function (t) {
   var d = loadAll(null);
   // footnotes are deliberately absent: the notes panel styles them as one
   // set via the segments slice, so loading them separately reads the body
-  // for data nothing on screen uses.
-  ['pageFormat', 'sections', 'namedStyles', 'segments', 'lists', 'tables',
+  // for data nothing on screen uses. sections is absent too: that panel
+  // reads only the slice under the cursor, via refresh.
+  ['pageFormat', 'namedStyles', 'segments', 'lists', 'tables',
    'constants'].forEach(function (k) {
     t.notEqual(d[k], undefined, 'loadAll returned no ' + k);
   });

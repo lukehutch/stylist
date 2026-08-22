@@ -9,7 +9,7 @@
  */
 const assert = require('assert');
 const { makeSandbox, allRequests } = require('./harness');
-const { makeDoc, makeLegacyDoc, makeMultiDoc } = require('./fixture');
+const { makeDoc, makeLegacyDoc, makeMultiDoc, makeSectionedDoc } = require('./fixture');
 
 module.exports = ({ suite, test }) => {
 
@@ -794,12 +794,127 @@ test('loadAll returns every panel\'s data plus the constants in one call', (t) =
   t.equal(d.documentTitle, 'Fixture Doc');
   t.deepEqual(d.tabs.map((tab) => tab.tabId), ['t.0', 't.1']);
   t.equal(d.namedStyles.length, 9);
-  t.ok(d.sections.length >= 1);
+  t.equal(d.sections, undefined,
+    'sections are read when their panel opens, not at boot');
   t.ok(d.lists.lists.length >= 1);
   t.ok(d.tables.length >= 1);
   t.equal(d.constants.units.length, 4);
   t.equal(d.constants.bulletPresets.length, 15);
   t.ok(d.constants.fonts.length > 20);
+});
+
+/* ------------------------------------------------------------------ */
+suite('Sections: finding and writing the one under the cursor');
+
+const SEC = makeSectionedDoc();
+const secTab = SEC.tabs[0].documentTab;
+const secContent = secTab.body.content;
+
+test('the section breaks read back with the styles that start them', (t) => {
+  const M = makeSandbox(SEC);
+  const secs = M.readSections('t.0').sections;
+  t.equal(secs.length, 3);
+  t.equal(secs[0].marginTopPt, 72);
+  t.equal(secs[1].marginTopPt, 90);
+  t.equal(secs[1].sectionType, 'NEXT_PAGE');
+  t.equal(secs[2].marginTopPt, 108);
+});
+
+test('a paragraph picks the section it sits inside', (t) => {
+  const M = makeSandbox(SEC);
+  const scan = M.sectionsScan_(M.resolveTab_(M.fetchDoc_(), 't.0'));
+  t.equal(M.pickSection_(scan.sections, scan.elements,
+    { paraKind: 'p', paraHead: 'First page text' }), 0);
+  t.equal(M.pickSection_(scan.sections, scan.elements,
+    { paraKind: 'p', paraHead: 'Shared heading' }), 1);
+  // A paragraph inside a table belongs to the section holding the table.
+  t.equal(M.pickSection_(scan.sections, scan.elements,
+    { paraKind: 'p', paraHead: 'Cell words' }), 2);
+});
+
+test('twin paragraphs across sections stay with the one already showing', (t) => {
+  const M = makeSandbox(SEC);
+  const scan = M.sectionsScan_(M.resolveTab_(M.fetchDoc_(), 't.0'));
+  // Both empty paragraphs match an empty head; the panel stays put...
+  t.equal(M.pickSection_(scan.sections, scan.elements,
+    { paraKind: 'p', paraHead: '', preferred: 2 }), 2);
+  // ...or moves to whichever twin is nearest where it was.
+  t.equal(M.pickSection_(scan.sections, scan.elements,
+    { paraKind: 'p', paraHead: '', preferred: 0 }), 1);
+  // A list item is not a candidate for a plain-paragraph handle.
+  t.equal(M.pickSection_(scan.sections, scan.elements,
+    { paraKind: 'p', paraHead: 'Item one', preferred: 0 }), 0);
+});
+
+test('no usable handle falls back to the section already showing', (t) => {
+  const M = makeSandbox(SEC);
+  const scan = M.sectionsScan_(M.resolveTab_(M.fetchDoc_(), 't.0'));
+  t.equal(M.pickSection_(scan.sections, scan.elements, {}), 0);
+  t.equal(M.pickSection_(scan.sections, scan.elements,
+    { preferred: 2 }), 2);
+  t.equal(M.pickSection_([], [], {}), -1);
+});
+
+test('refresh("sections") serves just the current slice', (t) => {
+  const M = makeSandbox(SEC);
+  const out = M.refresh('t.0', 'sections',
+    { paraKind: 'p', paraHead: 'Shared heading', preferred: 0 });
+  t.deepEqual(Object.keys(out).sort(),
+    ['activeSectionIndex', 'sectionCount', 'sections']);
+  t.equal(out.sectionCount, 3);
+  t.equal(out.activeSectionIndex, 1);
+  t.equal(out.sections.length, 1);
+  t.equal(out.sections[0].startIndex, 17);
+});
+
+test('a write goes to exactly the section it names', (t) => {
+  const M = makeSandbox(SEC);
+  M.__reset();
+  M.writeSection({ tabId: 't.0', startIndex: 17, marginTopPt: 20 });
+  const reqs = allRequests(M);
+  t.equal(reqs.length, 1);
+  t.equal(reqs[0].updateSectionStyle.range.startIndex, 17);
+  t.equal(reqs[0].updateSectionStyle.range.endIndex, 17);
+});
+
+test('"apply to all" writes every section in one batch', (t) => {
+  const M = makeSandbox(SEC);
+  M.__reset();
+  M.writeSection({ tabId: 't.0', startIndex: 17, marginTopPt: 20, applyAll: true });
+  const reqs = allRequests(M);
+  t.equal(reqs.length, 3, 'one request per section');
+  t.deepEqual(reqs.map((r) => r.updateSectionStyle.range.startIndex), [0, 17, 32]);
+  t.ok(reqs.every((r) => r.updateSectionStyle.sectionStyle.marginTop.magnitude === 20));
+  t.ok(reqs.every((r) => r.updateSectionStyle.fields === 'marginTop'));
+});
+
+test('unify copies the shown section\'s layout onto all the others', (t) => {
+  const M = makeSandbox(SEC);
+  M.__reset();
+  M.unifySections({ tabId: 't.0', fromStartIndex: 17 });
+  const reqs = allRequests(M);
+  t.equal(reqs.length, 2, 'every section but the source');
+  t.deepEqual(reqs.map((r) => r.updateSectionStyle.range.startIndex), [0, 32]);
+  reqs.forEach((r) => {
+    t.equal(r.updateSectionStyle.sectionStyle.marginTop.magnitude, 90,
+      'the source section\'s margin travels');
+    t.equal(r.updateSectionStyle.sectionStyle.marginTop.unit, 'PT');
+  });
+});
+
+test('nothing to unify when there is only one section', (t) => {
+  const M = makeSandbox(makeDoc());
+  M.__reset();
+  const res = M.unifySections({ tabId: 't.0', fromStartIndex: 0 });
+  t.equal(res.applied, 0);
+  t.equal(allRequests(M).length, 0);
+});
+
+test('the fixture still holds the twin paragraphs the tests above lean on', (t) => {
+  t.equal(secContent.filter((e) => e.paragraph &&
+        e.paragraph.elements[0].textRun &&
+        e.paragraph.elements[0].textRun.content === '').length, 2,
+    'two empty paragraphs for the twin tests');
 });
 
 
@@ -1241,11 +1356,13 @@ suite('The cursor probe that gates content reads');
 /** A fake element chain, shaped like DocumentApp's object model. */
 function chainOf(...types) {
   // innermost first; each wraps the next
+  const TEXT_OF = { LIST_ITEM: 'Item one', PARAGRAPH: 'Body text', TABLE_CELL: 'Cell text' };
   return types.reduce((child, type) => {
     if (type === 'LIST_ITEM') {
-      return { getType: () => type, getParent: () => child, getListId: () => 'list.X' };
+      return { getType: () => type, getParent: () => child, getListId: () => 'list.X',
+               getText: () => TEXT_OF[type] };
     }
-    return { getType: () => type, getParent: () => child };
+    return { getType: () => type, getParent: () => child, getText: () => TEXT_OF[type] || '' };
   }, null);
 }
 /** What DocumentApp hands back from getSelection(): null, or range elements. */
@@ -1253,10 +1370,11 @@ function selectionOf(el) {
   return el ? { getRangeElements: () => [{ getElement: () => el }] } : null;
 }
 
-test('the cursor in a list names that list', (t) => {
+test('the cursor in a list names that list, and the paragraph it sits in', (t) => {
   const M = makeSandbox(makeDoc());
   M.__selection = selectionOf(chainOf('LIST_ITEM', 'BODY_SECTION'));
-  t.deepEqual(M.cursorContext(), { listId: 'list.X' });
+  t.deepEqual(M.cursorContext(),
+    { listId: 'list.X', paraKind: 'li', paraHead: 'Item one' });
 });
 
 test('the cursor in a table reports presence -- tables have no id here', (t) => {
@@ -1265,26 +1383,38 @@ test('the cursor in a table reports presence -- tables have no id here', (t) => 
   t.deepEqual(M.cursorContext(), { inTable: true });
 });
 
+test('a paragraph inside a table cell is reported along with the table', (t) => {
+  // The climb records the first paragraph-shaped element on the way up and
+  // keeps going, so a cell paragraph still ends up reporting the table.
+  const M = makeSandbox(makeDoc());
+  M.__selection = selectionOf(
+    chainOf('BODY_SECTION', 'TABLE', 'TABLE_ROW', 'TABLE_CELL', 'PARAGRAPH'));
+  t.deepEqual(M.cursorContext(),
+    { paraKind: 'p', paraHead: 'Body text', inTable: true });
+});
+
 test('the probe climbs through a partial selection to the thing that holds it', (t) => {
   // A character-level selection hands back a Text element; identity belongs
   // to the paragraph above it.
   const textEl = { getType: () => 'TEXT', getParent: () => chainOf('LIST_ITEM') };
   const M = makeSandbox(makeDoc());
   M.__selection = selectionOf(textEl);
-  t.deepEqual(M.cursorContext(), { listId: 'list.X' });
+  t.deepEqual(M.cursorContext(),
+    { listId: 'list.X', paraKind: 'li', paraHead: 'Item one' });
 });
 
 test('with no selection, the bare cursor decides', (t) => {
   const M = makeSandbox(makeDoc());
   M.__selection = null;
   M.__cursor = { getElement: () => chainOf('LIST_ITEM') };
-  t.deepEqual(M.cursorContext(), { listId: 'list.X' });
+  t.deepEqual(M.cursorContext(),
+    { listId: 'list.X', paraKind: 'li', paraHead: 'Item one' });
 });
 
-test('plain paragraphs and empty selections give an empty context', (t) => {
+test('plain paragraphs report their text; no selection at all reports nothing', (t) => {
   const M = makeSandbox(makeDoc());
   M.__selection = selectionOf(chainOf('PARAGRAPH', 'BODY_SECTION'));
-  t.deepEqual(M.cursorContext(), {});
+  t.deepEqual(M.cursorContext(), { paraKind: 'p', paraHead: 'Body text' });
   M.__selection = selectionOf(null);
   t.deepEqual(M.cursorContext(), {}, 'no selection at all');
 });

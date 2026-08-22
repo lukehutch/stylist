@@ -121,6 +121,11 @@ function deletePreset(payload) {
   return { remaining: Object.keys(store).length };
 }
 
+/** payload: { from, to } */
+function renamePreset(payload) {
+  return renameInStore_(PRESET_STORE_KEY, payload);
+}
+
 /* ---------------- Individual style presets ---------------- */
 
 /**
@@ -206,6 +211,31 @@ function deleteStylePreset(payload) {
   delete store[(payload || {}).name];
   writeStore_(STYLE_PRESET_STORE_KEY, store);
   return { remaining: Object.keys(store).length };
+}
+
+/** payload: { from, to } */
+function renameStylePreset(payload) {
+  return renameInStore_(STYLE_PRESET_STORE_KEY, payload);
+}
+
+/**
+ * A rename is a re-key: the value under `from` moves to `to`. Renaming to the
+ * name it already has is a no-op, not a collision; renaming onto an occupied
+ * name is refused rather than silently replacing the other style.
+ */
+function renameInStore_(key, payload) {
+  payload = payload || {};
+  var from = String(payload.from || '');
+  var to = String(payload.to || '').trim();
+  if (!from) throw new Error('Nothing to rename.');
+  if (!to) throw new Error('Give it a name.');
+  var store = readStore_(key);
+  if (!store[from]) throw new Error('No preset named "' + from + '".');
+  if (to !== from && store[to]) throw new Error('A preset named "' + to + '" already exists.');
+  store[to] = store[from];
+  delete store[from];
+  writeStore_(key, store);
+  return { renamed: to };
 }
 
 /**

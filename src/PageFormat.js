@@ -144,9 +144,16 @@ function writePageFormat(payload) {
  * section of a tab is described by the body's leading sectionBreak.
  */
 function readSections(tabId) {
-  var doc = fetchDoc_();
-  var ctx = resolveTab_(doc, tabId);
-  var elements = ((ctx.content.body || {}).content) || [];
+  var r = resolveTab_(fetchDoc_(), tabId);
+  var scan = sectionsScan_(r);
+  return { tabId: r.tabId, sections: scan.sections };
+}
+
+/** The section breaks of one tab, plus the body elements the cursor probe
+ *  is matched against. One walk serves both the full list and the
+ *  find-the-current-section read. */
+function sectionsScan_(tabCtx) {
+  var elements = ((tabCtx.content.body || {}).content) || [];
   var sections = [];
   elements.forEach(function (el, i) {
     if (!el.sectionBreak) return;
@@ -174,7 +181,75 @@ function readSections(tabId) {
       columns: cols
     });
   });
-  return { tabId: ctx.tabId, sections: sections };
+  return { sections: sections, elements: elements };
+}
+
+/**
+ * Which section the cursor is in, by matching the paragraph text the probe
+ * reported against the body's paragraphs.
+ *
+ * DocumentApp cannot see section breaks, so there is no direct way to ask
+ * which one holds the cursor. The probe hands over the first 80 characters of
+ * the paragraph it is in (and whether it is a list item); the body is scanned
+ * for paragraphs with that same leading text and the section of the match is
+ * the answer. Two paragraphs can share a prefix -- two empties always do --
+ * so ties go to the section the panel was already showing, which is also the
+ * fallback when nothing matches: while you type in one section the panel
+ * should not jump to another just because a twin paragraph exists elsewhere.
+ */
+function pickSection_(secs, elements, ctx) {
+  if (!secs.length) return -1;
+  var preferred = Math.min(Math.max(ctx.preferred || 0, 0), secs.length - 1);
+  var want = ctx.paraHead;
+  if (want === undefined || want === null) return preferred;
+
+  var starts = secs.map(function (s) { return s.startIndex; });
+  function sectionOf(at) {
+    var hit = 0;
+    for (var i = 0; i < starts.length; i++) if (starts[i] <= at) hit = i;
+    return hit;
+  }
+  /** Paragraph text as the API stores it: its runs, concatenated. */
+  function paraText(p) {
+    return ((p || {}).elements || []).map(function (e) {
+      if (e.textRun) return e.textRun.content || '';
+      if (e.autoText) return ' ';
+      return '';
+    }).join('');
+  }
+
+  var wantLi = ctx.paraKind === 'li';
+  var hits = [];
+  function visit(els) {
+    (els || []).forEach(function (e) {
+      if (e.paragraph) {
+        if (!!e.paragraph.bullet === wantLi) {
+          var t = paraText(e.paragraph);
+          // An empty head can only stand for an empty paragraph; anything
+          // else matches by its prefix.
+          if (want === '' ? t === '' : t.slice(0, want.length) === want) {
+            if (e.startIndex !== undefined) hits.push(sectionOf(e.startIndex));
+          }
+        }
+        return;
+      }
+      if (e.table) {
+        (e.table.tableRows || []).forEach(function (r) {
+          (r.tableCells || []).forEach(function (c) { visit(c.content); });
+        });
+      }
+    });
+  }
+  visit(elements);
+
+  if (!hits.length) return preferred;
+  // Nearest match wins, so a paragraph whose twin sits in the section the
+  // panel already shows keeps the panel where it is -- and when the section
+  // the panel shows is itself a match, its distance is zero and nothing
+  // displaces it. That is the whole of the stickiness.
+  return hits.reduce(function (best, h) {
+    return Math.abs(h - preferred) < Math.abs(best - preferred) ? h : best;
+  }, hits[0]);
 }
 
 function writeSection(payload) {
@@ -206,7 +281,63 @@ function writeSection(payload) {
 
   // The range must overlap the section; a zero-width range at the section
   // break's own start index selects exactly that section.
-  var range = { startIndex: payload.startIndex, endIndex: payload.startIndex };
-  if (payload.tabId) range.tabId = payload.tabId;
-  return batchUpdate_([{ updateSectionStyle: { sectionStyle: style, range: range, fields: fields.join(',') } }]);
+  function request(startIndex) {
+    var range = { startIndex: startIndex, endIndex: startIndex };
+    if (payload.tabId) range.tabId = payload.tabId;
+    return { updateSectionStyle: { sectionStyle: style, range: range, fields: fields.join(',') } };
+  }
+  if (!payload.applyAll) return batchUpdate_([request(payload.startIndex)]);
+
+  // "Apply to all sections": one request per section, all in the one
+  // batchUpdate, so the document goes from uneven to even in a single step.
+  var secs = sectionsScan_(resolveTab_(fetchDoc_(), payload.tabId)).sections;
+  return batchUpdate_(secs.map(function (s) { return request(s.startIndex); }));
+}
+
+/**
+ * Bring every section into line with the one the panel is showing, which is
+ * what ticking "Apply to all sections" promises. Only the sections that
+ * actually differ get a request.
+ */
+function unifySections(payload) {
+  payload = payload || {};
+  var secs = sectionsScan_(resolveTab_(fetchDoc_(), payload.tabId)).sections;
+  var src = secs.filter(function (s) { return s.startIndex === payload.fromStartIndex; })[0] || secs[0];
+  if (!src || secs.length < 2) return { applied: 0 };
+
+  var style = {};
+  var fields = [];
+  [['marginTopPt', 'marginTop'], ['marginBottomPt', 'marginBottom'],
+   ['marginLeftPt', 'marginLeft'], ['marginRightPt', 'marginRight'],
+   ['marginHeaderPt', 'marginHeader'], ['marginFooterPt', 'marginFooter']]
+    .forEach(function (p) {
+      if (src[p[0]] !== null && src[p[0]] !== undefined) {
+        style[p[1]] = ptDim_(src[p[0]]);
+        fields.push(p[1]);
+      }
+    });
+  if (src.contentDirection) { style.contentDirection = src.contentDirection; fields.push('contentDirection'); }
+  if (src.columnSeparatorStyle) { style.columnSeparatorStyle = src.columnSeparatorStyle; fields.push('columnSeparatorStyle'); }
+  if (src.pageNumberStart !== null && src.pageNumberStart !== undefined) {
+    style.pageNumberStart = src.pageNumberStart; fields.push('pageNumberStart');
+  }
+  if (src.flipPageOrientation) { style.flipPageOrientation = true; fields.push('flipPageOrientation'); }
+  if (src.useFirstPageHeaderFooter) { style.useFirstPageHeaderFooter = true; fields.push('useFirstPageHeaderFooter'); }
+  if (src.columns && src.columns.length) {
+    style.columnProperties = src.columns.map(function (c) {
+      var out = {};
+      if (c.widthPt) out.width = ptDim_(c.widthPt);
+      if (c.paddingEndPt !== undefined && c.paddingEndPt !== null) out.paddingEnd = ptDim_(c.paddingEndPt);
+      return out;
+    });
+    fields.push('columnProperties');
+  }
+  if (!fields.length) return { applied: 0 };
+
+  var requests = secs.filter(function (s) { return s !== src; }).map(function (s) {
+    var range = { startIndex: s.startIndex, endIndex: s.startIndex };
+    if (payload.tabId) range.tabId = payload.tabId;
+    return { updateSectionStyle: { sectionStyle: style, range: range, fields: fields.join(',') } };
+  });
+  return requests.length ? batchUpdate_(requests) : { applied: 0 };
 }

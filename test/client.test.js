@@ -50,8 +50,8 @@ module.exports = ({ suite, test }) => {
   }
 
   // Panel and tab ids are built by string concatenation at runtime, so the
-  // scan above cannot see them. Check the six names explicitly.
-  ['page', 'styles', 'lists', 'notes', 'tables', 'presets'].forEach((n) => {
+  // scan above cannot see them. Check the seven names explicitly.
+  ['page', 'styles', 'lists', 'tables', 'sections', 'notes', 'presets'].forEach((n) => {
     ['panel-' + n, 'tab-' + n].forEach((id) => {
       test('#' + id + ' exists in the template', (t) => {
         t.match(sidebar, new RegExp('id="' + id + '"'));
@@ -292,7 +292,7 @@ module.exports = ({ suite, test }) => {
     // Every panel is an empty div the client fills in, so being after the
     // last of them is enough to be outside all of them.
     const panels = sidebar.match(/<div id="panel-[^"]*"[^>]*>[^]*?<\/div>/g) || [];
-    t.equal(panels.length, 6);
+    t.equal(panels.length, 7);
     panels.forEach(p => t.notOk(/id="tipItem"/.test(p), 'not nested in ' + p.slice(0, 24)));
   });
 
@@ -402,6 +402,36 @@ module.exports = ({ suite, test }) => {
     t.equal(delay(4000), 5000, 'a read that takes four seconds still waits only five');
   });
 
+  test('the context panels run on their own fast clock', (t) => {
+    const delay = evalFromClient(
+      ['POLL_MIN_MS', 'POLL_MAX_MS', 'POLL_DUTY', 'CONTEXT_TICK_MS',
+       'lastFetchMs', 'probeWaitUntil', 'activePanel', 'PANEL_SYNC',
+       'nextPollDelay', 'tickDelay'],
+      'return function (panel, backedOff) { activePanel = panel;' +
+      ' probeWaitUntil = backedOff ? Date.now() + 60000 : 0;' +
+      ' lastFetchMs = 4000; return tickDelay(); };');
+
+    t.ok(delay('lists', false) <= 150,
+      'clicking into a list is noticed in about a tenth of a second, got ' +
+      delay('lists', false) + 'ms');
+    t.equal(delay('sections', false), delay('lists', false),
+      'every cursor-scoped panel ticks at the same rate');
+    t.equal(delay('lists', true), 1000,
+      'a failed probe backs off to the slow floor rather than hammering at the fast tick');
+    t.equal(delay('page', false), 5000, 'a meta panel still waits out its read cost');
+    t.equal(delay('presets', false), 5000, 'and a static panel inherits that too');
+  });
+
+  test('the probe reads no content until its answer changes', (t) => {
+    const fn = /function poll\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /if \(probing\) return Promise\.resolve\(\);/,
+      'one probe in flight at a time: two answers could land out of order');
+    t.match(fn, /callRead\('cursorContext'\)/);
+    t.match(fn, /if \(now === lastCtx\) return null;/);
+    t.ok(fn.indexOf("JSON.stringify(ctx || {})") < fn.indexOf("callRead('refresh'"),
+      'the content read only follows a changed answer');
+  });
+
   test('a checkbox is dirty on its checked state, a text box on its text', (t) => {
     const shown = evalFromClient(['shownValue'], 'return shownValue;');
     t.equal(shown({ type: 'checkbox', checked: true, value: 'on' }), true);
@@ -439,7 +469,7 @@ module.exports = ({ suite, test }) => {
   suite('Stopping when the sidebar is not there');
 
   test('every way back into the loop goes through one flag', (t) => {
-    t.match(clientJs, /function schedule\(\) \{ if \(polling\) scheduleNext\(nextPollDelay\(\)\); \}/);
+    t.match(clientJs, /function schedule\(\) \{ if \(polling\) scheduleNext\(tickDelay\(\)\); \}/);
     t.match(clientJs, /function tick\(\) \{ poll\(\)\.then\(schedule\); \}/,
       'a fired timer still lands on schedule, which then does nothing');
   });
@@ -568,11 +598,38 @@ module.exports = ({ suite, test }) => {
       'the empty case must fall through to the button');
   });
 
-  test('an unnamed style is refused and a clash is confirmed first', (t) => {
+  test('a new custom style names itself, and the name is edited in place', (t) => {
     const fn = /function renderCustomStyles\(host\)[^]*?\n}/.exec(clientJs)[0];
-    t.match(fn, /if \(name === null\) return;/, 'cancelling the prompt does nothing');
-    t.match(fn, /if \(!name\) \{ status\('Give the style a name\.', 'err'\); return; \}/);
-    t.match(fn, /already exists\. Replace it\?/);
+    t.match(fn, /uniqueName\('Custom style'/,
+      'the count increments until the name is free, so nothing asks');
+    t.match(fn, /S\.open\['cstyle:' \+ name\] = true/,
+      'and the new row starts open, ready to be edited');
+  });
+
+  test('each custom style folds out from a head that carries its controls', (t) => {
+    const fn = /function customStyleRow\(p\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /el\('input', 'name'\)/,
+      'the name is an input on the row itself, not something to prompt for');
+    t.match(fn, /el\('button', 'act iconbtn', '✓'\)/);
+    t.match(fn, /el\('button', 'act danger iconbtn', '×'\)/);
+    t.match(fn, /apply\.title = 'Apply "/, 'the unlabelled buttons carry tooltips');
+    t.match(fn, /del\.title = 'Delete this custom style'/);
+    t.match(fn, /nameIn\.title = 'Rename this custom style'/);
+    t.match(fn, /buildStyleEditor/, 'the folded body holds the editable values');
+    t.match(fn, /applyStylePresetToSelection/, 'apply acts on the selection');
+  });
+
+  test('no dialog ever interrupts -- naming and confirming happen inline', (t) => {
+    t.notOk(/prompt\(/.test(clientJs), 'window.prompt is gone from the client');
+    t.notOk(/confirm\(/.test(clientJs), 'window.confirm is gone too');
+    t.notOk(/\balert\(/.test(clientJs), 'and window.alert with it');
+    const rename = evalFromClient(['uniqueName'],
+      'return uniqueName;');
+    t.equal(rename('Preset', []), 'Preset 1', 'the first taken slot appends a number');
+    t.equal(rename('Preset', ['Preset 1', 'Preset 2']), 'Preset 3',
+      'the count walks past every name already in use');
+    t.equal(rename('Source code copy', ['Source code copy']), 'Source code copy 1',
+      'a base that is itself taken gets the suffix, never silently reused');
   });
 
   test('a new custom style starts as a copy of Normal text', (t) => {
@@ -672,16 +729,20 @@ module.exports = ({ suite, test }) => {
   suite('Apply to all');
 
   test('ticking it settles the document first, then keeps writing to everything', (t) => {
-    t.match(clientJs, /call\(unifyFn, \[\{ tabId: S\.tabId \}\]\)/,
-      'the tick brings them into line');
+    t.match(clientJs, /var args = copy\(unifyArgs \|\| \{\}\);\s*\n\s*args\.tabId = S\.tabId;\s*\n\s*return call\(unifyFn, \[args\]\)/,
+      'the tick brings them into line, carrying whatever identifies the source');
     t.match(clientJs, /S\.all\[kind\] = on;/);
     t.match(clientJs, /patch\.allTables = true;/, 'a table write then covers all of them');
     t.match(clientJs, /allLists: true/, 'and a list write likewise');
+    t.match(clientJs, /patch\.applyAll = !!S\.all\.sections;/,
+      'and a section write covers every section');
   });
 
   test('the switch is only offered when there is more than one thing to unify', (t) => {
     t.match(clientJs, /S\.data\.tables\.length > 1[^]*?applyAllSwitch\('tables'/);
     t.match(clientJs, /lists\.length > 1[^]*?applyAllSwitch\('lists'/);
+    t.match(clientJs,
+      /var total = S\.data\.sectionCount \|\| 0;[^]*?if \(total > 1\) \{[^]*?applyAllSwitch\('sections'/);
   });
 
   test('unticking changes nothing in the document', (t) => {
@@ -767,7 +828,7 @@ module.exports = ({ suite, test }) => {
   });
 
   test('a bar across the top of the tip heading separates it from the add-on', (t) => {
-    t.match(css, /\.tip > \.head \{[^}]*border-top: 3px solid var\(--line\)/);
+    t.match(css, /\.tip > \.head \{[^}]*border-top: 5px solid var\(--line\)/);
   });
 
   test('an opened tip row cannot grow taller than the sidebar', (t) => {
@@ -921,12 +982,33 @@ module.exports = ({ suite, test }) => {
       'the check comes before anything is merged into the state');
   });
 
+  suite('Undo and redo reach the document');
+
+  test('clicking the sidebar never takes the keyboard from the document', (t) => {
+    t.match(clientJs,
+      /document\.addEventListener\('mousedown', function \(e\) \{\s*\n\s*if \(e\.target\.closest && e\.target\.closest\('button, \.item > \.head'\)\) e\.preventDefault\(\);/,
+      'buttons and fold heads are stopped at mousedown, before focus can move');
+  });
+
+  test('a ctrl/cmd Z outside a field is handed back to the document', (t) => {
+    t.match(clientJs,
+      /window\.addEventListener\('keydown', function \(e\) \{[^]*?\(e\.ctrlKey \|\| e\.metaKey\) && !e\.altKey && \(e\.key === 'z' \|\| e\.key === 'Z'\)/);
+    const fn = /window\.addEventListener\('keydown', function \(e\) \{[^]*?\n  \}\);/.exec(clientJs)[0];
+    t.match(fn, /a\.tagName === 'TEXTAREA' \|\| a\.isContentEditable \|\|\s*\n\s*\(a\.tagName === 'INPUT' && a\.type !== 'checkbox'\)/,
+      'typing in a field keeps the browser undo of your typing');
+    t.match(fn, /window\.parent\.focus\(\)/,
+      'focus returns to the frame holding the document, so the next keystroke lands there');
+  });
+
   suite('Sync reads only what the open panel needs');
 
   test('page and styles poll on metadata alone; notes and presets never read', (t) => {
     const map = /var PANEL_SYNC = \{[^}]*\}/.exec(clientJs)[0];
     t.match(map, /page: 'meta'/);
     t.match(map, /styles: 'meta'/);
+    t.match(map, /lists: 'context'/);
+    t.match(map, /tables: 'context'/);
+    t.match(map, /sections: 'context'/, 'the sections panel follows the cursor too');
     t.match(map, /notes: 'static'/);
     t.match(map, /presets: 'static'/);
   });
@@ -938,7 +1020,7 @@ module.exports = ({ suite, test }) => {
       'an unchanged answer reads nothing at all');
     t.ok(fn.indexOf("JSON.stringify(ctx || {})") < fn.indexOf("callRead('refresh'"),
       'and only a changed answer spends the content read');
-    t.match(fn, /callRead\('refresh', \[S\.tabId, what\]\)/,
+    t.match(fn, /callRead\('refresh', \[S\.tabId, what, ctxArg\]\)/,
       'the read is one slice, not the whole loadAll');
     t.notOk(/callRead\('loadAll'/.test(fn), 'no poll ever loads everything again');
   });
@@ -947,7 +1029,7 @@ module.exports = ({ suite, test }) => {
     // Matched as one contiguous source pattern rather than inside a captured
     // span: brace-counting these template-built panels is how a mutant hides.
     t.match(clientJs,
-      /activePanel = name;\s*\n\s*lastCtx = null;\s*\n\s*setTimeout\(poll, 0\);/,
+      /activePanel = name;\s*\n\s*lastCtx = null;\s*\n\s*lastCtxObj = null;\s*\n\s*setTimeout\(poll, 0\);/,
       'the panel is recorded, the old cursor answer discarded, and a read prompted');
   });
 
@@ -1086,5 +1168,22 @@ module.exports = ({ suite, test }) => {
   test('apply-to-all survives the scoping -- it is the whole-document path', (t) => {
     t.match(clientJs, /lists\.length > 1[^]*?applyAllSwitch\('lists'/);
     t.match(clientJs, /S\.data\.tables\.length > 1[^]*?applyAllSwitch\('tables'/);
+  });
+
+  test('the sections panel shows one section -- the one the cursor is in', (t) => {
+    const fn = /function renderSections\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /No section breaks in this tab\./);
+    t.notOk(/secs\.forEach/.test(fn), 'no row per section');
+    t.match(fn, /section ' \+ \(at \+ 1\) \+ ' of '/,
+      'it says which of the sections is being edited');
+    t.match(fn, /sectionBody\(secs\[0\]\)/,
+      'the slice already holds only the current section');
+    t.match(fn, /S\.all\.sections && total > 1[^]*?sectionBody\(secs\[0\]\)/,
+      'apply-to-all swaps the cursor scope for every-section-at-once');
+  });
+
+  test('the sections editor moved off the page panel entirely', (t) => {
+    const fn = /function renderPage\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.notOk(/ection/.test(fn), 'nothing section-shaped is left in renderPage');
   });
 };
