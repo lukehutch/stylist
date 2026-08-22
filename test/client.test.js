@@ -193,6 +193,17 @@ module.exports = ({ suite, test }) => {
     t.match(css, /html \{ overflow-y: scroll; \}/);
   });
 
+  suite('Staying in step with the document');
+
+  test('a field the user has left behind does not count as editing', (t) => {
+    // activeElement outlives the focus, so hasFocus decides.
+    t.match(clientJs, /function editingNow\(\)[^]*?document\.hasFocus\(\)/);
+  });
+
+  test('returning to the sidebar re-reads the document at once', (t) => {
+    t.match(clientJs, /window\.addEventListener\('focus', function \(\) \{ setTimeout\(poll, 0\); \}\)/);
+  });
+
   suite('Grouped controls');
 
   test('a group is a fieldset with its heading in the top edge', (t) => {

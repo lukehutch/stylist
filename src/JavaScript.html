@@ -1276,6 +1276,12 @@ var POLL_MS = 5000;
 var pendingRefresh = false;
 
 function editingNow() {
+  // hasFocus() first, and it is the whole point of this check. activeElement
+  // keeps naming the last field the user was in long after they have clicked
+  // away into the document itself, so without this the sidebar decides you are
+  // still typing, holds every refresh, and waits for a focusout that already
+  // happened. That is what made a newly inserted table take minutes to appear.
+  if (!document.hasFocus()) return false;
   var a = document.activeElement;
   if (!a) return false;
   var tag = (a.tagName || '').toLowerCase();
@@ -1343,6 +1349,12 @@ function boot() {
   document.addEventListener('focusout', function () {
     if (pendingRefresh) setTimeout(poll, 0);
   });
+
+  // Coming back to the sidebar after working in the document is the moment the
+  // user most wants it to be current, and it is the closest thing to an edit
+  // event this add-on can get: Docs offers no cursor or typing trigger, and a
+  // server-side trigger could not reach an open sidebar anyway.
+  window.addEventListener('focus', function () { setTimeout(poll, 0); });
 
   status('Loading document…', '');
   reload().then(function (data) {
