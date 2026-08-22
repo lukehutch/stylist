@@ -9,12 +9,14 @@
  */
 const assert = require('assert');
 const { makeSandbox, allRequests } = require('./harness');
-const { makeDoc, makeLegacyDoc } = require('./fixture');
+const { makeDoc, makeLegacyDoc, makeMultiDoc } = require('./fixture');
 
 module.exports = ({ suite, test }) => {
 
 const S = makeSandbox(makeDoc());
 const L = makeSandbox(makeLegacyDoc());
+/** Three lists and two tables; rebuilt per test, since these tests write. */
+const multi = () => makeSandbox(makeMultiDoc());
 
 /* ------------------------------------------------------------------ */
 suite('Unit conversion');
@@ -372,6 +374,78 @@ test('a level with no items reports rather than issuing a request', (t) => {
   t.ok(res.warnings.some(w => /No list items/.test(w)));
 });
 
+test('a list whose paragraphs are all gone is not offered', (t) => {
+  // No Docs request deletes a list definition, so an emptied list stays in
+  // document.lists for ever. It has nothing to style, so it is not listed.
+  const doc = makeDoc();
+  doc.tabs[0].documentTab.lists['list.dead'] = { listProperties: { nestingLevels: [{}] } };
+  const lists = makeSandbox(doc).readLists('t.0').lists;
+  t.equal(lists.length, 1);
+  t.equal(lists[0].listId, 'list.1');
+});
+
+test('numbering is told apart from bullets by its glyph type', (t) => {
+  const kinds = {};
+  multi().readLists('t.0').lists.forEach((l) => { kinds[l.listId] = l.kind; });
+  t.deepEqual(kinds, { 'list.1': 'bulleted', 'list.2': 'bulleted', 'list.3': 'numbered' });
+});
+
+test('lists come back in body order, which is what the cursor is matched on', (t) => {
+  const ids = multi().readLists('t.0').lists.map((l) => l.listId);
+  t.deepEqual(ids, ['list.1', 'list.2', 'list.3']);
+});
+
+test('applying a preset to all lists covers every one of them', (t) => {
+  const M = multi();
+  M.applyBulletPreset({ tabId: 't.0', allLists: true, bulletPreset: 'BULLET_CHECKBOX' });
+  const ranges = allRequests(M).map((r) => r.createParagraphBullets.range.startIndex);
+  t.deepEqual(ranges.sort((a, b) => a - b), [30, 200, 220]);
+});
+
+test('removing markers from all lists covers every one of them', (t) => {
+  const M = multi();
+  M.removeBullets({ tabId: 't.0', allLists: true });
+  t.equal(allRequests(M).filter((r) => r.deleteParagraphBullets).length, 3);
+});
+
+test('styling a level across all lists reaches that level in each', (t) => {
+  const M = multi();
+  M.writeListLevelStyle({ tabId: 't.0', allLists: true, level: 1, textStyle: { italic: true } });
+  const starts = allRequests(M).map((r) => r.updateTextStyle.range.startIndex);
+  t.deepEqual(starts.sort((a, b) => a - b), [40, 210]);
+});
+
+test('unifying lists settles each field by majority, not by the first list', (t) => {
+  // Two of the three lists indent level one by 36pt and centre it; the first
+  // indents by 90pt and does not centre. The majority is what everything ends
+  // up with -- deliberately not what the first list does.
+  const M = multi();
+  M.unifyLists({ tabId: 't.0' });
+  const lvl0 = allRequests(M)
+    .filter((r) => r.updateParagraphStyle && r.updateParagraphStyle.range.startIndex !== 40 &&
+                   r.updateParagraphStyle.range.startIndex !== 210)
+    .map((r) => r.updateParagraphStyle);
+  t.equal(lvl0.length, 3, 'every list gets its first level written');
+  lvl0.forEach((r) => {
+    t.equal(r.paragraphStyle.alignment, 'CENTER');
+    t.equal(r.paragraphStyle.indentStart.magnitude, 36);
+  });
+});
+
+test('unifying lists leaves the markers alone', (t) => {
+  // A majority vote across bulleted and numbered lists would turn the
+  // numbering of the minority into bullets.
+  const M = multi();
+  M.unifyLists({ tabId: 't.0' });
+  t.notOk(allRequests(M).some((r) => r.createParagraphBullets || r.deleteParagraphBullets));
+});
+
+test('unifying is a no-op when there is nothing to agree with', (t) => {
+  S.__reset();
+  t.equal(S.unifyLists({ tabId: 't.0' }).applied, 0);
+  t.equal(allRequests(S).length, 0);
+});
+
 /* ------------------------------------------------------------------ */
 suite('Tables');
 
@@ -381,6 +455,40 @@ test('tables are found with their geometry and header row', (t) => {
   t.equal(tbl.columns, 3);
   t.equal(tbl.headerRow, true);
   t.equal(tbl.startIndex, 70);
+});
+
+test('writing to all tables reaches every table from one read', (t) => {
+  const M = multi();
+  M.writeTableFormat({ tabId: 't.0', allTables: true, cell: { paddingTopPt: 5 }, applyCellsTo: 'all' });
+  const at = allRequests(M).map((r) => r.updateTableCellStyle.tableStartLocation.index);
+  t.deepEqual(at.sort((a, b) => a - b), [70, 300]);
+});
+
+test('unifying tables writes the settled values to every table', (t) => {
+  const M = multi();
+  t.equal(M.unifyTables({ tabId: 't.0' }).applied > 0, true);
+  const pads = allRequests(M).filter((r) => r.updateTableCellStyle);
+  t.equal(pads.length, 2);
+  pads.forEach((r) => t.equal(r.updateTableCellStyle.tableCellStyle.paddingTop.magnitude, 9));
+});
+
+test('a settled column width is dropped unless the sizing is fixed', (t) => {
+  // The two votes are taken separately, so they can disagree: one table is
+  // evenly distributed with no width, the other fixed at 100pt. Sending
+  // EVENLY_DISTRIBUTED together with a width is a contradiction.
+  const M = multi();
+  M.unifyTables({ tabId: 't.0' });
+  allRequests(M).filter((r) => r.updateTableColumnProperties).forEach((r) => {
+    const p = r.updateTableColumnProperties.tableColumnProperties;
+    t.equal(p.widthType, 'EVENLY_DISTRIBUTED');
+    t.equal(p.width, undefined, 'no width alongside EVENLY_DISTRIBUTED');
+  });
+});
+
+test('unifying tables is a no-op with only one table', (t) => {
+  S.__reset();
+  t.equal(S.unifyTables({ tabId: 't.0' }).applied, 0);
+  t.equal(allRequests(S).length, 0);
 });
 
 /* A body whose children are the given types, with a working getChildIndex. */

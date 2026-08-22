@@ -51,7 +51,7 @@ module.exports = ({ suite, test }) => {
 
   // Panel and tab ids are built by string concatenation at runtime, so the
   // scan above cannot see them. Check the six names explicitly.
-  ['page', 'styles', 'bullets', 'notes', 'tables', 'presets'].forEach((n) => {
+  ['page', 'styles', 'lists', 'notes', 'tables', 'presets'].forEach((n) => {
     ['panel-' + n, 'tab-' + n].forEach((id) => {
       test('#' + id + ' exists in the template', (t) => {
         t.match(sidebar, new RegExp('id="' + id + '"'));
@@ -583,6 +583,101 @@ module.exports = ({ suite, test }) => {
     t.deepEqual(picked.textStyle, { bold: true }, 'it falls back to the first style listed');
   });
 
+  suite('The list marker picker');
+
+  /* markerPicker built for real against a stand-in DOM, so what is asserted
+     here is what the panel would draw. */
+  const buildPicker = (list, presets) => evalFromClient(
+    ['markerPicker', 'glyphExample', 'GLYPH_SAMPLES', 'listTarget'],
+    'var made = [];\n' +
+    'var el = function (tag, cls, text) {\n' +
+    '  var n = { tag: tag, cls: cls || "", text: text || "", kids: [], title: "",\n' +
+    '            classList: { add: function (c) { n.cls += " " + c; },\n' +
+    '                         contains: function (c) { return n.cls.split(" ").indexOf(c) >= 0; } },\n' +
+    '            appendChild: function (k) { n.kids.push(k); return k; },\n' +
+    '            addEventListener: function (_, f) { n.click = f; } };\n' +
+    '  made.push(n); return n;\n' +
+    '};\n' +
+    'var calls = [];\n' +
+    'var call = function (fn, args) { calls.push([fn, args[0]]); return { then: function () {} }; };\n' +
+    'var reload = function () {};\n' +
+    'var S = { tabId: "t.0", data: { constants: { bulletPresets: ' + JSON.stringify(presets) + ' } } };\n' +
+    'var root = markerPicker(' + JSON.stringify(list) + ');\n' +
+    'return { made: made, calls: calls, root: root };');
+
+  const PRESETS = [
+    { id: 'BULLET_DISC_CIRCLE_SQUARE', numbered: false, glyphs: ['\u25cf', '\u25cb', '\u25a0'] },
+    { id: 'BULLET_CHECKBOX', numbered: false, glyphs: ['\u2751', '\u2751', '\u2751'] },
+    { id: 'NUMBERED_DECIMAL_ALPHA_ROMAN', numbered: true, glyphs: ['1.', 'a.', 'i.'] }
+  ];
+  const glyphButtons = (r) => r.made.filter((n) => /\bglyph\b/.test(n.cls));
+
+  test('a marker is offered as the character it is, not as the name of an enum', (t) => {
+    const r = buildPicker({ listId: 'list.1', levels: [{}] }, PRESETS);
+    t.deepEqual(glyphButtons(r).map((n) => n.text), ['\u25cf', '\u2751', '1.']);
+    t.notOk(/BULLET_|NUMBERED_/.test(r.made.map((n) => n.text).join(' ')),
+      'no API enum reaches the button faces');
+  });
+
+  test('bullets and numbering are separated, each under its own heading', (t) => {
+    const r = buildPicker({ listId: 'list.1', levels: [{}] }, PRESETS);
+    t.deepEqual(r.made.filter((n) => n.tag === 'h2').map((n) => n.text), ['Bullets', 'Numbering']);
+  });
+
+  test("the list's current marker is the one marked", (t) => {
+    const r = buildPicker(
+      { listId: 'list.1', levels: [{ glyphSymbol: '\u2751', glyphFormat: '%0' }] }, PRESETS);
+    const on = glyphButtons(r).filter((n) => n.classList.contains('on'));
+    t.equal(on.length, 1);
+    t.equal(on[0].text, '\u2751');
+  });
+
+  test('nothing is marked when the marker is one Docs itself set', (t) => {
+    // Format > Bullets & numbering > More bullets can put any character
+    // there, and no preset produces it.
+    const r = buildPicker(
+      { listId: 'list.1', levels: [{ glyphSymbol: '\u2600', glyphFormat: '%0' }] }, PRESETS);
+    t.equal(glyphButtons(r).filter((n) => n.classList.contains('on')).length, 0);
+  });
+
+  test('the deeper levels of a preset are shown on hover, not lost', (t) => {
+    const r = buildPicker({ listId: 'list.1', levels: [{}] }, PRESETS);
+    t.match(glyphButtons(r)[0].title, /\u25cf.*\u25cb.*\u25a0/);
+  });
+
+  test('clicking a marker applies that preset to that one list', (t) => {
+    const r = buildPicker({ listId: 'list.7', levels: [{}] }, PRESETS);
+    glyphButtons(r)[1].click();
+    t.deepEqual(r.calls, [['applyBulletPreset',
+      { tabId: 't.0', listId: 'list.7', bulletPreset: 'BULLET_CHECKBOX' }]]);
+  });
+
+  test('with no list in hand the same click goes to every list', (t) => {
+    const r = buildPicker(null, PRESETS);
+    glyphButtons(r)[2].click();
+    t.deepEqual(r.calls, [['applyBulletPreset',
+      { tabId: 't.0', allLists: true, bulletPreset: 'NUMBERED_DECIMAL_ALPHA_ROMAN' }]]);
+  });
+
+  suite('Apply to all');
+
+  test('ticking it settles the document first, then keeps writing to everything', (t) => {
+    t.match(clientJs, /call\(unifyFn, \[\{ tabId: S\.tabId \}\]\)/,
+      'the tick brings them into line');
+    t.match(clientJs, /S\.all\[kind\] = on;/);
+    t.match(clientJs, /patch\.allTables = true;/, 'a table write then covers all of them');
+    t.match(clientJs, /allLists: true/, 'and a list write likewise');
+  });
+
+  test('the switch is only offered when there is more than one thing to unify', (t) => {
+    t.match(clientJs, /S\.data\.tables\.length > 1[^]*?applyAllSwitch\('tables'/);
+    t.match(clientJs, /lists\.length > 1[^]*?applyAllSwitch\('lists'/);
+  });
+
+  test('unticking changes nothing in the document', (t) => {
+    t.match(clientJs, /if \(!on\) \{ renderAll\(\); return; \}/);
+  });
+
   suite('The status line');
 
   /* status() is run for real against a stand-in element, so these are its
@@ -602,7 +697,7 @@ module.exports = ({ suite, test }) => {
     // Every remaining call is an error, a "working on it", or the clear that
     // takes one of those away again.
     const calls = clientJs.match(/status\((?!msg)[^;]*\);/g) || [];
-    const allowed = /'err'\)|status\('', ''\)|Loading|Converting/;
+    const allowed = /'err'\)|status\('', ''\)|Loading|Converting|Bringing/;
     calls.forEach((c) => t.match(c, allowed, c.trim()));
     t.ok(calls.length > 4, 'the errors are still reported');
     t.notOk(/status\([^;]*✓/.test(clientJs), 'no tick-mark confirmations survive');
@@ -683,7 +778,7 @@ module.exports = ({ suite, test }) => {
   });
 
   test('the heading names the add-on, not the document', (t) => {
-    t.match(sidebar, /<span>Stylist: configure styles<\/span>/);
+    t.match(sidebar, /<span>Configure Styles<\/span>/);
     t.notOk(/docTitle/.test(sidebar + clientJs), 'nothing writes the document name there');
     t.notOk(/data\.documentTitle/.test(clientJs), 'the client no longer reads it');
   });

@@ -17,23 +17,39 @@
  * spacing of each nesting level can still be tuned precisely.
  */
 
+/**
+ * Every list marker the API can produce, as the characters it produces.
+ *
+ * `glyphs` is the marker at each of the first three nesting levels, so the
+ * picker can offer a character to choose rather than the name of an enum. The
+ * characters are Docs' own renderings of the preset names -- DISC is a filled
+ * circle, ARROW3D is a shaded arrowhead, and so on. The document is the final
+ * authority: whatever is applied is read back from `glyphSymbol` and shown.
+ */
 var BULLET_PRESETS = [
-  { id: 'BULLET_DISC_CIRCLE_SQUARE',          label: 'Disc / circle / square' },
-  { id: 'BULLET_DIAMONDX_ARROW3D_SQUARE',     label: 'Diamond-x / arrow / square' },
-  { id: 'BULLET_CHECKBOX',                    label: 'Checkbox' },
-  { id: 'BULLET_ARROW_DIAMOND_DISC',          label: 'Arrow / diamond / disc' },
-  { id: 'BULLET_STAR_CIRCLE_SQUARE',          label: 'Star / circle / square' },
-  { id: 'BULLET_ARROW3D_CIRCLE_SQUARE',       label: 'Arrow 3D / circle / square' },
-  { id: 'BULLET_LEFTTRIANGLE_DIAMOND_DISC',   label: 'Left triangle / diamond / disc' },
-  { id: 'BULLET_DIAMONDX_HOLLOWDIAMOND_SQUARE', label: 'Diamond-x / hollow diamond / square' },
-  { id: 'BULLET_DIAMOND_CIRCLE_SQUARE',       label: 'Diamond / circle / square' },
-  { id: 'NUMBERED_DECIMAL_ALPHA_ROMAN',       label: '1. / a. / i.' },
-  { id: 'NUMBERED_DECIMAL_ALPHA_ROMAN_PARENS', label: '1) / a) / i)' },
-  { id: 'NUMBERED_DECIMAL_NESTED',            label: '1. / 1.1. / 1.1.1.' },
-  { id: 'NUMBERED_UPPERALPHA_ALPHA_ROMAN',    label: 'A. / a. / i.' },
-  { id: 'NUMBERED_UPPERROMAN_UPPERALPHA_DECIMAL', label: 'I. / A. / 1.' },
-  { id: 'NUMBERED_ZERODECIMAL_ALPHA_ROMAN',   label: '01. / a. / i.' }
+  { id: 'BULLET_DISC_CIRCLE_SQUARE',            numbered: false, glyphs: ['\u25cf', '\u25cb', '\u25a0'] },
+  { id: 'BULLET_DIAMOND_CIRCLE_SQUARE',         numbered: false, glyphs: ['\u25c6', '\u25cb', '\u25a0'] },
+  { id: 'BULLET_STAR_CIRCLE_SQUARE',            numbered: false, glyphs: ['\u2605', '\u25cb', '\u25a0'] },
+  { id: 'BULLET_ARROW3D_CIRCLE_SQUARE',         numbered: false, glyphs: ['\u27a2', '\u25cb', '\u25a0'] },
+  { id: 'BULLET_ARROW_DIAMOND_DISC',            numbered: false, glyphs: ['\u2794', '\u25c6', '\u25cf'] },
+  { id: 'BULLET_DIAMONDX_ARROW3D_SQUARE',       numbered: false, glyphs: ['\u2756', '\u27a2', '\u25a0'] },
+  { id: 'BULLET_DIAMONDX_HOLLOWDIAMOND_SQUARE', numbered: false, glyphs: ['\u2756', '\u25c7', '\u25a0'] },
+  { id: 'BULLET_LEFTTRIANGLE_DIAMOND_DISC',     numbered: false, glyphs: ['\u25c4', '\u25c6', '\u25cf'] },
+  { id: 'BULLET_CHECKBOX',                      numbered: false, glyphs: ['\u2751', '\u2751', '\u2751'] },
+  { id: 'NUMBERED_DECIMAL_ALPHA_ROMAN',         numbered: true,  glyphs: ['1.', 'a.', 'i.'] },
+  { id: 'NUMBERED_DECIMAL_ALPHA_ROMAN_PARENS',  numbered: true,  glyphs: ['1)', 'a)', 'i)'] },
+  { id: 'NUMBERED_DECIMAL_NESTED',              numbered: true,  glyphs: ['1.', '1.1.', '1.1.1.'] },
+  { id: 'NUMBERED_UPPERALPHA_ALPHA_ROMAN',      numbered: true,  glyphs: ['A.', 'a.', 'i.'] },
+  { id: 'NUMBERED_UPPERROMAN_UPPERALPHA_DECIMAL', numbered: true, glyphs: ['I.', 'A.', '1.'] },
+  { id: 'NUMBERED_ZERODECIMAL_ALPHA_ROMAN',     numbered: true,  glyphs: ['01.', 'a.', 'i.'] }
 ];
+
+BULLET_PRESETS.forEach(function (p) { p.label = p.glyphs.join(' / '); });
+
+/** Glyph types that count as numbering rather than as a bullet character. */
+var NUMBERED_GLYPH_TYPES = {
+  DECIMAL: 1, ZERO_DECIMAL: 1, ALPHA: 1, UPPER_ALPHA: 1, ROMAN: 1, UPPER_ROMAN: 1
+};
 
 /** Index every body paragraph that belongs to a list. */
 function listParagraphs_(content) {
@@ -57,6 +73,61 @@ function listParagraphs_(content) {
   return byList;
 }
 
+/**
+ * Which list the cursor is in, as a listId, or null.
+ *
+ * Same join as activeTableIndex_, and for the same reason: DocumentApp knows
+ * where the cursor is but not the Docs API's listIds, and the two id spaces do
+ * not meet anywhere. What both agree on is order down the body, so the nth
+ * distinct list by either route is the same list. `ordered` is the Docs API's
+ * lists sorted by where their first paragraph starts; a differing count means
+ * the two views have diverged -- most often because DocumentApp is reading the
+ * document's own active tab rather than the one the sidebar is showing -- and
+ * then no answer is better than a wrong one.
+ */
+function activeListId_(ordered) {
+  try {
+    var doc = DocumentApp.getActiveDocument();
+    var sel = doc.getSelection();
+    var start = null;
+    if (sel) {
+      var res = sel.getRangeElements();
+      if (res && res.length) start = res[0].getElement();
+    } else {
+      var cursor = doc.getCursor();
+      if (cursor) start = cursor.getElement();
+    }
+    if (!start) return null;
+
+    var item = null;
+    for (var node = start; node; node = node.getParent()) {
+      if (node.getType() === DocumentApp.ElementType.LIST_ITEM) { item = node; break; }
+      if (node.getType() === DocumentApp.ElementType.BODY_SECTION ||
+          node.getType() === DocumentApp.ElementType.BODY) break;
+    }
+    if (!item) return null;
+    var wanted = item.getListId();
+
+    var body = doc.getBody();
+    if (body.getNumChildren === undefined) return null;
+    var seen = [], found = null;
+    for (var i = 0; i < body.getNumChildren(); i++) {
+      var child = body.getChild(i);
+      if (child.getType() !== DocumentApp.ElementType.LIST_ITEM) continue;
+      var id = child.getListId();
+      if (seen.indexOf(id) >= 0) continue;
+      if (id === wanted) found = seen.length;
+      seen.push(id);
+    }
+    if (found === null || seen.length !== (ordered || []).length) return null;
+    return ordered[found].listId;
+  } catch (e) {
+    // No cursor, a mocked DocumentApp, a document shape this cannot walk:
+    // none of those are errors, they just mean "no list is selected".
+    return null;
+  }
+}
+
 function readLists(tabId) {
   var doc = fetchDoc_();
   var ctx = resolveTab_(doc, tabId);
@@ -67,13 +138,21 @@ function readLists(tabId) {
   Object.keys(content.lists || {}).forEach(function (listId) {
     var lp = ((content.lists[listId] || {}).listProperties) || {};
     var items = paras[listId] || [];
+    // A list whose paragraphs are all gone stays in document.lists for ever:
+    // there is no request in the Docs API that deletes a list definition. It
+    // has no text to style and no marker to change, so it is dropped here
+    // rather than offered as a row that cannot do anything.
+    if (!items.length) return;
     var usedLevels = {};
     items.forEach(function (i) { usedLevels[i.nestingLevel] = true; });
 
+    var levelZero = ((lp.nestingLevels || [])[0]) || {};
     lists.push({
       listId: listId,
+      kind: NUMBERED_GLYPH_TYPES[levelZero.glyphType] ? 'numbered' : 'bulleted',
+      firstIndex: items.reduce(function (m, i) { return Math.min(m, i.startIndex); }, Infinity),
       itemCount: items.length,
-      inUse: items.length > 0,
+      inUse: true,
       preview: items.slice(0, 3).map(function (i) { return i.text; })
                     .filter(String).join(' · ').slice(0, 80),
       levels: (lp.nestingLevels || []).map(function (nl, idx) {
@@ -98,8 +177,15 @@ function readLists(tabId) {
     });
   });
 
-  lists.sort(function (a, b) { return b.itemCount - a.itemCount; });
-  return { tabId: ctx.tabId, lists: lists, presets: BULLET_PRESETS };
+  // Body order, so "the nth list" means the same thing here as it does to
+  // DocumentApp, which is what activeListId_ joins the two views on.
+  lists.sort(function (a, b) { return a.firstIndex - b.firstIndex; });
+  return {
+    tabId: ctx.tabId,
+    lists: lists,
+    activeListId: activeListId_(lists),
+    presets: BULLET_PRESETS
+  };
 }
 
 /** Contiguous index ranges covering the given paragraphs. */
@@ -117,58 +203,85 @@ function mergeRanges_(items) {
   return out;
 }
 
-/** payload: { tabId, listId, bulletPreset } */
+/**
+ * Which lists a write covers: the one named, or every list in the tab.
+ *
+ * `listId: null` with `allLists: true` is what the panel's "apply to all"
+ * sends. Doing the fan-out here rather than in the sidebar keeps it to one
+ * document read and one batchUpdate however many lists there are -- a call per
+ * list would be a full document read per list.
+ */
+function targetLists_(byList, payload) {
+  if (payload.allLists) return Object.keys(byList);
+  return payload.listId ? [payload.listId] : [];
+}
+
+/** payload: { tabId, listId | allLists, bulletPreset } */
 function applyBulletPreset(payload) {
   payload = payload || {};
   var doc = fetchDoc_();
   var ctx = resolveTab_(doc, payload.tabId);
-  var items = (listParagraphs_(ctx.content)[payload.listId]) || [];
-  if (!items.length) return { applied: 0, warnings: ['That list has no paragraphs in the body.'] };
-
-  var requests = mergeRanges_(items).map(function (r) {
-    if (ctx.tabId) r.tabId = ctx.tabId;
-    return { createParagraphBullets: { range: r, bulletPreset: payload.bulletPreset } };
+  var byList = listParagraphs_(ctx.content);
+  var requests = [];
+  targetLists_(byList, payload).forEach(function (id) {
+    mergeRanges_(byList[id] || []).forEach(function (r) {
+      if (ctx.tabId) r.tabId = ctx.tabId;
+      requests.push({ createParagraphBullets: { range: r, bulletPreset: payload.bulletPreset } });
+    });
   });
+  if (!requests.length) return { applied: 0, warnings: ['That list has no paragraphs in the body.'] };
   return batchUpdate_(requests);
 }
 
-/** payload: { tabId, listId } -- strips bullets, keeping the text. */
+/** payload: { tabId, listId | allLists } -- strips markers, keeping the text. */
 function removeBullets(payload) {
   payload = payload || {};
   var doc = fetchDoc_();
   var ctx = resolveTab_(doc, payload.tabId);
-  var items = (listParagraphs_(ctx.content)[payload.listId]) || [];
-  if (!items.length) return { applied: 0 };
-  var requests = mergeRanges_(items).map(function (r) {
-    if (ctx.tabId) r.tabId = ctx.tabId;
-    return { deleteParagraphBullets: { range: r } };
+  var byList = listParagraphs_(ctx.content);
+  var requests = [];
+  targetLists_(byList, payload).forEach(function (id) {
+    mergeRanges_(byList[id] || []).forEach(function (r) {
+      if (ctx.tabId) r.tabId = ctx.tabId;
+      requests.push({ deleteParagraphBullets: { range: r } });
+    });
   });
   return batchUpdate_(requests);
 }
 
 /**
- * Style the paragraphs of one nesting level of one list.
+ * Style the paragraphs of one nesting level.
  *
- * payload: { tabId, listId, level, textStyle, paragraphStyle }
+ * payload: { tabId, listId | allLists, level, textStyle, paragraphStyle }
  *
- * `level` of null means every level of the list.
+ * `level` of null means every level.
  */
 function writeListLevelStyle(payload) {
   payload = payload || {};
   var doc = fetchDoc_();
   var ctx = resolveTab_(doc, payload.tabId);
-  var items = (listParagraphs_(ctx.content)[payload.listId]) || [];
-  if (payload.level !== null && payload.level !== undefined && payload.level !== '') {
-    var lvl = Number(payload.level);
-    items = items.filter(function (i) { return i.nestingLevel === lvl; });
-  }
+  var byList = listParagraphs_(ctx.content);
+  var levelGiven = payload.level !== null && payload.level !== undefined && payload.level !== '';
+  var lvl = Number(payload.level);
+
+  var items = [];
+  targetLists_(byList, payload).forEach(function (id) {
+    (byList[id] || []).forEach(function (it) {
+      if (!levelGiven || it.nestingLevel === lvl) items.push(it);
+    });
+  });
   if (!items.length) return { applied: 0, warnings: ['No list items at that nesting level.'] };
 
+  return batchUpdate_(levelRequests_(ctx.tabId, items, payload));
+}
+
+/** The style requests a set of list paragraphs needs, ready to batch. */
+function levelRequests_(tabId, items, payload) {
   var ts = uiToTextStyle_(payload.textStyle);
   var ps = uiToParagraphStyle_(payload.paragraphStyle);
   var requests = [];
   mergeRanges_(items).forEach(function (r) {
-    if (ctx.tabId) r.tabId = ctx.tabId;
+    if (tabId) r.tabId = tabId;
     if (ts.fields.length) {
       requests.push({ updateTextStyle: { range: r, textStyle: ts.style, fields: ts.fields.join(',') } });
     }
@@ -176,8 +289,55 @@ function writeListLevelStyle(payload) {
       requests.push({ updateParagraphStyle: { range: r, paragraphStyle: ps.style, fields: ps.fields.join(',') } });
     }
   });
-  var res = batchUpdate_(requests);
-  res.warnings = ['Glyph shape and glyph format are read-only in the Docs API; ' +
-                  'indentation, spacing and text styling were applied.'];
-  return res;
+  return requests;
+}
+
+/**
+ * Make every list in the tab share the formatting most of them already have.
+ *
+ * This is what ticking "apply to all lists" does. Each field is settled
+ * separately and by majority, so a document where nine lists indent by 18pt
+ * and one by 36pt comes out at 18pt, and a field the lists already agree on
+ * is written back unchanged. Levels are matched by depth: every list's second
+ * level ends up looking like the second level most lists have.
+ *
+ * Markers are deliberately left alone. A tab usually holds both bulleted and
+ * numbered lists, and a majority vote across the two would silently turn the
+ * numbering of the minority into bullets.
+ */
+function unifyLists(payload) {
+  payload = payload || {};
+  var read = readLists(payload.tabId);
+  var lists = read.lists;
+  if (lists.length < 2) return { applied: 0 };
+
+  var doc = fetchDoc_();
+  var ctx = resolveTab_(doc, payload.tabId);
+  var byList = listParagraphs_(ctx.content);
+
+  var depth = 0;
+  lists.forEach(function (l) { depth = Math.max(depth, l.levels.length); });
+
+  var requests = [];
+  for (var lvl = 0; lvl < depth; lvl++) {
+    var here = [];
+    lists.forEach(function (l) {
+      var st = (l.levels[lvl] || {}).style;
+      if (st && (l.levels[lvl] || {}).inUse) here.push(st);
+    });
+    if (here.length < 2) continue;
+
+    var want = {
+      textStyle: commonFields_(here.map(function (st) { return st.textStyle || {}; })),
+      paragraphStyle: commonFields_(here.map(function (st) { return st.paragraphStyle || {}; }))
+    };
+    var items = [];
+    Object.keys(byList).forEach(function (id) {
+      (byList[id] || []).forEach(function (it) {
+        if (it.nestingLevel === lvl) items.push(it);
+      });
+    });
+    levelRequests_(ctx.tabId, items, want).forEach(function (r) { requests.push(r); });
+  }
+  return batchUpdate_(requests);
 }

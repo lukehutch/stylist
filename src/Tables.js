@@ -178,6 +178,55 @@ function readTables(tabId) {
   return { tabId: ctx.tabId, tables: tables, activeIndex: activeTableIndex_(tables) };
 }
 
+/**
+ * Make every table in the tab share the formatting most of them already have.
+ *
+ * The counterpart of unifyLists, and the same rule: every field is settled by
+ * majority on its own, so tables that already agree keep what they have.
+ * Only whole-table settings take part -- a header row's own colouring is left
+ * to the header-row editor, since not every table has one.
+ */
+function unifyTables(payload) {
+  payload = payload || {};
+  var doc = fetchDoc_();
+  var ctx = resolveTab_(doc, payload.tabId);
+  var tables = tableLocations_(ctx.content, ctx.tabId);
+  if (tables.length < 2) return { applied: 0 };
+
+  var cell = commonFields_(tables.map(function (t) { return (t.cellStyle || {}).style || {}; }));
+  var rows = commonFields_(tables.map(function (t) {
+    var rs = (t.rowStyles || [])[0] || {};
+    var o = {};
+    if (rs.minRowHeightPt !== null && rs.minRowHeightPt !== undefined) o.minRowHeightPt = rs.minRowHeightPt;
+    o.preventOverflow = !!rs.preventOverflow;
+    return o;
+  }));
+  var columns = commonFields_(tables.map(function (t) {
+    var c = (t.columnWidths || [])[0] || {};
+    var o = {};
+    if (c.widthType && c.widthType !== 'WIDTH_TYPE_UNSPECIFIED') o.widthType = c.widthType;
+    if (c.widthPt !== null && c.widthPt !== undefined) o.widthPt = c.widthPt;
+    return o;
+  }));
+  // A width only means anything alongside FIXED_WIDTH; sending one with
+  // EVENLY_DISTRIBUTED is a contradiction, and the majority vote on the two
+  // fields is taken separately, so the pair can disagree.
+  if (columns.widthType && columns.widthType !== 'FIXED_WIDTH') delete columns.widthPt;
+  var pinned = modeOf_(tables.map(function (t) { return t.pinnedHeaderRows; }));
+
+  var requests = [];
+  tables.forEach(function (t) {
+    tableRequests_({
+      tabId: payload.tabId,
+      cell: cell, applyCellsTo: 'all',
+      rows: rows, columns: columns,
+      pinnedHeaderRowsCount: pinned
+    }, { startIndex: t.startIndex, columnCount: t.columns })
+      .forEach(function (r) { requests.push(r); });
+  });
+  return batchUpdate_(requests);
+}
+
 function tableLoc_(startIndex, tabId) {
   var loc = { index: startIndex };
   if (tabId) loc.tabId = tabId;
@@ -198,8 +247,31 @@ function tableLoc_(startIndex, tabId) {
  */
 function writeTableFormat(payload) {
   payload = payload || {};
+  var targets;
+  if (payload.allTables) {
+    // Every table in the tab, from one document read and into one batchUpdate.
+    // None of the requests below insert or delete content, so a start index
+    // found now is still correct when the batch reaches the later tables.
+    var doc = fetchDoc_();
+    var ctx = resolveTab_(doc, payload.tabId);
+    targets = tableLocations_(ctx.content, ctx.tabId).map(function (t) {
+      return { startIndex: t.startIndex, columnCount: t.columns };
+    });
+  } else {
+    targets = [{ startIndex: payload.startIndex, columnCount: payload.columnCount }];
+  }
+
   var requests = [];
-  var loc = tableLoc_(payload.startIndex, payload.tabId);
+  targets.forEach(function (target) {
+    tableRequests_(payload, target).forEach(function (r) { requests.push(r); });
+  });
+  return batchUpdate_(requests);
+}
+
+/** The requests one table needs for `payload`. */
+function tableRequests_(payload, target) {
+  var requests = [];
+  var loc = tableLoc_(target.startIndex, payload.tabId);
 
   if (payload.cell) {
     var c = payload.cell;
@@ -227,7 +299,7 @@ function writeTableFormat(payload) {
         req.updateTableCellStyle.tableRange = {
           tableCellLocation: { tableStartLocation: loc, rowIndex: 0, columnIndex: 0 },
           rowSpan: 1,
-          columnSpan: payload.columnCount || 1
+          columnSpan: target.columnCount || 1
         };
       } else {
         // Omitting tableRange and giving only the start location targets
@@ -293,5 +365,5 @@ function writeTableFormat(payload) {
     });
   }
 
-  return batchUpdate_(requests);
+  return requests;
 }

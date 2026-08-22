@@ -40,6 +40,48 @@ function batchUpdate_(requests) {
   return { applied: reqs.length };
 }
 
+/**
+ * The value that occurs most often, or undefined if there is nothing to count.
+ *
+ * Ties go to whichever value was seen first, which in document order means the
+ * earliest list or table in the tab wins. Any tie-break would be arbitrary;
+ * this one is at least predictable and does not depend on key ordering.
+ */
+function modeOf_(values) {
+  var counts = {}, order = [], best, bestN = 0;
+  (values || []).forEach(function (v) {
+    if (v === undefined || v === null) return;
+    var k = JSON.stringify(v);
+    if (!(k in counts)) { counts[k] = 0; order.push(k); }
+    counts[k]++;
+  });
+  order.forEach(function (k) { if (counts[k] > bestN) { bestN = counts[k]; best = k; } });
+  return best === undefined ? undefined : JSON.parse(best);
+}
+
+/**
+ * Field by field, the value most of these objects carry.
+ *
+ * Settling each field on its own rather than picking one object wholesale is
+ * what makes "apply to all" useful: tables that agree about their padding but
+ * disagree about their borders keep the padding and get the majority border,
+ * instead of one table's whole look being imposed on the rest.
+ */
+function commonFields_(objs) {
+  var keys = {};
+  (objs || []).forEach(function (o) {
+    Object.keys(o || {}).forEach(function (k) { keys[k] = 1; });
+  });
+  var out = {};
+  Object.keys(keys).forEach(function (k) {
+    var vals = [];
+    (objs || []).forEach(function (o) { if (o && o[k] !== undefined) vals.push(o[k]); });
+    var m = modeOf_(vals);
+    if (m !== undefined) out[k] = m;
+  });
+  return out;
+}
+
 /** Depth-first list of every tab, including nested child tabs. */
 function flattenTabs_(doc) {
   var out = [];

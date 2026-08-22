@@ -153,10 +153,83 @@ function mainTab() {
   };
 }
 
+/**
+ * Three lists and two tables, so "apply to all" has something to agree on.
+ *
+ * Deliberately not unanimous, and deliberately not led by the first list: the
+ * first indents its first level by 90pt and does not centre, the other two
+ * indent by 36pt and centre. So a majority vote has a winner, and it is not
+ * "whatever the first list does". Same for the tables: their padding differs
+ * and their column sizing does not.
+ */
+function makeMultiDoc() {
+  const t = mainTab();
+  const c = t.body.content;
+
+  function item(start, listId, level, ps, text) {
+    return {
+      startIndex: start, endIndex: start + 10,
+      paragraph: {
+        paragraphStyle: Object.assign({ namedStyleType: 'NORMAL_TEXT' }, ps),
+        bullet: { listId: listId, nestingLevel: level },
+        elements: [{ startIndex: start, endIndex: start + 10, textRun: { content: text } }]
+      }
+    };
+  }
+
+  // list.1 is already in mainTab; give its paragraphs the majority style.
+  c.forEach((el) => {
+    const b = el.paragraph && el.paragraph.bullet;
+    if (!b || b.listId !== 'list.1') return;
+    if (b.nestingLevel) {
+      el.paragraph.paragraphStyle.indentStart = { magnitude: 72, unit: 'PT' };
+    } else {
+      el.paragraph.paragraphStyle.indentStart = { magnitude: 90, unit: 'PT' };
+      el.paragraph.paragraphStyle.alignment = 'START';
+    }
+  });
+
+  c.push(item(200, 'list.2', 0, { indentStart: { magnitude: 36, unit: 'PT' }, alignment: 'CENTER' }, 'Two A'));
+  c.push(item(210, 'list.2', 1, { indentStart: { magnitude: 72, unit: 'PT' } }, 'Two B'));
+  c.push(item(220, 'list.3', 0, { indentStart: { magnitude: 36, unit: 'PT' }, alignment: 'CENTER' }, 'Three A'));
+
+  c.push({
+    startIndex: 300, endIndex: 340,
+    table: {
+      rows: 2, columns: 2,
+      tableStyle: { tableColumnProperties: [{ widthType: 'FIXED_WIDTH', width: { magnitude: 100, unit: 'PT' } }] },
+      tableRows: [
+        { startIndex: 301, endIndex: 320, tableRowStyle: {}, tableCells: [
+          { content: [{ paragraph: { elements: [{ textRun: { content: 'B1' } }] } }],
+            tableCellStyle: { paddingTop: { magnitude: 9, unit: 'PT' } } }
+        ] },
+        { startIndex: 320, endIndex: 339, tableRowStyle: {}, tableCells: [] }
+      ]
+    }
+  });
+
+  t.lists['list.2'] = { listProperties: { nestingLevels: [
+    { glyphType: 'GLYPH_TYPE_UNSPECIFIED', glyphSymbol: '\u25cf', glyphFormat: '%0' },
+    { glyphType: 'GLYPH_TYPE_UNSPECIFIED', glyphSymbol: '\u25cb', glyphFormat: '%1' }
+  ] } };
+  t.lists['list.3'] = { listProperties: { nestingLevels: [
+    { glyphType: 'DECIMAL', glyphFormat: '%0.', startNumber: 1 }
+  ] } };
+
+  return {
+    title: 'Multi Doc',
+    documentId: 'DOC_ID',
+    tabs: [{
+      tabProperties: { tabId: 't.0', title: 'Main', index: 0, nestingLevel: 0 },
+      documentTab: t
+    }]
+  };
+}
+
 /** Same content, but exposed the legacy (pre-tabs) way. */
 function makeLegacyDoc() {
   const t = mainTab();
   return Object.assign({ title: 'Legacy Doc', documentId: 'DOC_ID' }, t);
 }
 
-module.exports = { makeDoc, makeLegacyDoc };
+module.exports = { makeDoc, makeLegacyDoc, makeMultiDoc };

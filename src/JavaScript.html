@@ -9,6 +9,7 @@ var S = {
   tabId: null,
   unitFields: [],      // dimension inputs to re-render when the unit changes
   open: {},            // which list items are expanded, so a re-render can restore them
+  all: { lists: false, tables: false },   // panels editing everything at once
   fingerprint: null,   // JSON of the last payload, to spot document-side changes
   busy: 0              // server calls in flight; polling stands aside while any are
 };
@@ -545,6 +546,32 @@ function buildStyleEditor(model, commit, opts) {
  * the top edge. That is a fieldset with a legend, so nothing has to fake the
  * gap in the border. Append the controls to what this returns.
  */
+/**
+ * The "apply to all" switch at the head of the Lists and Tables panels.
+ *
+ * Ticking it does three things in one go. Everything is first brought into
+ * line with the formatting most of them already have, so the document starts
+ * from a state it largely had already rather than from one table's look
+ * imposed on the rest. The editor below then shows those settled values,
+ * because it reads them back from the document like it always does. And from
+ * then on every change goes to all of them.
+ *
+ * Unticking it changes nothing in the document; it just points the editor back
+ * at the one thing the cursor is in.
+ */
+function applyAllSwitch(kind, label, unifyFn) {
+  var wrap = el('div', 'checks applyall');
+  wrap.appendChild(checkField(label, S.all[kind], function (on) {
+    S.all[kind] = on;
+    if (!on) { renderAll(); return; }
+    status('Bringing them into line…', '');
+    return call(unifyFn, [{ tabId: S.tabId }])
+      .then(function () { status('', ''); return reload(); })
+      .catch(function (e) { status(String(e.message || e), 'err'); });
+  }));
+  return wrap;
+}
+
 function group(title) {
   var g = el('fieldset', 'group');
   g.appendChild(el('legend', null, title));
@@ -875,61 +902,141 @@ function glyphExample(lv) {
   return (lv.glyphFormat || '%0').replace(/%\d/g, fill);
 }
 
-function renderBullets() {
-  var host = document.getElementById('panel-bullets');
+/** What a list is called in the panel, and the one-line summary beside it. */
+function listName(list, ordinal) {
+  return (list.kind === 'numbered' ? 'Numbered list ' : 'Bulleted list ') + ordinal;
+}
+
+function listMeta(list) {
+  var marker = glyphExample((list.levels || [])[0] || {});
+  return (marker ? marker + ' \u00b7 ' : '') +
+    list.itemCount + (list.itemCount === 1 ? ' item' : ' items') +
+    (list.preview ? ' \u00b7 ' + list.preview : '');
+}
+
+/** Where a write goes: one list, or every list in the tab. */
+function listTarget(list) {
+  return list ? { tabId: S.tabId, listId: list.listId }
+              : { tabId: S.tabId, allLists: true };
+}
+
+function renderLists() {
+  var host = document.getElementById('panel-lists');
   host.innerHTML = '';
 
-  if (!S.data.lists.lists.length) {
+  var lists = S.data.lists.lists;
+  if (!lists.length) {
     host.appendChild(el('p', 'hint', 'This tab has no lists.'));
     return;
   }
-  S.data.lists.lists.forEach(function (list, i) {
-    host.appendChild(listItem(
-      'List ' + (i + 1) + (list.inUse ? '' : ' (unused)'),
-      list.itemCount + ' items · ' + (list.preview || ''),
-      function () { return listBody(list); }));
+  if (lists.length > 1) {
+    host.appendChild(applyAllSwitch('lists', 'Apply to all lists', 'unifyLists'));
+  }
+  if (S.all.lists) {
+    // Every list now carries the same formatting, so the first one's values
+    // are all of their values; the editor shows them and writes to them all.
+    host.appendChild(listBody(null));
+    return;
+  }
+
+  var active = null;
+  lists.forEach(function (l) { if (l.listId === S.data.lists.activeListId) active = l; });
+  if (active) {
+    host.appendChild(el('p', 'hint',
+      'Editing the list your cursor is in. Click inside a different list to switch.'));
+    var row = listItem(listName(active, lists.indexOf(active) + 1), listMeta(active),
+      function () { return listBody(active); }, 'list:' + active.listId);
+    host.appendChild(row);
+    if (!row.classList.contains('open')) row.querySelector('.head').click();
+    return;
+  }
+
+  host.appendChild(el('p', 'hint',
+    'Click inside a list in the document to edit it here. Until then, every list ' +
+    'in this tab is listed below.'));
+  [['Bulleted lists', 'bulleted'], ['Numbered lists', 'numbered']].forEach(function (g) {
+    var mine = lists.filter(function (l) { return l.kind === g[1]; });
+    if (!mine.length) return;
+    host.appendChild(el('h2', null, g[0]));
+    mine.forEach(function (l, i) {
+      host.appendChild(listItem(listName(l, i + 1), listMeta(l),
+        function () { return listBody(l); }, 'list:' + l.listId));
+    });
   });
 }
 
+/**
+ * Pick a list's marker by the character it is, not by the name of an enum.
+ *
+ * These fifteen are every marker the API can produce, because the only way to
+ * put one on a paragraph is createParagraphBullets and it takes one of fifteen
+ * fixed presets. No request writes a glyph symbol, so any other character --
+ * a dingbat, an arrow, an emoji -- can only be set in Docs itself, under
+ * Format > Bullets & numbering > List options > More bullets. Whatever is set
+ * that way is read back and shown here like any other marker.
+ */
+function markerPicker(list) {
+  var box = el('div');
+  var presets = S.data.constants.bulletPresets || [];
+  var current = list ? glyphExample((list.levels || [])[0] || {}) : '';
+
+  [['Bullets', false], ['Numbering', true]].forEach(function (g) {
+    var mine = presets.filter(function (p) { return !!p.numbered === g[1]; });
+    if (!mine.length) return;
+    box.appendChild(el('h2', null, g[0]));
+    var row = el('div', 'glyphs');
+    mine.forEach(function (p) {
+      var b = el('button', p.numbered ? 'glyph num' : 'glyph', p.glyphs[0]);
+      b.title = 'Levels 1-3:  ' + p.glyphs.join('   ');
+      if (current && p.glyphs[0] === current) b.classList.add('on');
+      b.addEventListener('click', function () {
+        var t = listTarget(list);
+        t.bulletPreset = p.id;
+        return call('applyBulletPreset', [t]).then(reload);
+      });
+      row.appendChild(b);
+    });
+    box.appendChild(row);
+  });
+  return box;
+}
+
+/** `list` of null edits every list in the tab at once. */
 function listBody(list) {
   var box = el('div');
-  box.appendChild(fieldRow('Glyph preset', selectField(
-    [{ id: '', label: 'Choose a preset…' }].concat(S.data.constants.bulletPresets),
-    '', function (v) {
-      if (!v) return;
-      return call('applyBulletPreset', [{ tabId: S.tabId, listId: list.listId, bulletPreset: v }])
-        .then(reload);
-    })));
+  box.appendChild(markerPicker(list));
 
-  var rm = el('button', 'act danger', 'Remove bullets');
+  var rm = el('button', 'act danger', list ? 'Remove markers' : 'Remove markers from every list');
   rm.addEventListener('click', function () {
-    call('removeBullets', [{ tabId: S.tabId, listId: list.listId }])
-      .then(reload);
+    return call('removeBullets', [listTarget(list)]).then(reload);
   });
   var row = el('div', 'btnrow');
   row.appendChild(rm);
   box.appendChild(row);
 
   box.appendChild(el('h2', null, 'Nesting levels'));
-  list.levels.forEach(function (lv) {
+  var levels = (list || S.data.lists.lists[0]).levels;
+  var key = list ? list.listId : 'all';
+  levels.forEach(function (lv) {
     if (!lv.inUse && lv.level > 2) return;   // Docs always defines 9; show the useful ones
-    var glyph = glyphExample(lv) || 'no marker';
+    var glyph = list ? (glyphExample(lv) || 'no marker') : 'level ' + (lv.level + 1);
     box.appendChild(listItem(
       'Level ' + (lv.level + 1) + (lv.inUse ? '' : ' (unused)'),
-      glyph + (lv.indentStartPt != null ? ' · indent ' + fromPt(lv.indentStartPt, S.unit) + S.unit.toLowerCase() : ''),
+      glyph + (lv.indentStartPt != null ? ' \u00b7 indent ' + fromPt(lv.indentStartPt, S.unit) + S.unit.toLowerCase() : ''),
       function () {
         var inner = el('div');
         var cur = lv.style || { textStyle: {}, paragraphStyle: {}, mixed: [] };
         var model = { textStyle: copy(cur.textStyle), paragraphStyle: copy(cur.paragraphStyle) };
         inner.appendChild(buildStyleEditor(model, function (payload) {
-          return call('writeListLevelStyle', [{
-            tabId: S.tabId, listId: list.listId, level: lv.level,
-            textStyle: payload.textStyle, paragraphStyle: payload.paragraphStyle
-          }]);
+          var t = listTarget(list);
+          t.level = lv.level;
+          t.textStyle = payload.textStyle;
+          t.paragraphStyle = payload.paragraphStyle;
+          return call('writeListLevelStyle', [t]);
         }, { sparse: true, mixed: cur.mixed }));
         return inner;
       },
-      'lvl:' + list.listId + ':' + lv.level));
+      'lvl:' + key + ':' + lv.level));
   });
   return box;
 }
@@ -1041,6 +1148,16 @@ function renderTables() {
     return;
   }
 
+  if (S.data.tables.length > 1) {
+    host.appendChild(applyAllSwitch('tables', 'Apply to all tables', 'unifyTables'));
+  }
+  if (S.all.tables) {
+    // Every table now carries the same formatting, so the first one's values
+    // are all of their values; the editor shows them and writes to them all.
+    host.appendChild(tableBody(null));
+    return;
+  }
+
   var active = S.data.activeTableIndex;
   var chosen = (active === null || active === undefined) ? null : S.data.tables[active];
 
@@ -1073,12 +1190,19 @@ function renderTables() {
   if (!row.classList.contains('open')) row.querySelector('.head').click();
 }
 
+/** `t` of null edits every table in the tab at once. */
 function tableBody(t) {
   var box = el('div');
+  var all = !t;
+  if (all) t = S.data.tables[0];
   function put(patch) {
     patch.tabId = S.tabId;
-    patch.startIndex = t.startIndex;
-    patch.columnCount = t.columns;
+    if (all) {
+      patch.allTables = true;
+    } else {
+      patch.startIndex = t.startIndex;
+      patch.columnCount = t.columns;
+    }
     return call('writeTableFormat', [patch]);
   }
 
@@ -1287,7 +1411,7 @@ function renderAll() {
   S.unitFields = [];
   renderPage();
   renderStyles();
-  renderBullets();
+  renderLists();
   renderNotes();
   renderTables();
   renderPresets();
@@ -1516,7 +1640,7 @@ function stopPolling() {
 }
 
 function switchTab(name) {
-  ['page', 'styles', 'bullets', 'notes', 'tables', 'presets'].forEach(function (n) {
+  ['page', 'styles', 'lists', 'notes', 'tables', 'presets'].forEach(function (n) {
     document.getElementById('panel-' + n).classList.toggle('active', n === name);
     document.getElementById('tab-' + n).classList.toggle('active', n === name);
   });
@@ -1540,7 +1664,7 @@ function boot() {
     status('Loading tab…', '');
     reload().then(function () { status('', ''); });
   });
-  ['page', 'styles', 'bullets', 'notes', 'tables', 'presets'].forEach(function (n) {
+  ['page', 'styles', 'lists', 'notes', 'tables', 'presets'].forEach(function (n) {
     document.getElementById('tab-' + n).addEventListener('click', function () { switchTab(n); });
   });
 
