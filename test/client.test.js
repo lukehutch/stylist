@@ -140,18 +140,76 @@ module.exports = ({ suite, test }) => {
   });
 
   test('every clickable expander head carries a turnstile arrow', (t) => {
-    const heads = clientJs.match(/el\('div', 'head'\)/g) || [];
-    const twisties = clientJs.match(/appendChild\(el\('span', 'tw'\)\)/g) || [];
-    const togglers = clientJs.match(/classList\.toggle\('open'\)/g) || [];
-    t.ok(heads.length >= 2);
-    t.equal(twisties.length, togglers.length,
-      'one arrow per head that actually toggles');
+    // Arrows are built in the client for the generated rows and written into
+    // the markup for the fixed one, so both files count.
+    const twisties = (clientJs.match(/appendChild\(el\('span', 'tw'\)\)/g) || []).length +
+                     (sidebar.match(/class="tw"/g) || []).length;
+    const togglers = (clientJs.match(/classList\.toggle\('open'\)/g) || []).length;
+    t.ok(togglers.length !== 0);
+    t.equal(twisties, togglers, 'one arrow per head that actually toggles');
   });
 
   test('the arrow points right when closed and down when open', (t) => {
     t.match(css, /\.tw \{[^}]*border-left: 6px solid/, 'a right-pointing triangle');
     t.match(css, /\.item\.open > \.head \.tw \{[^}]*transform: rotate\(90deg\)/);
     t.match(css, /\.tw \{[^}]*transition: transform/);
+  });
+
+  suite('Tipping the author');
+
+  test('the tip section sits below the panels, not inside one', (t) => {
+    t.match(sidebar, /id="tipItem"/);
+    const tipAt = sidebar.indexOf('id="tipItem"');
+    const lastPanel = sidebar.lastIndexOf('class="panel"');
+    t.ok(tipAt > lastPanel, 'it comes after every panel');
+    // Every panel is an empty div the client fills in, so being after the
+    // last of them is enough to be outside all of them.
+    const panels = sidebar.match(/<div id="panel-[^"]*"[^>]*>[^]*?<\/div>/g) || [];
+    t.equal(panels.length, 6);
+    panels.forEach(p => t.notOk(/id="tipItem"/.test(p), 'not nested in ' + p.slice(0, 24)));
+  });
+
+  test('it opens and closes like the other expanders', (t) => {
+    t.match(clientJs, /getElementById\('tipHead'\)/);
+    t.match(clientJs, /tipItem\.classList\.toggle\('open'\)/);
+  });
+
+  test('the closed row offers the heart and the invitation', (t) => {
+    t.match(sidebar, /&#10084;&#65039; Love Stylist\? Tip the author!/);
+  });
+
+  test('the open row credits the author and links the licence', (t) => {
+    t.match(sidebar, /Stylist was written by Luke Hutchison and is available as/);
+    t.match(sidebar, /under the MIT license/);
+    t.match(sidebar, /<a href="https:\/\/github\.com\/lukehutch\/stylist"[^>]*>\s*open source\s*<\/a>/);
+  });
+
+  test('both the heading and the QR code lead to Venmo', (t) => {
+    const links = sidebar.match(/https:\/\/venmo\.com\/code\?user_id=1472553554018304287/g) || [];
+    t.equal(links.length, 2, 'the "Tip the author" heading and the image');
+    t.match(sidebar, /class="tiplink"[^>]*>Tip the author</);
+  });
+
+  test('links leave the sidebar rather than replacing the document', (t) => {
+    const venmoTags = sidebar.match(/<a[^>]*venmo\.com[^>]*>/g) || [];
+    venmoTags.forEach(tag => t.match(tag, /target="_blank"/));
+    venmoTags.forEach(tag => t.match(tag, /rel="noopener"/));
+  });
+
+  test('the QR image is carried in the page, since Apps Script serves no files', (t) => {
+    t.match(sidebar, /include\('TipImage'\)/);
+    const img = read('TipImage.html');
+    t.match(img, /^<!--[^]*assets\/venmo\.png/, 'it says where it came from');
+    t.match(img, /src="data:image\/png;base64,[A-Za-z0-9+/=]{1000,}"/);
+  });
+
+  test('the QR code is 80% of the sidebar width', (t) => {
+    t.match(css, /\.tipqr \{[^}]*width: 80vw/);
+  });
+
+  test('the tip heading is centred and bold', (t) => {
+    t.match(css, /\.tiplink \{[^}]*text-align: center/);
+    t.match(css, /\.tiplink \{[^}]*font-weight: 700/);
   });
 
   suite('Staying in step with the document');

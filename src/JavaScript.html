@@ -1291,6 +1291,11 @@ function boot() {
     document.getElementById('tab-' + n).addEventListener('click', function () { switchTab(n); });
   });
 
+  var tipItem = document.getElementById('tipItem');
+  document.getElementById('tipHead').addEventListener('click', function () {
+    tipItem.classList.toggle('open');
+  });
+
   // A refresh held back because the focus was in a field runs the moment
   // the focus leaves it.
   document.addEventListener('focusout', function () {

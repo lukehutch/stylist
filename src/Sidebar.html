@@ -66,6 +66,23 @@
       <div id="panel-presets" class="panel"></div>
 
       <datalist id="fontlist"></datalist>
+
+      <!-- Outside the tabbed area on purpose: it is about the add-on rather
+           than about any one panel, so it sits below all of them. -->
+      <div class="item tip" id="tipItem">
+        <div class="head" id="tipHead">
+          <span class="tw"></span>
+          <span class="name">&#10084;&#65039; Love Stylist? Tip the author!</span>
+        </div>
+        <div class="body">
+          <p class="hint">Stylist was written by Luke Hutchison and is available as
+            <a href="https://github.com/lukehutch/stylist" target="_blank" rel="noopener">open source</a>
+            under the MIT license.</p>
+          <a class="tiplink" href="https://venmo.com/code?user_id=1472553554018304287" target="_blank" rel="noopener">Tip the author</a>
+          <a class="tipqrlink" href="https://venmo.com/code?user_id=1472553554018304287" target="_blank" rel="noopener"
+             title="Open Venmo"><?!= include('TipImage'); ?></a>
+        </div>
+      </div>
     </div>
 
     <div id="status">Starting…</div>
