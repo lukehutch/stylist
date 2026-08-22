@@ -155,6 +155,26 @@ module.exports = ({ suite, test }) => {
     t.match(css, /\.tw \{[^}]*transition: transform/);
   });
 
+  suite('Footnotes');
+
+  test('footnotes are styled as one set, with no row per footnote', (t) => {
+    const notes = /function renderNotes\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(notes, /segmentEditor\('footnotes'/, 'the style-them-all editor stays');
+    t.notOk(/segments\.footnotes/.test(notes),
+      'no per-footnote row: the individual list is headers and footers only');
+    t.match(notes, /Individual headers and footers/);
+  });
+
+  test('the panel says what a change will and will not touch', (t) => {
+    t.match(clientJs, /Only the settings you actually change are/);
+  });
+
+  test('converting to endnotes is still offered', (t) => {
+    t.match(clientJs, /convertFootnotesToEndnotes/);
+    t.match(clientJs, /Append copy \(keep footnotes\)/);
+    t.match(clientJs, /Convert \(delete footnotes\)/);
+  });
+
   suite('Tipping the author');
 
   test('the tip section sits below the panels, not inside one', (t) => {

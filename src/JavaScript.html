@@ -855,9 +855,13 @@ function renderNotes() {
   host.appendChild(note);
 
   host.appendChild(el('h2', null, 'Style all footnote text'));
+  var fnCount = (S.data.footnotes.footnotes || []).length;
   host.appendChild(el('p', 'hint',
-    'Applied across every footnote body. "Keep lines together" is the nearest thing to a ' +
-    'do-not-split control that reaches footnotes, though the renderer may still override it.'));
+    'Every footnote in the document is styled together — ' + fnCount +
+    (fnCount === 1 ? ' footnote' : ' footnotes') + '. Only the settings you actually change are ' +
+    'written, so formatting inside a footnote that you do not touch — an italic phrase, a link — ' +
+    'is left as it is. "Keep lines together" is the nearest thing to a do-not-split control that ' +
+    'reaches footnotes, though the renderer may still override it.'));
   host.appendChild(segmentEditor('footnotes', 'Footnote text'));
 
   host.appendChild(el('h2', null, 'Footnote callout marks'));
@@ -873,9 +877,11 @@ function renderNotes() {
   host.appendChild(el('h2', null, 'All footers'));
   host.appendChild(segmentEditor('footers', 'Footers'));
 
-  host.appendChild(el('h2', null, 'Individual segments'));
-  var segs = S.data.segments.headers.concat(S.data.segments.footers).concat(S.data.segments.footnotes);
-  if (!segs.length) host.appendChild(el('p', 'hint', 'This tab has no headers, footers or footnotes.'));
+  // Footnotes are deliberately absent here: they are styled as one set
+  // above, not one row per footnote.
+  host.appendChild(el('h2', null, 'Individual headers and footers'));
+  var segs = S.data.segments.headers.concat(S.data.segments.footers);
+  if (!segs.length) host.appendChild(el('p', 'hint', 'This tab has no headers or footers.'));
   segs.forEach(function (seg) {
     host.appendChild(listItem(seg.role,
       (seg.empty ? '(empty) ' : '') + (seg.preview || seg.segmentId),

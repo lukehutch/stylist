@@ -236,6 +236,19 @@ test('styling all footnotes targets each footnote by segmentId', (t) => {
   t.equal(reqs[0].updateTextStyle.textStyle.fontSize.magnitude, 9);
 });
 
+test('styling all footnotes writes only the settings that were changed', (t) => {
+  S.__reset();
+  S.writeSegmentStyle({ target: 'footnotes', textStyle: { fontSizePt: 9 } });
+  const reqs = allRequests(S);
+  t.ok(reqs.length > 0);
+  reqs.forEach((r) => {
+    t.equal(r.updateTextStyle.fields, 'fontSize',
+      'the mask names fontSize alone, so an italic run inside a footnote stays italic');
+    t.deepEqual(Object.keys(r.updateTextStyle.textStyle), ['fontSize']);
+    t.notOk(r.updateParagraphStyle, 'and nothing is written at paragraph level');
+  });
+});
+
 test('keepLinesTogether reaches footnote paragraphs', (t) => {
   S.__reset();
   S.writeSegmentStyle({ target: 'footnotes', paragraphStyle: { keepLinesTogether: true } });
