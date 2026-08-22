@@ -82,6 +82,10 @@
     border: 1px solid var(--line); background: #f8f9fa; border-radius: 4px; color: var(--muted);
   }
   .tabs button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  /* The glyph before each tab's label. Text-presentation symbols rather than
+     emoji, so they inherit the button colour: muted when inactive, white on
+     the accent blue when active. */
+  .tabs .tico { margin-right: 3px; opacity: 0.85; }
   .panel { display: none; }
   .panel.active { display: block; }
 
