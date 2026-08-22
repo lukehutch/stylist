@@ -99,5 +99,12 @@
     </div>
 
     <?!= include('JavaScript'); ?>
+
+    <!-- A write that runs past half a second veils the panel and spins an
+         hourglass over it until it settles. -->
+    <div id="busy" aria-hidden="true">
+      <div class="veil"></div>
+      <div class="glass">&#x231B;</div>
+    </div>
   </body>
 </html>

@@ -220,6 +220,26 @@
   #status.err { color: var(--err); background: #fce8e6; }
   #status.ok { color: var(--ok); }
 
+  /* ---- slow-write veil: everything greys out, one hourglass, centred ---- */
+  #busy { position: fixed; top: 0; right: 0; bottom: 0; left: 0; display: none; z-index: 30; }
+  #busy.on { display: block; }
+  #busy .veil { position: absolute; top: 0; right: 0; bottom: 0; left: 0;
+    background: rgba(255, 255, 255, 0.66); }
+  /* The translate keeps it centred while the rotation spins it. */
+  #busy .glass {
+    position: absolute; top: 50%; left: 50%;
+    font-size: calc(var(--fs) * 3); line-height: 1;
+    transform: translate(-50%, -50%);
+    animation: busy-spin 1.1s linear infinite;
+  }
+  @keyframes busy-spin {
+    from { transform: translate(-50%, -50%) rotate(0deg); }
+    to   { transform: translate(-50%, -50%) rotate(360deg); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #busy .glass { animation: none; }
+  }
+
   /* ---- footer: the status line and the tip row, pinned to the bottom ---- */
   /* Fixed, so it is on screen on every tab and at every scroll position. The
      max-height and the scrolling body below are what stop an opened tip row

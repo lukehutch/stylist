@@ -141,6 +141,75 @@ function resolveTab_(doc, tabId) {
 
 /** Every tab id to operate on for a given scope ('current' or 'all'). */
 /**
+ * Page setup and named styles without reading the document's content.
+ *
+ * The standard `fields` query parameter asks the server to send back only
+ * some fields of the document; everything else -- above all the body, which
+ * is what makes a long document take seconds to read -- stays behind. The
+ * clasp-generated service does not list `fields` among get()'s parameters,
+ * so whether it passes through is not something a local test can settle:
+ * this function finds out from the response instead.
+ *
+ * If the parameter was ignored, the full document comes back -- which
+ * contains everything the callers want anyway. It is cached as the execution's
+ * document and null is returned, meaning "you have a full read; use it".
+ * Nothing is worse off than before this function existed; when the parameter
+ * does pass through, metadata reads stop carrying the body entirely.
+ */
+var META_FIELDS_ = ['title', 'documentStyle', 'namedStyles', 'tabs'];
+
+function maskedMeta_(fields) {
+  var res = Docs.Documents.get(activeDocId_(), {
+    includeTabsContent: true,
+    fields: fields
+  });
+  if (!res) return null;
+  // A field we did not ask for means the mask did not pass through -- which
+  // also means this is a complete response. Cache it as the execution's read.
+  // (Looking for an absent body is not enough: tabbed documents have none at
+  // the top level whether or not the mask worked.)
+  for (var k in res) {
+    if (META_FIELDS_.indexOf(k) === -1) {
+      docCache_ = res;
+      return null;
+    }
+  }
+  return res;
+}
+
+/**
+ * What the page and styles panels poll on, in one small response:
+ * the tab list, this tab's page setup and its named styles. No body, no
+ * headers, footers, footnotes, lists or tables.
+ */
+function readDocMeta(tabId) {
+  return timed_('metaRead', function () {
+    var doc = maskedMeta_('title,documentStyle,namedStyles,' +
+      'tabs.tabProperties,tabs.documentTab.documentStyle,tabs.documentTab.namedStyles') ||
+      fetchDoc_();
+    var flat = flattenTabs_(doc);
+    var hit = null;
+    if (tabId) {
+      for (var i = 0; i < flat.length; i++) {
+        if (flat[i].tabId === tabId) { hit = flat[i]; break; }
+      }
+    }
+    if (!hit && flat.length) hit = flat[0];
+    // Tabbed documents carry these under documentTab; documents from before
+    // the tabs feature carry them at the top level with the same shape.
+    var content = (hit && (hit.tab.documentTab || {})) || doc;
+    var ds = content.documentStyle !== undefined ? content.documentStyle : doc.documentStyle;
+    var ns = content.namedStyles !== undefined ? content.namedStyles : doc.namedStyles;
+    return {
+      activeTabId: hit ? hit.tabId : null,
+      tabs: flat.map(function (t) { return { tabId: t.tabId, title: t.title, depth: t.depth }; }),
+      pageFormat: pageFormatFromStyle_(hit ? hit.tabId : null, ds),
+      namedStyles: namedStylesFromContent_({ namedStyles: ns })
+    };
+  });
+}
+
+/**
  * The tabs a write targets, worked out from a tab list the caller already
  * has. The sidebar was handed the whole list when it loaded, so passing it
  * back saves re-reading the document just to learn the tab ids -- which on a

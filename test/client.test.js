@@ -347,7 +347,11 @@ module.exports = ({ suite, test }) => {
   });
 
   test('returning to the sidebar re-reads the document at once', (t) => {
-    t.match(clientJs, /window\.addEventListener\('focus', function \(\) \{ setTimeout\(poll, 0\); \}\)/);
+    const fn = /window\.addEventListener\('focus', function \(\) \{[^]*?\n  \}\);/.exec(clientJs)[0];
+    t.match(fn, /lastCtx = null;/,
+      'one read is spent even with the cursor unmoved: text edited elsewhere in ' +
+      'the same list or table would not show otherwise');
+    t.match(fn, /setTimeout\(poll, 0\)/);
   });
 
   test('the poll stands aside while a write is in flight', (t) => {
@@ -829,7 +833,7 @@ module.exports = ({ suite, test }) => {
   test('a poll is skipped while a picker has focus, not merely re-rendered', (t) => {
     const fn = /function poll\(\)[^]*?\n}/.exec(clientJs)[0];
     t.match(fn, /if \(pickerOpen\(\)\) \{ pollDeferred = true; return Promise\.resolve\(\); \}/);
-    t.ok(fn.indexOf('pickerOpen()') < fn.indexOf("callRead('loadAll'"),
+    t.ok(fn.indexOf('pickerOpen()') < fn.indexOf("callRead("),
       'the check comes before the read, so the fingerprint cannot move on without a render');
   });
 
@@ -912,9 +916,39 @@ module.exports = ({ suite, test }) => {
   test('a read that was overtaken by a write is thrown away, not drawn', (t) => {
     const fn = /function poll\(\)[^]*?\n}/.exec(clientJs)[0];
     t.match(fn, /var at = writes;/);
-    t.match(fn, /if \(at !== writes\) return;/);
-    t.ok(fn.indexOf('if (at !== writes) return;') < fn.indexOf('S.data = data'),
-      'the check comes before anything is put on screen');
+    t.match(fn, /if \(at !== writes\) return null;/);
+    t.ok(fn.indexOf('if (at !== writes) return null;') < fn.indexOf('Object.keys(slice)'),
+      'the check comes before anything is merged into the state');
+  });
+
+  suite('Sync reads only what the open panel needs');
+
+  test('page and styles poll on metadata alone; notes and presets never read', (t) => {
+    const map = /var PANEL_SYNC = \{[^}]*\}/.exec(clientJs)[0];
+    t.match(map, /page: 'meta'/);
+    t.match(map, /styles: 'meta'/);
+    t.match(map, /notes: 'static'/);
+    t.match(map, /presets: 'static'/);
+  });
+
+  test('lists and tables re-read only when the cursor moves between things', (t) => {
+    const fn = /function poll\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /callRead\('cursorContext'\)/, 'the cheap probe goes first');
+    t.match(fn, /if \(now === lastCtx\) return null;/,
+      'an unchanged answer reads nothing at all');
+    t.ok(fn.indexOf("JSON.stringify(ctx || {})") < fn.indexOf("callRead('refresh'"),
+      'and only a changed answer spends the content read');
+    t.match(fn, /callRead\('refresh', \[S\.tabId, what\]\)/,
+      'the read is one slice, not the whole loadAll');
+    t.notOk(/callRead\('loadAll'/.test(fn), 'no poll ever loads everything again');
+  });
+
+  test('switching panels refreshes immediately and distrusts an old cursor answer', (t) => {
+    // Matched as one contiguous source pattern rather than inside a captured
+    // span: brace-counting these template-built panels is how a mutant hides.
+    t.match(clientJs,
+      /activePanel = name;\s*\n\s*lastCtx = null;\s*\n\s*setTimeout\(poll, 0\);/,
+      'the panel is recorded, the old cursor answer discarded, and a read prompted');
   });
 
   test('a write carries the tab list the sidebar already has', (t) => {
@@ -1008,5 +1042,49 @@ module.exports = ({ suite, test }) => {
     t.match(css, /\.row > label \{ color: var\(--muted\)/);
     t.match(css, /\.checks\.applyall label \{[^}]*color: var\(--fg\)/,
       'except the one that governs a whole panel');
+  });
+
+  suite('A slow write takes the panel with it');
+
+  test('past half a second, a veil and a spinning hourglass appear', (t) => {
+    t.match(clientJs, /var BUSY_AFTER_MS = 500;/);
+    t.match(sidebar, /<div id="busy"[^]*?<div class="veil"><\/div>\s*<div class="glass">/);
+    t.match(css, /#busy \{ position: fixed;[^}]*display: none/);
+    t.match(css, /#busy\.on \{ display: block; \}/);
+    t.match(css, /#busy \.veil \{[^}]*background: rgba\(255, 255, 255, 0\.66\)/);
+    t.match(css, /#busy \.glass \{[^}]*top: 50%; left: 50%;/, 'centred in the viewport');
+    t.match(css, /@keyframes busy-spin \{[^]*?rotate\(360deg\)/, 'it spins');
+    t.match(css, /@media \(prefers-reduced-motion: reduce\) \{[^}]*#busy \.glass \{ animation: none/, 'unless motion is reduced');
+  });
+
+  test('only writes arm it, and only while something is still in flight', (t) => {
+    const call = /function call\(fn, args\)[^]*?\n}/.exec(clientJs)[0];
+    // Anchored to its own line: a bare /armBusy\(\);/ would also match inside
+    // disarmBusy(); and pass with the call site deleted.
+    t.match(call, /(^|\n)\s*armBusy\(\);/, 'writes arm it');
+    t.match(call, /if \(S\.busy <= 0\) disarmBusy\(\);/, 'the last write to settle disarms it');
+    const arm = /function armBusy\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(arm, /busyTimer = setTimeout/, 'not at once -- after the threshold');
+    t.notOk(/callRead[\s\S]{0,80}armBusy/.test(clientJs), 'reads never arm it');
+  });
+
+  suite('Panels show only what is at the cursor');
+
+  test('with no list under the cursor, the panel says so and lists nothing', (t) => {
+    const fn = /function renderLists\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /Click inside a list in the document to edit it here\./);
+    t.notOk(/Bulleted lists/.test(fn), 'no enumeration of every list');
+    t.notOk(/listMeta\(l\)/.test(fn), 'no row per list');
+  });
+
+  test('with no table under the cursor, the panel says so and lists nothing', (t) => {
+    const fn = /function renderTables\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /Click inside a table in the document to edit it here\./);
+    t.notOk(/S\.data\.tables\.forEach/.test(fn), 'no row per table');
+  });
+
+  test('apply-to-all survives the scoping -- it is the whole-document path', (t) => {
+    t.match(clientJs, /lists\.length > 1[^]*?applyAllSwitch\('lists'/);
+    t.match(clientJs, /S\.data\.tables\.length > 1[^]*?applyAllSwitch\('tables'/);
   });
 };

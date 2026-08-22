@@ -44,8 +44,11 @@ suite('Reading');
 
 test('every panel gets its data from one loadAll call', function (t) {
   var d = loadAll(null);
+  // footnotes are deliberately absent: the notes panel styles them as one
+  // set via the segments slice, so loading them separately reads the body
+  // for data nothing on screen uses.
   ['pageFormat', 'sections', 'namedStyles', 'segments', 'lists', 'tables',
-   'footnotes', 'constants'].forEach(function (k) {
+   'constants'].forEach(function (k) {
     t.notEqual(d[k], undefined, 'loadAll returned no ' + k);
   });
   t.equal(d.namedStyles.length, 9, 'there should be nine named styles');

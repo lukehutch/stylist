@@ -334,7 +334,7 @@ test('the load reports where its own time went', (t) => {
   // difference between a slow Docs API read and a slow cursor lookup, which
   // are fixed in completely different places.
   t.ok(d.timings, 'a breakdown comes back with the payload');
-  ['docsGet', 'page', 'styles', 'lists', 'tables', 'footnotes', 'serverTotal']
+  ['docsGet', 'page', 'styles', 'lists', 'tables', 'serverTotal']
     .forEach((k) => t.equal(typeof d.timings[k], 'number', k + ' is timed'));
 });
 
@@ -1159,4 +1159,139 @@ test('a level with no paragraphs in it asks for nothing', (t) => {
   t.equal(allRequests(M).filter((r) => r.deleteParagraphBullets).length, 0);
 });
 
+/* ------------------------------------------------------------------ */
+suite('Metadata reads that never touch the body');
+
+test('the meta read asks for page setup, named styles and tabs, and nothing else', (t) => {
+  const seen = [];
+  const M = makeSandbox(makeDoc(), {
+    docsGet: (id, opts) => { seen.push(opts); return fullMeta(makeDoc()); }
+  });
+  M.readDocMeta('t.0');
+  t.equal(seen.length, 1);
+  for (const want of ['documentStyle', 'namedStyles', 'tabs.tabProperties',
+                      'tabs.documentTab.documentStyle']) {
+    t.ok(seen[0].fields.indexOf(want) !== -1, want + ' is asked for');
+  }
+  for (const banned of ['body', 'headers', 'footers', 'footnotes', 'lists', 'inlineObjects']) {
+    t.ok(seen[0].fields.indexOf(banned) === -1, banned + ' is not asked for');
+  }
+});
+
+test('a masked response serves the panels without a second read', (t) => {
+  let calls = 0;
+  const M = makeSandbox(makeDoc(), {
+    docsGet: () => { calls++; return fullMeta(makeDoc(), 't.0'); }
+  });
+  const meta = M.readDocMeta('t.0');
+  t.equal(calls, 1);
+  t.equal(meta.activeTabId, 't.0');
+  t.deepEqual(meta.tabs, [
+    { tabId: 't.0', title: 'Main', depth: 0 },
+    { tabId: 't.1', title: 'Appendix', depth: 1 }
+  ]);
+  t.equal(meta.pageFormat.pageWidthPt, 612);
+  t.equal(meta.namedStyles.length, 9);
+});
+
+test('an ignored mask comes back as a complete response, and is cached as one', (t) => {
+  const doc = makeDoc();
+  let calls = 0;
+  const M = makeSandbox(doc, { docsGet: () => { calls++; return doc; } });
+  const meta = M.readDocMeta('t.0');
+  t.equal(calls, 1, 'no second read to make up for it');
+  t.ok(M.docCache_, 'the full response became the execution\'s document');
+  t.equal(meta.namedStyles.length, 9);
+  t.equal(meta.pageFormat.pageWidthPt, 612,
+    'values come out of the same response either way');
+});
+
+test('refresh("meta") returns the slice the poll merges', (t) => {
+  const M = makeSandbox(makeDoc(), { docsGet: () => fullMeta(makeDoc(), 't.0') });
+  const slice = M.refresh('t.0', 'meta');
+  t.deepEqual(Object.keys(slice).sort(), ['activeTabId', 'namedStyles', 'pageFormat', 'tabs']);
+});
+
+test('footnotes are no longer part of any default load', (t) => {
+  const d = S.loadAll(null);
+  t.equal(d.footnotes, undefined, 'not in loadAll');
+  const r = S.refresh('t.0');
+  t.equal(r.footnotes, undefined, 'and not in refresh');
+});
+
+/** A response shaped like a honored field mask: metadata only, no body.
+    Child tabs stay nested, exactly as the API returns them. */
+function fullMeta(doc) {
+  const strip = (t) => ({
+    tabProperties: t.tabProperties,
+    documentTab: { documentStyle: t.documentTab.documentStyle, namedStyles: t.documentTab.namedStyles },
+    childTabs: (t.childTabs || []).map(strip)
+  });
+  return {
+    title: doc.title,
+    documentStyle: doc.tabs[0].documentTab.documentStyle,
+    namedStyles: doc.tabs[0].documentTab.namedStyles,
+    tabs: doc.tabs.map(strip)
+  };
+}
+
+/* ------------------------------------------------------------------ */
+suite('The cursor probe that gates content reads');
+
+/** A fake element chain, shaped like DocumentApp's object model. */
+function chainOf(...types) {
+  // innermost first; each wraps the next
+  return types.reduce((child, type) => {
+    if (type === 'LIST_ITEM') {
+      return { getType: () => type, getParent: () => child, getListId: () => 'list.X' };
+    }
+    return { getType: () => type, getParent: () => child };
+  }, null);
+}
+/** What DocumentApp hands back from getSelection(): null, or range elements. */
+function selectionOf(el) {
+  return el ? { getRangeElements: () => [{ getElement: () => el }] } : null;
+}
+
+test('the cursor in a list names that list', (t) => {
+  const M = makeSandbox(makeDoc());
+  M.__selection = selectionOf(chainOf('LIST_ITEM', 'BODY_SECTION'));
+  t.deepEqual(M.cursorContext(), { listId: 'list.X' });
+});
+
+test('the cursor in a table reports presence -- tables have no id here', (t) => {
+  const M = makeSandbox(makeDoc());
+  M.__selection = selectionOf(chainOf('TABLE_CELL', 'TABLE_ROW', 'TABLE', 'BODY_SECTION'));
+  t.deepEqual(M.cursorContext(), { inTable: true });
+});
+
+test('the probe climbs through a partial selection to the thing that holds it', (t) => {
+  // A character-level selection hands back a Text element; identity belongs
+  // to the paragraph above it.
+  const textEl = { getType: () => 'TEXT', getParent: () => chainOf('LIST_ITEM') };
+  const M = makeSandbox(makeDoc());
+  M.__selection = selectionOf(textEl);
+  t.deepEqual(M.cursorContext(), { listId: 'list.X' });
+});
+
+test('with no selection, the bare cursor decides', (t) => {
+  const M = makeSandbox(makeDoc());
+  M.__selection = null;
+  M.__cursor = { getElement: () => chainOf('LIST_ITEM') };
+  t.deepEqual(M.cursorContext(), { listId: 'list.X' });
+});
+
+test('plain paragraphs and empty selections give an empty context', (t) => {
+  const M = makeSandbox(makeDoc());
+  M.__selection = selectionOf(chainOf('PARAGRAPH', 'BODY_SECTION'));
+  t.deepEqual(M.cursorContext(), {});
+  M.__selection = selectionOf(null);
+  t.deepEqual(M.cursorContext(), {}, 'no selection at all');
+});
+
+test('whatever goes wrong up there, the answer stays an object', (t) => {
+  const M = makeSandbox(makeDoc());
+  M.__selection = { getRangeElements: () => { throw new Error('no ui'); } };
+  t.deepEqual(M.cursorContext(), {});
+});
 };

@@ -68,10 +68,14 @@ function rawCall(fn, args) {
 function call(fn, args) {
   S.busy++;
   writes++;
+  armBusy();
   var p = chain.catch(function () {}).then(function () { return rawCall(fn, args); });
   chain = p.catch(function () {});
   p.then(done, done);
-  function done() { S.busy--; }
+  function done() {
+    S.busy--;
+    if (S.busy <= 0) disarmBusy();   // queued writes re-arm; one veil covers all of them
+  }
   return p;
 }
 
@@ -93,6 +97,32 @@ function callRead(fn, args) {
  * worked is one more thing to read about a result already on screen. Calling
  * this with no message hides the bar.
  */
+/**
+ * A write that is taking longer than half a second takes the panel with it:
+ * a veil goes over everything and an hourglass spins in the middle, until
+ * the write settles. Reads never trigger it -- they hold nothing up.
+ */
+var BUSY_AFTER_MS = 500;
+var busyTimer = null;
+
+function busyShow(on) {
+  var v = document.getElementById('busy');
+  if (v) v.classList.toggle('on', !!on);
+}
+
+function armBusy() {
+  if (busyTimer) return;
+  busyTimer = setTimeout(function () {
+    busyTimer = null;
+    busyShow(true);
+  }, BUSY_AFTER_MS);
+}
+
+function disarmBusy() {
+  if (busyTimer) { clearTimeout(busyTimer); busyTimer = null; }
+  busyShow(false);
+}
+
 function status(msg, kind) {
   var el = document.getElementById('status');
   el.textContent = msg || '';
@@ -1024,17 +1054,7 @@ function renderLists() {
   }
 
   host.appendChild(el('p', 'hint',
-    'Click inside a list in the document to edit it here. Until then, every list ' +
-    'in this tab is listed below.'));
-  [['Bulleted lists', 'bulleted'], ['Numbered lists', 'numbered']].forEach(function (g) {
-    var mine = lists.filter(function (l) { return l.kind === g[1]; });
-    if (!mine.length) return;
-    host.appendChild(el('h2', null, g[0]));
-    mine.forEach(function (l, i) {
-      host.appendChild(listItem(listName(l, i + 1), listMeta(l),
-        function () { return listBody(l); }, 'list:' + l.listId));
-    });
-  });
+    'Click inside a list in the document to edit it here.'));
 }
 
 /**
@@ -1278,18 +1298,8 @@ function renderTables() {
   var chosen = (active === null || active === undefined) ? null : S.data.tables[active];
 
   if (!chosen) {
-    // Every table is still listed, because a document with one table should
-    // not make you click into it first. With several, the list is how you
-    // reach the one you have not put the cursor in.
     host.appendChild(el('p', 'hint',
-      'Click inside a table in the document to edit it here. Until then, every table ' +
-      'in this tab is listed below.'));
-    S.data.tables.forEach(function (t) {
-      host.appendChild(listItem(
-        'Table ' + (t.index + 1),
-        t.rows + '×' + t.columns + (t.preview ? ' · ' + t.preview : ''),
-        function () { return tableBody(t); }));
-    });
+      'Click inside a table in the document to edit it here.'));
     return;
   }
 
@@ -1661,30 +1671,71 @@ function renderKeepingEdits() {
   try { node.setSelectionRange(keep.start, keep.end); } catch (e) { /* not text */ }
 }
 
-/* ---- the read ---------------------------------------------------- */
+/* ---- what each panel needs to stay current ------------------------
+ *
+ * meta    -- page setup, named styles and the tab list. A masked response
+ *            that never carries the body, so polling it costs the same on a
+ *            200-page document as on a one-pager.
+ * context -- the list or table under the cursor. A cheap probe says whether
+ *            the cursor is still where it was; only when it has moved does
+ *            anything content-shaped get read at all.
+ * static  -- never read on the clock. Switching to the panel refreshes it,
+ *            as does any write.
+ * ------------------------------------------------------------------ */
+var PANEL_SYNC = {
+  page: 'meta', styles: 'meta',
+  lists: 'context', tables: 'context',
+  notes: 'static', presets: 'static'
+};
+var activePanel = 'page';
+
+/** The last cursorContext answer, as JSON so it can be compared. */
+var lastCtx = null;
 
 function poll() {
   if (!S.data || S.busy || document.hidden) return Promise.resolve();
   // Skipped whole, not just the render: fetching here would move the
   // fingerprint on, and the change would then never be drawn at all.
   if (pickerOpen()) { pollDeferred = true; return Promise.resolve(); }
-  // Nothing else is in flight -- S.busy is checked above and this read joins
-  // no queue -- so this measures the server round trip, not time spent waiting.
+
+  var kind = PANEL_SYNC[activePanel] || 'static';
   var t0 = Date.now();
   var at = writes;
-  return callRead('loadAll', [S.tabId])
-    .then(function (data) {
-      lastFetchMs = Date.now() - t0;
-      // A write went out while this read was in the air, so what came back
-      // predates it. Drawing it would put the old value back on screen.
-      if (at !== writes) return;
-      var fresh = JSON.stringify(data);
-      if (fresh === S.fingerprint) return;
-      S.data = data;
-      S.tabId = data.activeTabId;
-      S.fingerprint = fresh;
-      renderKeepingEdits();
+
+  var prep;
+  if (kind === 'meta') {
+    prep = Promise.resolve('meta');
+  } else if (kind !== 'context') {
+    prep = Promise.resolve(null);          // nothing to watch on the clock
+  } else {
+    // A few accessor calls to find out whether there is anything to read.
+    // Only the cursor moving onto, off, or between lists and tables spends
+    // a content read.
+    prep = callRead('cursorContext').then(function (ctx) {
+      var now = JSON.stringify(ctx || {});
+      if (now === lastCtx) return null;
+      lastCtx = now;
+      return activePanel;
+    });
+  }
+
+  return prep
+    .then(function (what) {
+      if (!what) return null;
+      return callRead('refresh', [S.tabId, what]).then(function (slice) {
+        lastFetchMs = Date.now() - t0;
+        // A write went out while this read was in the air, so what came back
+        // predates it. Drawing it would put the old value back on screen.
+        if (at !== writes) return null;
+        Object.keys(slice).forEach(function (k) { S.data[k] = slice[k]; });
+        if (slice.activeTabId) S.tabId = slice.activeTabId;
+        var fresh = JSON.stringify(S.data);
+        if (fresh === S.fingerprint) return null;
+        S.fingerprint = fresh;
+        return true;
+      });
     })
+    .then(function (changed) { if (changed) renderKeepingEdits(); })
     .catch(function () { /* transient: the next tick tries again */ });
 }
 
@@ -1767,6 +1818,11 @@ function switchTab(name) {
     document.getElementById('panel-' + n).classList.toggle('active', n === name);
     document.getElementById('tab-' + n).classList.toggle('active', n === name);
   });
+  // A panel you have just come back to should not wait out the clock, and a
+  // context panel should not trust a cursor answer from before you left.
+  activePanel = name;
+  lastCtx = null;
+  setTimeout(poll, 0);
 }
 
 function boot() {
@@ -1820,7 +1876,14 @@ function boot() {
   // user most wants it to be current, and it is the closest thing to an edit
   // event this add-on can get: Docs offers no cursor or typing trigger, and a
   // server-side trigger could not reach an open sidebar anyway.
-  window.addEventListener('focus', function () { setTimeout(poll, 0); });
+  window.addEventListener('focus', function () {
+    // Coming back from working in the document is when the user most wants
+    // the panel current, so spend one read on it even if the cursor has not
+    // moved: text edited elsewhere in the same list or table would not show
+    // otherwise.
+    lastCtx = null;
+    setTimeout(poll, 0);
+  });
 
   // Capture, because blur does not bubble. This is what makes deferring cheap:
   // the read the picker held off happens as soon as the picker is done with.

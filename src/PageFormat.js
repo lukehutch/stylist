@@ -19,12 +19,17 @@ var PAGE_SIZE_PRESETS = [
 
 var DOC_MARGIN_KEYS = ['marginTop', 'marginBottom', 'marginLeft', 'marginRight', 'marginHeader', 'marginFooter'];
 
-function readPageFormat(tabId) {
-  var doc = fetchDoc_();
-  var ctx = resolveTab_(doc, tabId);
-  var ds = ctx.content.documentStyle || {};
+/**
+ * Page setup from a documentStyle message alone.
+ *
+ * Split from readPageFormat so the metadata-only read can serve it without
+ * ever fetching body content: page setup is document-level data, and none of
+ * it needs to know what is written on the page.
+ */
+function pageFormatFromStyle_(tabId, ds) {
+  ds = ds || {};
   var out = {
-    tabId: ctx.tabId,
+    tabId: tabId,
     pageWidthPt: dimPt_((ds.pageSize || {}).width),
     pageHeightPt: dimPt_((ds.pageSize || {}).height),
     flipPageOrientation: !!ds.flipPageOrientation,
@@ -39,6 +44,12 @@ function readPageFormat(tabId) {
   };
   DOC_MARGIN_KEYS.forEach(function (k) { out[k + 'Pt'] = dimPt_(ds[k]); });
   return out;
+}
+
+function readPageFormat(tabId) {
+  var doc = fetchDoc_();
+  var ctx = resolveTab_(doc, tabId);
+  return pageFormatFromStyle_(ctx.tabId, ctx.content.documentStyle);
 }
 
 /**

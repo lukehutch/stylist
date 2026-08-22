@@ -23,25 +23,27 @@ var NAMED_STYLE_TYPES = [
   { id: 'HEADING_6',   label: 'Heading 6' }
 ];
 
+/** The named-style editor values, from an already-read tab. */
+function namedStylesFromContent_(content) {
+  var byType = {};
+  ((((content || {}).namedStyles) || {}).styles || []).forEach(function (s) {
+    byType[s.namedStyleType] = s;
+  });
+  return NAMED_STYLE_TYPES.map(function (t) {
+    var s = byType[t.id] || {};
+    return {
+      namedStyleType: t.id,
+      label: t.label,
+      textStyle: textStyleToUi_(s.textStyle),
+      paragraphStyle: paragraphStyleToUi_(s.paragraphStyle)
+    };
+  });
+}
+
 function readNamedStyles(tabId) {
   var doc = fetchDoc_();
   var ctx = resolveTab_(doc, tabId);
-  var byType = {};
-  (((ctx.content.namedStyles) || {}).styles || []).forEach(function (s) {
-    byType[s.namedStyleType] = s;
-  });
-  return {
-    tabId: ctx.tabId,
-    styles: NAMED_STYLE_TYPES.map(function (t) {
-      var s = byType[t.id] || {};
-      return {
-        namedStyleType: t.id,
-        label: t.label,
-        textStyle: textStyleToUi_(s.textStyle),
-        paragraphStyle: paragraphStyleToUi_(s.paragraphStyle)
-      };
-    })
-  };
+  return { tabId: ctx.tabId, styles: namedStylesFromContent_(ctx.content) };
 }
 
 /**

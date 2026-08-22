@@ -18,7 +18,8 @@ const config = require('../gapp.config.json');
 
 const ROOT = path.join(__dirname, '..');
 
-function makeSandbox(doc) {
+function makeSandbox(doc, opts) {
+  opts = opts || {};
   const captured = [];
   // DocumentApp reads these; the tests set them through sb.__selection.
   const state = { selection: null, cursor: null, body: null };
@@ -47,9 +48,14 @@ function makeSandbox(doc) {
   };
 
   const counts = { get: 0 };
+  // `opts.docsGet(id, optionalArgs)` replaces get() wholesale when a test has
+  // to see the exact call -- the masked-read tests do, since their whole
+  // subject is what got asked for.
+  const docsGet = opts.docsGet ||
+    (() => { counts.get++; return JSON.parse(JSON.stringify(doc)); });
   const Docs = {
     Documents: {
-      get: () => { counts.get++; return JSON.parse(JSON.stringify(doc)); },
+      get: docsGet,
       batchUpdate: (resource, id) => {
         captured.push({ documentId: id, requests: resource.requests });
         return { replies: [] };

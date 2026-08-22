@@ -58,7 +58,6 @@ function loadAll(tabId) {
     lists: timed_('lists', function () { return readLists(active); }),
     tables: tables.tables,
     activeTableIndex: tables.activeIndex,
-    footnotes: timed_('footnotes', function () { return readFootnotes(active); }),
     presets: timed_('presets', function () { return listPresets(); }),
     stylePresets: timed_('stylePresets', function () { return listStylePresets(); }),
     constants: {
@@ -90,7 +89,17 @@ var FONT_LIST = [
  * this after an apply so that inherited/derived values stay honest without
  * paying for a full loadAll.
  */
+/**
+ * Re-read one slice of the sidebar's state.
+ *
+ * 'meta' is the cheap one: a masked response carrying page setup, named
+ * styles and the tab list and nothing else -- no body -- so polling it does
+ * not get slower as the document grows. Everything else is content-shaped
+ * and pays for a full read; the caller's job is to ask rarely (see
+ * cursorContext).
+ */
 function refresh(tabId, what) {
+  if (what === 'meta') return readDocMeta(tabId);
   var out = {};
   if (!what || what === 'page') out.pageFormat = readPageFormat(tabId);
   if (!what || what === 'styles') out.namedStyles = readNamedStyles(tabId).styles;
@@ -102,6 +111,47 @@ function refresh(tabId, what) {
     out.tables = t.tables;
     out.activeTableIndex = t.activeIndex;
   }
-  if (!what || what === 'footnotes') out.footnotes = readFootnotes(tabId);
+  return out;
+}
+
+/**
+ * What is under the cursor, for the price of a few accessor calls.
+ *
+ * This is the gate that keeps the lists and tables panels from re-reading
+ * the document every second: the panels only show the list or table the
+ * cursor sits in, so if this answer has not changed there is nothing for
+ * them to learn from a read. Identity comes straight off the element the
+ * selection or cursor is in -- no walk over the body, no indices.
+ *
+ * A table has no id in DocumentApp, so it reports presence only; moving
+ * between two tables necessarily passes through not-being-in-one, which is
+ * change enough.
+ */
+function cursorContext() {
+  var out = {};
+  try {
+    var doc = DocumentApp.getActiveDocument();
+    if (!doc) return out;
+    var el = null;
+    var sel = doc.getSelection();
+    if (sel && sel.getRangeElements && sel.getRangeElements().length) {
+      el = sel.getRangeElements()[0].getElement();
+    } else {
+      var cur = doc.getCursor();
+      if (cur) el = cur.getElement();
+    }
+    while (el && el.getType) {
+      var type = el.getType();
+      if (type === DocumentApp.ElementType.LIST_ITEM) {
+        // getListId is the identity of the list this item belongs to. Some
+        // service versions expose it only via getList(); prefer the direct one.
+        out.listId = el.getListId !== undefined ? el.getListId()
+          : (el.getList && el.getList() ? el.getList().getId() : null);
+        break;
+      }
+      if (type === DocumentApp.ElementType.TABLE) { out.inTable = true; break; }
+      el = el.getParent();
+    }
+  } catch (e) { /* nothing selected yet, or no cursor: an empty context */ }
   return out;
 }
