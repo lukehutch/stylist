@@ -165,6 +165,28 @@ test('a 2.54cm margin equals the same 72pt', (t) => {
   t.near(allRequests(S)[0].updateDocumentStyle.documentStyle.marginLeft.magnitude, 72, 1e-6);
 });
 
+test('a page background colour is sent as an opaque OptionalColor', (t) => {
+  S.__reset();
+  S.writePageFormat({ backgroundColor: '#ff0000' });
+  const r = allRequests(S)[0].updateDocumentStyle;
+  t.deepEqual(r.documentStyle.background,
+    { color: { color: { rgbColor: { red: 1, green: 0, blue: 0 } } } });
+  t.equal(r.fields, 'background');
+});
+
+/* "Documents cannot have a transparent background color" -- the Docs API
+   discovery document says exactly that, so sending an empty OptionalColor is
+   a write Google accepts and then ignores, which is what made the "none"
+   button look broken. Naming the field with no value resets it instead. */
+test('clearing the page background resets the field rather than going transparent', (t) => {
+  S.__reset();
+  S.writePageFormat({ backgroundColor: '' });
+  const r = allRequests(S)[0].updateDocumentStyle;
+  t.equal(r.fields, 'background', 'the field is named, so it is reset');
+  t.equal(r.documentStyle.background, undefined,
+    'and carries no value -- an empty OptionalColor would be the ignored one');
+});
+
 test('header margin write warns while useCustomHeaderFooterMargins is off', (t) => {
   S.__reset();
   const res = S.writePageFormat({ marginHeaderPt: 24 });

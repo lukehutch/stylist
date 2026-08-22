@@ -280,16 +280,27 @@ function checkField(labelText, value, commit) {
  * Colour field. The Docs API models "no colour" as an empty OptionalColor,
  * which is distinct from black, so a clear button is a real control here.
  */
-function colorField(hex, commit) {
+/**
+ * A colour swatch and a "none" button beside it.
+ *
+ * `opts.blank` is what the swatch shows when the document has no colour set
+ * here, and what it changes to when "none" is pressed. A colour input has no
+ * way to render "unset", so it has to render the colour the document will
+ * actually come out as: white for a page background, black for text.
+ */
+function colorField(hex, commit, opts) {
+  opts = opts || {};
+  var blank = opts.blank || '#000000';
   var input = el('input');
   input.type = 'color';
-  input.value = hex || '#000000';
+  input.value = hex || blank;
   bindCommit(input, function (i) { return { value: i.value }; }, commit);
-  input.setLive(hex || '#000000');
+  input.setLive(hex || blank);
 
   var clear = el('button', 'act', 'none');
-  clear.title = 'Clear the colour (transparent / inherited)';
+  clear.title = opts.noneTitle || 'Clear the colour (transparent / inherited)';
   clear.addEventListener('click', function () {
+    input.value = blank;
     input.setLive(null);
     Promise.resolve(commit(''));
   });
@@ -633,7 +644,8 @@ function renderPage() {
     [{ id: 'PAGES', label: 'Pages' }, { id: 'PAGELESS', label: 'Pageless' }],
     pf.documentMode, function (v) { return applyPage({ documentMode: v }).then(reload); })));
   host.appendChild(fieldRow('Background', colorField(pf.backgroundColor,
-    function (v) { return applyPage({ backgroundColor: v }); })));
+    function (v) { return applyPage({ backgroundColor: v }); },
+    { blank: '#ffffff', noneTitle: 'Back to the default white page' })));
 
   /* ---- sections ---- */
   host.appendChild(el('h2', null, 'Sections'));
@@ -1352,6 +1364,28 @@ function atPath(path) {
 
 var rerendering = false;
 
+/**
+ * Whether the user has a picker open, and so nothing may be rebuilt under them.
+ *
+ * A native dropdown -- a <select>, a colour swatch, a font box backed by a
+ * <datalist> -- is drawn by the browser and not by this page. Nothing in the
+ * DOM says whether one is open, and replacing the element closes it with no
+ * way to put it back: the poll would silently cancel a choice half made.
+ *
+ * Focus is the one signal available, and it is good enough, because a dropdown
+ * cannot be open unless its control has focus. Erring the other way costs only
+ * freshness, and only while the user is inside a control they are about to
+ * change anyway -- the deferred read runs the moment focus leaves.
+ */
+function pickerOpen() {
+  var a = document.activeElement;
+  if (!a || !document.hasFocus()) return false;
+  if (a.tagName === 'SELECT') return true;
+  return a.tagName === 'INPUT' && (a.type === 'color' || a.hasAttribute('list'));
+}
+
+var pollDeferred = false;
+
 function renderKeepingEdits() {
   var a = document.activeElement;
   var keep = null;
@@ -1388,6 +1422,9 @@ function renderKeepingEdits() {
 
 function poll() {
   if (!S.data || S.busy || document.hidden) return Promise.resolve();
+  // Skipped whole, not just the render: fetching here would move the
+  // fingerprint on, and the change would then never be drawn at all.
+  if (pickerOpen()) { pollDeferred = true; return Promise.resolve(); }
   // call() bails above when anything else is in flight, so the queue is empty
   // here and this is the server round trip rather than time spent waiting.
   var t0 = Date.now();
@@ -1517,6 +1554,14 @@ function boot() {
   // event this add-on can get: Docs offers no cursor or typing trigger, and a
   // server-side trigger could not reach an open sidebar anyway.
   window.addEventListener('focus', function () { setTimeout(poll, 0); });
+
+  // Capture, because blur does not bubble. This is what makes deferring cheap:
+  // the read the picker held off happens as soon as the picker is done with.
+  document.addEventListener('blur', function () {
+    if (!pollDeferred) return;
+    pollDeferred = false;
+    setTimeout(poll, 0);
+  }, true);
 
   // Closing the sidebar tears down this frame; hiding it does not. Cover both,
   // so the poll never outlives the panel the user was looking at.

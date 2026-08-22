@@ -82,8 +82,18 @@ function writePageFormat(payload) {
       fields.push('documentFormat.documentMode');
     }
     if (payload.backgroundColor !== undefined) {
-      style.background = { color: hexToColor_(payload.backgroundColor) };
-      fields.push('background');
+      // A document background cannot be transparent -- the API says so in as
+      // many words -- so "no colour" here has to mean the default, which is
+      // white. Naming the field in the mask while sending no value for it is
+      // how the Docs API is asked to reset a property, and it is the only way
+      // to get white back without writing an explicit white the user would
+      // then have to clear again.
+      if (payload.backgroundColor === '' || payload.backgroundColor === null) {
+        fields.push('background');
+      } else {
+        style.background = { color: hexToColor_(payload.backgroundColor) };
+        fields.push('background');
+      }
     }
     if (!fields.length) return;
 

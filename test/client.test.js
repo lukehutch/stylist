@@ -692,4 +692,63 @@ module.exports = ({ suite, test }) => {
     t.match(css, /\.topbar \.title \{[^}]*display: flex/);
     t.match(css, /\.topbar \.title \{[^}]*align-items: center/);
   });
+
+  test('the banner is not crowded against the Units row', (t) => {
+    const m = /\.topbar \.title \{[^}]*margin-bottom: (\d+)px/.exec(css);
+    t.ok(m, 'the title still sets its own bottom margin');
+    t.ok(Number(m[1]) >= 10, 'and leaves real space below it, got ' + m[1] + 'px');
+  });
+
+  suite('Colour fields');
+
+  test('an unset swatch shows the colour the document will actually render', (t) => {
+    const fn = /function colorField\(hex, commit, opts\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /var blank = opts\.blank \|\| '#000000';/);
+    t.match(fn, /input\.value = hex \|\| blank;/);
+  });
+
+  test('"none" repaints the swatch instead of leaving the old colour on it', (t) => {
+    const fn = /function colorField\(hex, commit, opts\)[^]*?\n}/.exec(clientJs)[0];
+    const clear = /clear\.addEventListener[^]*?\}\);/.exec(fn)[0];
+    t.match(clear, /input\.value = blank;/, 'the swatch changes, not only the model');
+    t.match(clear, /commit\(''\)/, 'and the write still clears the colour');
+  });
+
+  test('the page background offers white, because a page cannot be transparent', (t) => {
+    const fn = /function renderPage\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /colorField\(pf\.backgroundColor,[^]*?blank: '#ffffff'/);
+  });
+
+  suite('Polling and open pickers');
+
+  /* Replacing a <select> closes the dropdown the browser drew for it, and
+     nothing can reopen it -- so the poll has to stand aside entirely. */
+  test('a poll is skipped while a picker has focus, not merely re-rendered', (t) => {
+    const fn = /function poll\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /if \(pickerOpen\(\)\) \{ pollDeferred = true; return Promise\.resolve\(\); \}/);
+    t.ok(fn.indexOf('pickerOpen()') < fn.indexOf("call('loadAll'"),
+      'the check comes before the read, so the fingerprint cannot move on without a render');
+  });
+
+  test('a dropdown, a colour swatch and a font box all count as open', (t) => {
+    const open = (a, hasFocus) => evalFromClient(['pickerOpen'],
+      'var document = { activeElement: ' + JSON.stringify(a) + ',' +
+      ' hasFocus: function () { return ' + (hasFocus === false ? 'false' : 'true') + '; } };\n' +
+      'if (document.activeElement) document.activeElement.hasAttribute =' +
+      ' function (n) { return this._attrs.indexOf(n) >= 0; };\n' +
+      'return pickerOpen();');
+    t.equal(open({ tagName: 'SELECT', _attrs: [] }), true);
+    t.equal(open({ tagName: 'INPUT', type: 'color', _attrs: [] }), true);
+    t.equal(open({ tagName: 'INPUT', type: 'text', _attrs: ['list'] }), true, 'the font box');
+    t.equal(open({ tagName: 'INPUT', type: 'number', _attrs: [] }), false,
+      'a plain number field is kept fresh -- renderKeepingEdits covers it');
+    t.equal(open({ tagName: 'SELECT', _attrs: [] }, false), false,
+      'and a select in a window that lost focus cannot have a dropdown open');
+    t.equal(open(null), false);
+  });
+
+  test('the deferred read happens as soon as the picker is done with', (t) => {
+    t.match(clientJs, /document\.addEventListener\('blur', function \(\) \{[^]*?pollDeferred = false;[^]*?\}, true\);/,
+      'on capture, because blur does not bubble');
+  });
 };

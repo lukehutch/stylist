@@ -11,7 +11,7 @@
 function onOpen(e) {
   DocumentApp.getUi()
     .createAddonMenu()
-    .addItem('Open format editor', 'showSidebar')
+    .addItem('Open', 'showSidebar')
     .addToUi();
 }
 
