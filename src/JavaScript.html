@@ -66,35 +66,24 @@ function call(fn, args) {
   return p;
 }
 
+/**
+ * The bar along the bottom of the sidebar, which is there only when it has
+ * something to say -- and only ever says two kinds of thing.
+ *
+ * Errors, because a write that did not happen leaves nothing to look at. And
+ * "working on it" for the two operations slow enough to look frozen, each of
+ * which clears the bar itself when it finishes.
+ *
+ * Nothing else. Every field applies to the document as you leave it and the
+ * poll brings changes back the other way, so a line reporting that something
+ * worked is one more thing to read about a result already on screen. Calling
+ * this with no message hides the bar.
+ */
 function status(msg, kind) {
   var el = document.getElementById('status');
-  el.textContent = msg;
+  el.textContent = msg || '';
   el.className = kind || '';
-}
-
-function reportResult(res, label) {
-  if (!res) { status(label + ' — no change', ''); return; }
-  var warn = (res.warnings || []).filter(Boolean);
-  if (warn.length) {
-    status(label + ' — ' + warn[0], 'err');
-    showNotes(warn);
-  } else {
-    status(label + ' ✓', 'ok');
-  }
-}
-
-function showNotes(list) {
-  var box = document.getElementById('globalNotes');
-  box.innerHTML = '';
-  if (!list || !list.length) { box.style.display = 'none'; return; }
-  box.style.display = 'block';
-  var ul = document.createElement('ul');
-  list.forEach(function (w) {
-    var li = document.createElement('li');
-    li.textContent = w;
-    ul.appendChild(li);
-  });
-  box.appendChild(ul);
+  el.style.display = msg ? 'block' : 'none';
 }
 
 /* =================================================================
@@ -267,7 +256,12 @@ function selectField(options, value, commit) {
   sel.value = value || '';
   bindCommit(sel, function (i) { return { value: i.value }; }, commit);
   sel.setLive(value || '');
-  return sel;
+  // Wrapped, because the arrow is drawn by .combo::after painting over the top
+  // of the control rather than by the browser painting inside it. Callers only
+  // ever hand this straight to fieldRow, so the wrapper is transparent to them.
+  var combo = el('span', 'combo');
+  combo.appendChild(sel);
+  return combo;
 }
 
 function checkField(labelText, value, commit) {
@@ -297,7 +291,7 @@ function colorField(hex, commit) {
   clear.title = 'Clear the colour (transparent / inherited)';
   clear.addEventListener('click', function () {
     input.setLive(null);
-    Promise.resolve(commit('')).then(function () { status('Colour cleared ✓', 'ok'); });
+    Promise.resolve(commit(''));
   });
   return [input, clear];
 }
@@ -551,22 +545,6 @@ function group(title) {
  * Collapsible list row. `key` identifies the row across re-renders -- the
  * background poll rebuilds every panel, and rows that were open stay open.
  */
-/**
- * The short "what you can do here" list at the top of a panel.
- *
- * Things the user can actually do, in their own words -- not an inventory of
- * what the Docs API refuses. A real limitation is worth saying next to the
- * control it affects, where it is actionable, rather than in a wall of text
- * someone has to read before reaching the first field.
- */
-function intro(items) {
-  var box = el('div', 'intro');
-  var ul = el('ul');
-  items.forEach(function (t) { ul.appendChild(el('li', null, t)); });
-  box.appendChild(ul);
-  return box;
-}
-
 function listItem(name, meta, buildBody, key) {
   key = key || name;
   var item = el('div', 'item');
@@ -598,12 +576,6 @@ function renderPage() {
   var host = document.getElementById('panel-page');
   host.innerHTML = '';
   var pf = S.data.pageFormat;
-
-  host.appendChild(intro([
-    'Set the page size, orientation and the four margins.',
-    'Set header and footer margins, and turn on a different first or even page.',
-    'Change margins and columns for one section at a time, further down.'
-  ]));
 
   host.appendChild(el('h2', null, 'Page size'));
   var presets = [{ id: '', label: 'Custom…' }].concat(
@@ -667,9 +639,6 @@ function renderPage() {
   host.appendChild(el('h2', null, 'Sections'));
   if (!S.data.sections.length) {
     host.appendChild(el('p', 'hint', 'No section breaks in this tab.'));
-  } else {
-    host.appendChild(el('p', 'hint',
-      'Section settings override the document defaults above for their part of the document.'));
   }
   S.data.sections.forEach(function (sec) {
     host.appendChild(listItem(
@@ -684,7 +653,7 @@ function sectionBody(sec) {
   function put(patch) {
     patch.tabId = S.tabId;
     patch.startIndex = sec.startIndex;
-    return call('writeSection', [patch]).then(function (r) { reportResult(r, 'Section'); });
+    return call('writeSection', [patch]);
   }
   var gSec = group('Margins and layout');
   box.appendChild(gSec);
@@ -711,7 +680,6 @@ function sectionBody(sec) {
 
   var gSCols = group('Columns');
   box.appendChild(gSCols);
-  gSCols.appendChild(el('p', 'hint', 'Set an equal width for every column, plus the gap after each.'));
   var wPt = (sec.columns[0] || {}).widthPt;
   var gPt = (sec.columns[0] || {}).paddingEndPt;
   var count = numPlain(sec.columnCount, function (v) {
@@ -736,7 +704,7 @@ function sectionBody(sec) {
 function applyPage(patch) {
   patch.tabId = S.tabId;
   patch.scope = S.scope;
-  return call('writePageFormat', [patch]).then(function (r) { reportResult(r, 'Page setup'); return r; });
+  return call('writePageFormat', [patch]);
 }
 
 /* =================================================================
@@ -745,12 +713,8 @@ function applyPage(patch) {
 function renderStyles() {
   var host = document.getElementById('panel-styles');
   host.innerHTML = '';
-  host.appendChild(intro([
-    'Edit any of the nine styles behind the Docs Styles menu. Every paragraph ' +
-      'using one updates everywhere in the document.',
-    'Save a style you like as a custom style, to reuse later.',
-    'Apply a custom style to whatever text is selected, from the list at the bottom.'
-  ]));
+
+  host.appendChild(el('h2', null, 'Built-in styles'));
 
   S.data.namedStyles.forEach(function (st) {
     var ts = st.textStyle || {};
@@ -768,7 +732,7 @@ function renderStyles() {
           namedStyleType: st.namedStyleType,
           textStyle: payload.textStyle,
           paragraphStyle: payload.paragraphStyle
-        }]).then(function (r) { reportResult(r, st.label); });
+        }]);
       }, { sparse: false }));
 
       var row = el('div', 'btnrow');
@@ -777,7 +741,7 @@ function renderStyles() {
         var name = prompt('Name for this style preset:', st.label + ' copy');
         if (!name) return;
         call('saveStylePreset', [{ name: name, textStyle: model.textStyle, paragraphStyle: model.paragraphStyle }])
-          .then(function () { status('Saved preset "' + name + '" ✓', 'ok'); return reload(); });
+          .then(reload);
       });
       row.appendChild(save);
       box.appendChild(row);
@@ -805,9 +769,7 @@ function renderCustomStyles(host) {
 
   var presets = S.data.stylePresets || [];
   if (!presets.length) {
-    host.appendChild(el('p', 'hint',
-      'No custom styles yet. Open a style above, adjust it, and use "Save as style preset".'));
-    return;
+    host.appendChild(el('p', 'hint', 'No custom styles yet.'));
   }
 
   presets.forEach(function (p) {
@@ -822,9 +784,7 @@ function renderCustomStyles(host) {
     var apply = el('button', 'act', p.name);
     apply.title = 'Apply "' + p.name + '" to the current selection';
     apply.addEventListener('click', function () {
-      status('Applying "' + p.name + '"…', '');
       call('applyStylePresetToSelection', [{ name: p.name }])
-        .then(function (r) { reportResult(r, p.name); })
         .catch(function (e) { status(String(e.message || e), 'err'); });
     });
     row.appendChild(apply);
@@ -835,24 +795,77 @@ function renderCustomStyles(host) {
     del.addEventListener('click', function () {
       if (!confirm('Delete custom style "' + p.name + '"?')) return;
       call('deleteStylePreset', [{ name: p.name }])
-        .then(function () { status('Deleted "' + p.name + '"', 'ok'); return reload(); });
+        .then(reload);
     });
     row.appendChild(del);
     host.appendChild(row);
   });
+
+  var addRow = el('div', 'btnrow');
+  var add = el('button', 'act', 'New custom style…');
+  add.title = 'Create a custom style, starting from Normal text';
+  add.addEventListener('click', function () {
+    var name = prompt('Name for the new custom style:', 'My style');
+    if (name === null) return;
+    name = name.trim();
+    if (!name) { status('Give the style a name.', 'err'); return; }
+    if (presets.some(function (p) { return p.name === name; }) &&
+        !confirm('A custom style named "' + name + '" already exists. Replace it?')) return;
+    var base = normalTextStyle();
+    call('saveStylePreset', [{ name: name, textStyle: base.textStyle,
+                              paragraphStyle: base.paragraphStyle }])
+      .then(reload)
+      .catch(function (e) { status(String(e.message || e), 'err'); });
+  });
+  addRow.appendChild(add);
+  host.appendChild(addRow);
+}
+
+/**
+ * What a brand-new custom style starts out as: a copy of Normal text.
+ *
+ * Not an empty style. A style with no attributes set applies nothing, so it
+ * would look broken the first time it was used; the document's own base style
+ * is a starting point the user can recognise and then edit away from.
+ */
+function normalTextStyle() {
+  var list = S.data.namedStyles || [];
+  var normal = null;
+  list.forEach(function (st) {
+    if (!normal && st.namedStyleType === 'NORMAL_TEXT') normal = st;
+  });
+  normal = normal || list[0] || {};
+  return { textStyle: normal.textStyle || {}, paragraphStyle: normal.paragraphStyle || {} };
 }
 
 /* =================================================================
  * Panel: Bullet / list styles
  * ================================================================= */
+/** A stand-in for each way Docs can number a level, to show one as an example. */
+var GLYPH_SAMPLES = {
+  DECIMAL: '1', ZERO_DECIMAL: '01',
+  UPPER_ALPHA: 'A', ALPHA: 'a',
+  UPPER_ROMAN: 'I', ROMAN: 'i'
+};
+
+/**
+ * What a nesting level's marker looks like -- as the marker, not as the API's
+ * description of it.
+ *
+ * glyphFormat is a template in which %0, %1 ... stand for the numbers of this
+ * level and its parents, so filling those in with the level's symbol, or with
+ * a sample of its numbering, gives back exactly what the reader sees in the
+ * document: "●", or "1.", or "a)".
+ */
+function glyphExample(lv) {
+  var fill = lv.glyphSymbol || GLYPH_SAMPLES[lv.glyphType] || '';
+  if (!fill) return '';
+  return (lv.glyphFormat || '%0').replace(/%\d/g, fill);
+}
+
 function renderBullets() {
   var host = document.getElementById('panel-bullets');
   host.innerHTML = '';
-  host.appendChild(intro([
-    'Change the indentation and spacing of each nesting level.',
-    'Change the font, size and colour of the text at each level.',
-    'Swap the glyphs for one of the 16 built-in sets — Docs has no way to define your own.'
-  ]));
 
   if (!S.data.lists.lists.length) {
     host.appendChild(el('p', 'hint', 'This tab has no lists.'));
@@ -873,14 +886,13 @@ function listBody(list) {
     '', function (v) {
       if (!v) return;
       return call('applyBulletPreset', [{ tabId: S.tabId, listId: list.listId, bulletPreset: v }])
-        .then(function (r) { reportResult(r, 'Bullets'); return reload(); });
+        .then(reload);
     })));
 
   var rm = el('button', 'act danger', 'Remove bullets');
   rm.addEventListener('click', function () {
-    if (!confirm('Remove bullets from this list? The text stays, the list formatting goes.')) return;
     call('removeBullets', [{ tabId: S.tabId, listId: list.listId }])
-      .then(function (r) { reportResult(r, 'Bullets removed'); return reload(); });
+      .then(reload);
   });
   var row = el('div', 'btnrow');
   row.appendChild(rm);
@@ -889,23 +901,19 @@ function listBody(list) {
   box.appendChild(el('h2', null, 'Nesting levels'));
   list.levels.forEach(function (lv) {
     if (!lv.inUse && lv.level > 2) return;   // Docs always defines 9; show the useful ones
-    var glyph = lv.glyphSymbol || lv.glyphFormat || lv.glyphType;
+    var glyph = glyphExample(lv) || 'no marker';
     box.appendChild(listItem(
       'Level ' + (lv.level + 1) + (lv.inUse ? '' : ' (unused)'),
       glyph + (lv.indentStartPt != null ? ' · indent ' + fromPt(lv.indentStartPt, S.unit) + S.unit.toLowerCase() : ''),
       function () {
         var inner = el('div');
-        var ro = el('p', 'hint');
-        ro.textContent = 'Read-only from the API: glyph "' + glyph + '", type ' + lv.glyphType +
-          ', starts at ' + lv.startNumber + ', alignment ' + lv.bulletAlignment + '.';
-        inner.appendChild(ro);
         var cur = lv.style || { textStyle: {}, paragraphStyle: {}, mixed: [] };
         var model = { textStyle: copy(cur.textStyle), paragraphStyle: copy(cur.paragraphStyle) };
         inner.appendChild(buildStyleEditor(model, function (payload) {
           return call('writeListLevelStyle', [{
             tabId: S.tabId, listId: list.listId, level: lv.level,
             textStyle: payload.textStyle, paragraphStyle: payload.paragraphStyle
-          }]).then(function (r) { reportResult(r, 'Level ' + (lv.level + 1)); });
+          }]);
         }, { sparse: true, mixed: cur.mixed }));
         return inner;
       },
@@ -921,29 +929,11 @@ function listBody(list) {
 function renderNotes() {
   var host = document.getElementById('panel-notes');
   host.innerHTML = '';
-  host.appendChild(intro([
-    'Style every footnote at once — formatting already inside them is left alone.',
-    'Style the superscript callout marks separately from the note text.',
-    'Convert footnotes to endnotes, collecting them into a Notes section at the end.',
-    'Style headers and footers, individually or all together.'
-  ]));
 
   host.appendChild(el('h2', null, 'Style all footnote text'));
-  var fnCount = (S.data.footnotes.footnotes || []).length;
-  host.appendChild(el('p', 'hint',
-    'Every footnote in the document is styled together — ' + fnCount +
-    (fnCount === 1 ? ' footnote' : ' footnotes') + '. Only the settings you actually change are ' +
-    'written, so formatting inside a footnote that you do not touch — an italic phrase, a link — ' +
-    'is left as it is. "Keep lines together" is the nearest thing to a do-not-split control that ' +
-    'reaches footnotes, though the renderer may still override it.'));
   host.appendChild(segmentEditor('footnotes', 'Footnote text'));
 
   host.appendChild(el('h2', null, 'Footnote callout marks'));
-  host.appendChild(el('p', 'hint',
-    'No style governs callouts: FootnoteReference carries its own TextStyle and nothing in the ' +
-    'API binds it to a named style, so this is a one-off rewrite of every callout in the ' +
-    'document — ' + S.data.segments.footnoteReferenceCount + ' of them. Character settings only. ' +
-    'Footnotes you add later take the style of the text they are inserted into, so re-apply then.'));
   host.appendChild(segmentEditor('footnoteRefs', 'Footnote callouts', { paragraph: false }));
 
   host.appendChild(el('h2', null, 'All headers'));
@@ -967,7 +957,7 @@ function renderNotes() {
           return call('writeSegmentStyle', [{
             tabId: S.tabId, scope: S.scope, target: 'segment', segmentId: seg.segmentId,
             textStyle: payload.textStyle, paragraphStyle: payload.paragraphStyle
-          }]).then(function (r) { reportResult(r, seg.role); });
+          }]);
         }, { sparse: true, noPageBreak: true, mixed: cur.mixed }));
         return box;
       },
@@ -975,9 +965,6 @@ function renderNotes() {
   });
 
   host.appendChild(el('h2', null, 'Convert footnotes to endnotes'));
-  host.appendChild(el('p', 'hint',
-    'Emulated, because neither Docs nor its API has real endnotes: the footnote text is appended ' +
-    'as a numbered section at the end of the document.'));
   var headingIn = el('input');
   headingIn.type = 'text';
   headingIn.value = 'Notes';
@@ -988,8 +975,6 @@ function renderNotes() {
   copyBtn.addEventListener('click', function () { runConvert('copy', headingIn.value); });
   var convBtn = el('button', 'act danger', 'Convert (delete footnotes)');
   convBtn.addEventListener('click', function () {
-    if (!confirm('This deletes every footnote and leaves a superscript number in its place. ' +
-                 'Ctrl+Z in the document undoes it. Continue?')) return;
     runConvert('convert', headingIn.value);
   });
   row.appendChild(copyBtn);
@@ -1000,7 +985,7 @@ function renderNotes() {
 function runConvert(mode, heading) {
   status('Converting…', '');
   call('convertFootnotesToEndnotes', [{ tabId: S.tabId, mode: mode, heading: heading }])
-    .then(function (r) { reportResult(r, 'Endnotes'); return reload(); })
+    .then(function () { status('', ''); return reload(); })
     .catch(function (e) { status(String(e.message || e), 'err'); });
 }
 
@@ -1012,7 +997,7 @@ function segmentEditor(target, label, opts) {
     return call('writeSegmentStyle', [{
       tabId: S.tabId, scope: S.scope, target: target,
       textStyle: payload.textStyle, paragraphStyle: payload.paragraphStyle
-    }]).then(function (r) { reportResult(r, label); });
+    }]);
   }, { sparse: true, noPageBreak: true, mixed: cur.mixed,
        paragraph: opts.paragraph, character: opts.character });
 }
@@ -1038,13 +1023,6 @@ function currentSegmentStyle(target) {
 function renderTables() {
   var host = document.getElementById('panel-tables');
   host.innerHTML = '';
-
-  host.appendChild(intro([
-    'Click inside a table in the document, and this panel edits that table.',
-    'Set cell padding, background colour, borders and vertical alignment — for ' +
-      'every cell, or just the header row.',
-    'Set column widths, row heights, and how many rows repeat as headers across pages.'
-  ]));
 
   if (!S.data.tables.length) {
     host.appendChild(el('p', 'hint', 'This document has no tables.'));
@@ -1089,7 +1067,7 @@ function tableBody(t) {
     patch.tabId = S.tabId;
     patch.startIndex = t.startIndex;
     patch.columnCount = t.columns;
-    return call('writeTableFormat', [patch]).then(function (r) { reportResult(r, 'Table'); });
+    return call('writeTableFormat', [patch]);
   }
 
   var gCells = group('Cells');
@@ -1192,13 +1170,6 @@ function renderPresets() {
   var host = document.getElementById('panel-presets');
   host.innerHTML = '';
 
-  host.appendChild(intro([
-    'Save the whole document\'s formatting as a preset, and apply it to another document.',
-    'Export a preset as JSON to keep in version control, and import one back.',
-    'Bind a custom style to a heading level you are not using, and it appears on ' +
-      'the Docs Styles menu under that heading\'s name.'
-  ]));
-
   host.appendChild(el('h2', null, 'Whole-document presets'));
   var saveRow = el('div', 'btnrow');
   var saveBtn = el('button', 'act primary', 'Save current formatting as a preset');
@@ -1206,7 +1177,7 @@ function renderPresets() {
     var name = prompt('Preset name:');
     if (!name) return;
     call('savePreset', [{ name: name, tabId: S.tabId }])
-      .then(function () { status('Preset saved ✓', 'ok'); return reload(); })
+      .then(reload)
       .catch(function (e) { status(String(e.message || e), 'err'); });
   });
   saveRow.appendChild(saveBtn);
@@ -1223,7 +1194,7 @@ function renderPresets() {
     var apply = el('button', 'act', 'Apply');
     apply.addEventListener('click', function () {
       call('applyPreset', [{ name: p.name, tabId: S.tabId, scope: S.scope }])
-        .then(function (r) { reportResult(r, 'Preset applied'); return reload(); })
+        .then(reload)
         .catch(function (e) { status(String(e.message || e), 'err'); });
     });
     var del = el('button', 'act danger', '×');
@@ -1240,8 +1211,7 @@ function renderPresets() {
 
   host.appendChild(el('h2', null, 'Saved style presets'));
   if (!S.data.stylePresets.length) {
-    host.appendChild(el('p', 'hint',
-      'Save one from any style on the Text styles tab, then bind it to a named style here.'));
+    host.appendChild(el('p', 'hint', 'No saved style presets yet.'));
   }
   S.data.stylePresets.forEach(function (sp) {
     var item = el('div', 'item');
@@ -1260,7 +1230,7 @@ function renderPresets() {
         if (!v) return;
         return call('applyStylePresetToNamedStyle', [{
           name: sp.name, namedStyleType: v, tabId: S.tabId, scope: S.scope
-        }]).then(function (r) { reportResult(r, 'Bound "' + sp.name + '"'); return reload(); });
+        }]).then(reload);
       })));
     var drow = el('div', 'btnrow');
     var d = el('button', 'act danger', 'Delete');
@@ -1275,9 +1245,6 @@ function renderPresets() {
   });
 
   host.appendChild(el('h2', null, 'Export / import JSON'));
-  host.appendChild(el('p', 'hint',
-    'A complete snapshot of page setup and all nine named styles. Keep it in version control ' +
-    'to share a house style.'));
   var ta = el('textarea');
   ta.id = 'configJson';
   host.appendChild(ta);
@@ -1286,14 +1253,13 @@ function renderPresets() {
   exp.addEventListener('click', function () {
     call('exportConfig', [S.tabId]).then(function (cfg) {
       ta.value = JSON.stringify(cfg, null, 2);
-      status('Exported ✓', 'ok');
     });
   });
   var imp = el('button', 'act primary', 'Import');
   imp.addEventListener('click', function () {
     if (!ta.value.trim()) { status('Paste a configuration first', 'err'); return; }
     call('importConfig', [{ config: ta.value, tabId: S.tabId, scope: S.scope }])
-      .then(function (r) { reportResult(r, 'Imported'); return reload(); })
+      .then(reload)
       .catch(function (e) { status(String(e.message || e), 'err'); });
   });
   ioRow.appendChild(exp);
@@ -1535,7 +1501,7 @@ function boot() {
   document.getElementById('doctab').addEventListener('change', function (e) {
     S.tabId = e.target.value || null;
     status('Loading tab…', '');
-    reload().then(function () { status('Ready', 'ok'); });
+    reload().then(function () { status('', ''); });
   });
   ['page', 'styles', 'bullets', 'notes', 'tables', 'presets'].forEach(function (n) {
     document.getElementById('tab-' + n).addEventListener('click', function () { switchTab(n); });
@@ -1572,7 +1538,6 @@ function boot() {
     // It is also a measurement of exactly what the poll pays, so the first
     // wait is paced by it rather than by the one-second floor.
     lastFetchMs = firstReadMs;
-    document.getElementById('docTitle').textContent = data.documentTitle || 'Untitled';
     var sel = document.getElementById('doctab');
     if (data.tabs.length > 1) {
       data.tabs.forEach(function (t) {
@@ -1589,7 +1554,7 @@ function boot() {
       o.value = f;
       fl.appendChild(o);
     });
-    status('Ready', 'ok');
+    status('', '');
     startPolling();
   }).catch(function (e) {
     status('Could not load: ' + String((e && e.message) || e), 'err');

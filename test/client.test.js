@@ -195,27 +195,19 @@ module.exports = ({ suite, test }) => {
 
   suite('What you can do here');
 
-  test('every panel opens with a short list of what it does', (t) => {
-    ['renderPage', 'renderStyles', 'renderBullets', 'renderNotes', 'renderTables',
-     'renderPresets'].forEach((fn) => {
-      const body = new RegExp('function ' + fn + '\\(\\)[^]*?\\n}').exec(clientJs)[0];
-      t.match(body, /appendChild\(intro\(\[/, fn);
-    });
+  test('no panel opens with a box explaining itself', (t) => {
+    t.notOk(/intro\(/.test(clientJs), 'the intro helper and its six call sites are gone');
+    t.notOk(/\.intro\b/.test(css), 'and the rule that styled them');
   });
 
-  test('the tables list says to click into a table first', (t) => {
+  test('what survives is the hint that tells you where to put the cursor', (t) => {
     const body = /function renderTables\(\)[^]*?\n}/.exec(clientJs)[0];
-    t.match(body, /intro\(\[\s*'Click inside a table in the document/);
+    t.match(body, /Click inside a table in the document to edit it here/);
   });
 
   test('the footnote wall of API limitations is gone', (t) => {
     t.notOk(/Footnote placement and pagination/.test(clientJs));
     t.notOk(/capabilities/.test(clientJs), 'and the server-supplied caveat list with it');
-  });
-
-  test('the panel intro is styled apart from the yellow warning box', (t) => {
-    t.match(css, /\.intro \{/);
-    t.match(css, /\.intro li \{/);
   });
 
   suite('Tables');
@@ -273,8 +265,10 @@ module.exports = ({ suite, test }) => {
     t.match(notes, /Individual headers and footers/);
   });
 
-  test('the panel says what a change will and will not touch', (t) => {
-    t.match(clientJs, /Only the settings you actually change are/);
+  test('the panel no longer lectures about what a change touches', (t) => {
+    t.notOk(/Only the settings you actually change are/.test(clientJs));
+    t.notOk(/No style governs callouts/.test(clientJs));
+    t.notOk(/Emulated, because neither Docs/.test(clientJs));
   });
 
   test('converting to endnotes is still offered', (t) => {
@@ -511,5 +505,191 @@ module.exports = ({ suite, test }) => {
 
   test('nothing is left of the button the poll replaced', (t) => {
     t.notOk(/resync/i.test(sidebar + clientJs), 'the Re-sync control should be gone');
+  });
+
+  suite('Bullet levels');
+
+  const glyph = (lv) => evalFromClient(['GLYPH_SAMPLES', 'glyphExample'],
+    'return glyphExample(' + JSON.stringify(lv) + ');');
+
+  test('a level is described by the marker itself, not by the API enum', (t) => {
+    t.equal(glyph({ glyphType: 'GLYPH_TYPE_UNSPECIFIED', glyphSymbol: '●', glyphFormat: '%0' }), '●');
+    t.equal(glyph({ glyphType: 'DECIMAL', glyphSymbol: '', glyphFormat: '%0.' }), '1.');
+    t.equal(glyph({ glyphType: 'ALPHA', glyphSymbol: '', glyphFormat: '%0)' }), 'a)');
+    t.equal(glyph({ glyphType: 'UPPER_ROMAN', glyphSymbol: '', glyphFormat: '%0.' }), 'I.');
+    t.equal(glyph({ glyphType: 'DECIMAL', glyphSymbol: '', glyphFormat: '%0.%1.' }), '1.1.',
+      'a nested format keeps its shape');
+  });
+
+  test('a level with no marker yields nothing, not a stray character', (t) => {
+    t.equal(glyph({ glyphType: 'NONE', glyphSymbol: '', glyphFormat: '' }), '');
+  });
+
+  test('no API enum reaches the panel', (t) => {
+    t.notOk(/Read-only from the API/.test(clientJs), 'the old line is gone');
+    t.notOk(/levelMarkerNote/.test(clientJs), 'and the paragraph that replaced it');
+    t.equal(glyph({ glyphType: 'GLYPH_TYPE_UNSPECIFIED', glyphSymbol: '●', glyphFormat: '%0' }),
+      '●', 'an unspecified type falls back to the symbol, never to its own name');
+  });
+
+  suite('Custom styles');
+
+  test('the built-in list gets a heading matching the custom one', (t) => {
+    const fn = /function renderStyles\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /el\('h2', null, 'Built-in styles'\)/);
+    t.ok(fn.indexOf("'Built-in styles'") < fn.indexOf('S.data.namedStyles.forEach'),
+      'it comes above the styles it heads');
+    t.match(clientJs, /el\('h2', null, 'Custom styles'\)/, 'the two headings still match');
+  });
+
+  test('a new custom style can be started from scratch', (t) => {
+    const fn = /function renderCustomStyles\(host\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /el\('button', 'act', 'New custom style…'\)/);
+    t.ok(fn.indexOf('New custom style…') > fn.indexOf('presets.forEach'),
+      'the button sits below the list');
+    t.match(fn, /call\('saveStylePreset'/);
+  });
+
+  test('the button is there even when there are no custom styles yet', (t) => {
+    const fn = /function renderCustomStyles\(host\)[^]*?\n}/.exec(clientJs)[0];
+    // An early return in the empty branch would take the button with it, which
+    // is exactly the case where it is most needed.
+    t.notOk(/No custom styles yet[^]*?\n    return;/.test(fn),
+      'the empty case must fall through to the button');
+  });
+
+  test('an unnamed style is refused and a clash is confirmed first', (t) => {
+    const fn = /function renderCustomStyles\(host\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /if \(name === null\) return;/, 'cancelling the prompt does nothing');
+    t.match(fn, /if \(!name\) \{ status\('Give the style a name\.', 'err'\); return; \}/);
+    t.match(fn, /already exists\. Replace it\?/);
+  });
+
+  test('a new custom style starts as a copy of Normal text', (t) => {
+    const picked = evalFromClient(['normalTextStyle'],
+      'var S = { data: { namedStyles: [' +
+      "{ namedStyleType: 'HEADING_1', textStyle: { fontSizePt: 20 } }," +
+      "{ namedStyleType: 'NORMAL_TEXT', textStyle: { fontFamily: 'Georgia' }," +
+      '  paragraphStyle: { lineSpacing: 1.5 } }] } };' +
+      'return normalTextStyle();');
+    t.deepEqual(picked.textStyle, { fontFamily: 'Georgia' });
+    t.deepEqual(picked.paragraphStyle, { lineSpacing: 1.5 });
+  });
+
+  test('an empty style would apply nothing, so it is not the starting point', (t) => {
+    const picked = evalFromClient(['normalTextStyle'],
+      "var S = { data: { namedStyles: [{ namedStyleType: 'HEADING_1', textStyle: { bold: true } }] } };" +
+      'return normalTextStyle();');
+    t.deepEqual(picked.textStyle, { bold: true }, 'it falls back to the first style listed');
+  });
+
+  suite('The status line');
+
+  /* status() is run for real against a stand-in element, so these are its
+     actual behaviour rather than another look at the source. */
+  const runStatus = (tail) => evalFromClient(
+    ['status'],
+    'var el = { style: {} };\n' +
+    'var document = { getElementById: function () { return el; } };\n' + tail);
+
+  test('the bar is absent until something needs saying', (t) => {
+    t.match(sidebar, /<div id="status" style="display:none"><\/div>/,
+      'it starts hidden and empty');
+    t.notOk(/status\('Ready'/.test(clientJs), 'nothing reports a permanent Ready');
+  });
+
+  test('nothing that worked is announced', (t) => {
+    // Every remaining call is an error, a "working on it", or the clear that
+    // takes one of those away again.
+    const calls = clientJs.match(/status\((?!msg)[^;]*\);/g) || [];
+    const allowed = /'err'\)|status\('', ''\)|Loading|Converting/;
+    calls.forEach((c) => t.match(c, allowed, c.trim()));
+    t.ok(calls.length > 4, 'the errors are still reported');
+    t.notOk(/status\([^;]*✓/.test(clientJs), 'no tick-mark confirmations survive');
+  });
+
+  test('a write reports nothing anywhere -- the document is the report', (t) => {
+    t.notOk(/reportResult|showNotes|globalNotes/.test(clientJs + sidebar + css),
+      'the notes box, its writer and its styling are all gone');
+  });
+
+  test('an error is shown and stays', (t) => {
+    const r = runStatus(
+      "status('boom', 'err');\n" +
+      'return { text: el.textContent, display: el.style.display, kind: el.className };');
+    t.equal(r.text, 'boom');
+    t.equal(r.display, 'block');
+    t.equal(r.kind, 'err');
+  });
+
+  test('an empty message hides the bar', (t) => {
+    const r = runStatus("status('working…', '');\nvar was = el.style.display;\n" +
+      "status('', '');\nreturn { was: was, now: el.style.display, text: el.textContent };");
+    t.equal(r.was, 'block', 'progress is shown while it runs');
+    t.equal(r.now, 'none');
+    t.equal(r.text, '');
+  });
+
+  test('every slow operation clears its own message when it finishes', (t) => {
+    ['runConvert', 'boot'].forEach((n) => {
+      const fn = new RegExp('function ' + n + '\\([^]*?\\n}').exec(clientJs)[0];
+      t.match(fn, /status\('', ''\)/, n + ' must take its message away again');
+    });
+  });
+
+  suite('The footer');
+
+  test('the status line and the tip row are outside the scrolling area', (t) => {
+    const wrap = /<div class="wrap">[^]*?\n    <\/div>/.exec(sidebar);
+    t.ok(wrap, 'the scrolling area is still .wrap');
+    t.notOk(/id="tipItem"/.test(wrap[0]), 'the tip row is not inside it');
+    t.notOk(/id="status"/.test(wrap[0]), 'the status line is not inside it');
+    const footer = /<div class="footer">[^]*?\n    <\/div>/.exec(sidebar);
+    t.ok(footer, 'they live in a footer of their own');
+    t.match(footer[0], /id="status"/);
+    t.match(footer[0], /id="tipItem"/);
+  });
+
+  test('the footer is pinned to the bottom on every tab', (t) => {
+    t.match(css, /\.footer \{[^}]*position: fixed/);
+    t.match(css, /\.footer \{[^}]*bottom: 0/);
+    t.match(css, /\.wrap \{ padding:[^}]*\}/, 'the panels still clear it');
+  });
+
+  test('the tip row opens upwards, into the space above its heading', (t) => {
+    t.match(css, /\.tip > \.head \{ order: 2; \}/, 'the heading is ordered last');
+    t.match(css, /\.tip > \.body \{ order: 1;/, 'the panel is ordered first');
+    t.match(css, /\.tip \{[^}]*grid-template-rows: 0fr auto/);
+    t.match(css, /\.tip\.open \{ grid-template-rows: 1fr auto; \}/);
+  });
+
+  test('an opened tip row cannot grow taller than the sidebar', (t) => {
+    t.match(css, /\.footer \{[^}]*max-height: 100vh/);
+    t.match(css, /\.tip\.open > \.body \{[^}]*overflow-y: auto/);
+  });
+
+  suite('The heading');
+
+  test('the icon is larger than the text it sits beside', (t) => {
+    t.match(css, /\.applogo \{ width: calc\(var\(--fs\) \* 3\)/);
+    t.match(css, /\.topbar \.title \{[^}]*font-size: calc\(var\(--fs\) \* 1\.3\)/);
+  });
+
+  test('a long document title wraps to two lines and then ellipsizes', (t) => {
+    t.match(css, /\.topbar \.title > span \{[^}]*-webkit-line-clamp: 2/);
+    t.match(css, /\.topbar \.title > span \{[^}]*overflow: hidden/);
+    t.notOk(/\.topbar \.title \{[^}]*white-space: nowrap/.test(css),
+      'the old single-line rule would stop it wrapping');
+  });
+
+  test('the heading names the add-on, not the document', (t) => {
+    t.match(sidebar, /<span>Stylist: configure styles<\/span>/);
+    t.notOk(/docTitle/.test(sidebar + clientJs), 'nothing writes the document name there');
+    t.notOk(/data\.documentTitle/.test(clientJs), 'the client no longer reads it');
+  });
+
+  test('a one-line title is centred against the icon', (t) => {
+    t.match(css, /\.topbar \.title \{[^}]*display: flex/);
+    t.match(css, /\.topbar \.title \{[^}]*align-items: center/);
   });
 };

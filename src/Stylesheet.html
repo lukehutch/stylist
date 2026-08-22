@@ -31,7 +31,10 @@
      has to read as a hint rather than as a value. opacity: 1 because Firefox
      dims placeholders by default, which on top of a grey would be unreadable. */
   ::placeholder { color: var(--muted); opacity: 1; font-style: italic; }
-  .wrap { padding: 8px 10px 40px; }
+  /* The bottom padding clears the fixed footer: the collapsed tip row is one
+     line of --fs-md plus 6px of padding top and bottom, and the footer sits on
+     top of whatever the panel scrolled to without it. */
+  .wrap { padding: 8px 10px calc(var(--fs) * 3); }
 
   /* Section headings sit in a full-bleed band: the .wrap padding is 8px 10px,
      so the negative margins cancel it and the background reaches both edges. */
@@ -52,8 +55,18 @@
 
   /* ---- top bar ---- */
   .topbar { border-bottom: 1px solid var(--line); padding-bottom: 8px; }
-  .topbar .title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-                   font-size: calc(var(--fs) * 2); line-height: 1.25; margin-bottom: 4px; }
+  .topbar .title { display: flex; align-items: center; font-weight: 500;
+                   font-size: calc(var(--fs) * 1.3); line-height: 1.25; margin-bottom: 4px; }
+  /* Document titles are arbitrary text in a 300px pane, so the name gets two
+     lines and then an ellipsis. -webkit-line-clamp is the only way to ellipsize
+     text that has wrapped; the unprefixed line-clamp is there for whenever the
+     Chromium the sidebar runs in stops needing the prefix. A single-line title
+     is centred against the icon by align-items above. */
+  .topbar .title > span {
+    display: -webkit-box; -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2; line-clamp: 2;
+    overflow: hidden; min-width: 0; overflow-wrap: anywhere;
+  }
   .row { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
   .row > label { color: var(--muted); font-size: var(--fs-sm); white-space: nowrap; }
   .row > select, .row > input { flex: 1; min-width: 0; }
@@ -75,6 +88,22 @@
   input[type=text], input[type=number], select {
     width: 100%; min-width: 0; padding: 3px 5px; font: inherit; font-size: var(--fs-md);
     border: 1px solid var(--line); border-radius: 3px; background: #fff; color: var(--fg);
+  }
+  /* A dropdown arrow is drawn inside the control and has no background of its
+     own, so a value too wide for the box runs straight into it and the two
+     become one unreadable smudge. Padding keeps the text out of the arrow's
+     corner; the strip below covers whatever still reaches it.
+     It has to be an element, not a background: backgrounds paint behind text,
+     so a white background would be hidden by the very text it should mask. */
+  select, input[list] { padding-right: 22px; }
+  .combo { position: relative; display: flex; flex: 1; min-width: 0; }
+  .combo > select { -webkit-appearance: none; appearance: none; }
+  .combo::after {
+    content: ''; position: absolute; top: 1px; right: 1px; bottom: 1px; width: 20px;
+    border-radius: 0 3px 3px 0;
+    background: #fff no-repeat center;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0h10L5 6z' fill='%235f6368'/%3E%3C/svg%3E");
+    pointer-events: none;   /* the click still belongs to the select underneath */
   }
   input[type=color] { width: 30px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 3px; background: #fff; }
   input.invalid { border-color: var(--err); background: #fce8e6; }
@@ -128,7 +157,7 @@
   button.act.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   button.act.danger { color: var(--err); }
   .btnrow { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
-  .applogo { width: calc(var(--fs) * 2.4); height: calc(var(--fs) * 2.4);
+  .applogo { width: calc(var(--fs) * 3); height: calc(var(--fs) * 3);
              vertical-align: middle; margin-right: 8px; flex: 0 0 auto; }
   .customstyle { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
   .customstyle > button.act { flex: 0 1 auto; max-width: 60%; overflow: hidden;
@@ -143,21 +172,42 @@
 
   /* The "what you can do here" list at the top of a panel. Deliberately quiet:
      it is orientation, not a warning, so it gets none of .note's yellow. */
-  .intro { background: var(--band); border: 1px solid var(--line); border-radius: 4px;
-           padding: 6px 8px 6px 0; margin: 0 0 8px; }
-  .intro ul { margin: 0 0 0 22px; padding: 0; }
-  .intro li { font-size: var(--fs-sm); color: var(--muted); margin: 2px 0; }
 
+  /* In the footer, above the tip row. Hidden unless it has something to say --
+     see status() -- so it is display: none by default and the client turns it
+     on, rather than sitting there permanently saying "Ready". */
   #status {
-    position: fixed; left: 0; right: 0; bottom: 0; padding: 5px 10px; font-size: var(--fs-sm);
-    border-top: 1px solid var(--line); background: #f8f9fa; color: var(--muted);
+    padding: 5px 10px; font-size: var(--fs-sm);
+    border-bottom: 1px solid var(--line); background: #f8f9fa; color: var(--muted);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   #status.err { color: var(--err); background: #fce8e6; }
   #status.ok { color: var(--ok); }
 
-  /* ---- tip / about, below the panels on every tab ---- */
-  .tip { margin-top: 16px; }
+  /* ---- footer: the status line and the tip row, pinned to the bottom ---- */
+  /* Fixed, so it is on screen on every tab and at every scroll position. The
+     max-height and the scrolling body below are what stop an opened tip row
+     from growing taller than the sidebar and pushing its own heading off. */
+  .footer {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 5;
+    background: var(--bg); border-top: 1px solid var(--line);
+    max-height: 100vh; display: flex; flex-direction: column;
+  }
+
+  /* The tip row is an .item, but it opens upwards: the body is ordered above
+     the head, so the expanding track is the first one and the heading stays
+     put on the bottom edge while the panel grows into the space above it. */
+  .tip { margin: 0; border: 0; border-radius: 0; min-height: 0;
+         grid-template-rows: 0fr auto; }
+  .tip.open { grid-template-rows: 1fr auto; }
+  .tip > .head { order: 2; }
+  .tip > .body { order: 1;
+                 border-top: 0; border-bottom: 0 solid var(--line);
+                 transition: padding 160ms ease, border-bottom-width 160ms ease; }
+  .tip.open > .body { border-top-width: 0; border-bottom-width: 1px; overflow-y: auto; }
+  /* Closed, the turnstile points up at the panel that will appear there. */
+  .tip > .head .tw { transform: rotate(-90deg); }
+  .tip.open > .head .tw { transform: rotate(90deg); }
   .tip .body a { color: var(--accent); }
   /* 80% of the sidebar itself, so vw rather than a percentage of the padded
      box it sits in. The image is square, so height follows. */

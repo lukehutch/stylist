@@ -31,7 +31,7 @@
   <g fill="#7fd4ff">
     <path d="M99 31l7 13h-14z"/>        <!-- arrowhead up -->
     <path d="M99 97l-7-13h14z"/>        <!-- arrowhead down -->
-  </g></svg><span id="docTitle">Loading…</span></div>
+  </g></svg><span>Stylist: configure styles</span></div>
         <div class="row" id="tabRow" style="display:none">
           <label for="doctab">Tab</label>
           <select id="doctab"></select>
@@ -56,8 +56,6 @@
         <button id="tab-presets">Presets</button>
       </div>
 
-      <div class="note" id="globalNotes" style="display:none"></div>
-
       <div id="panel-page"    class="panel active"></div>
       <div id="panel-styles"  class="panel"></div>
       <div id="panel-bullets" class="panel"></div>
@@ -66,9 +64,14 @@
       <div id="panel-presets" class="panel"></div>
 
       <datalist id="fontlist"></datalist>
+    </div>
 
-      <!-- Outside the tabbed area on purpose: it is about the add-on rather
-           than about any one panel, so it sits below all of them. -->
+    <!-- Fixed to the bottom of the sidebar, outside .wrap: it belongs to the
+         add-on rather than to any one panel, and pinning it here keeps it in
+         reach without scrolling to the end of whichever panel is open. It
+         opens upwards for the same reason -- there is nothing below it. -->
+    <div class="footer">
+      <div id="status" style="display:none"></div>
       <div class="item tip" id="tipItem">
         <div class="head" id="tipHead">
           <span class="tw"></span>
@@ -85,7 +88,6 @@
       </div>
     </div>
 
-    <div id="status">Starting…</div>
     <?!= include('JavaScript'); ?>
   </body>
 </html>

@@ -70,6 +70,58 @@ step first and the live-test setup gets shorter.
 If you only want to *use* the add-on yourself, the first column is the whole
 list — `clasp push`, then Deploy → Test deployments → Install.
 
+## Updating the script in your test document
+
+Once the test deployment exists (below, [the sidebar by hand](#the-sidebar-by-hand)),
+getting a code change into the document you test in is:
+
+```bash
+npm test                  # local gate first; a red suite is not worth pushing
+clasp push --force
+```
+
+Then, **in the test document**, do the smallest of these that covers what you
+changed:
+
+| What you changed | What the document needs |
+|---|---|
+| `src/*.js` — server code only | nothing; the next `google.script.run` call from the open sidebar already runs the new code |
+| `src/Sidebar.html`, `src/JavaScript.html`, `src/Stylesheet.html` | **close and reopen the sidebar** (Extensions → Stylist → Open format editor) |
+| `onOpen` — the menu's name or items | **reload the document** (F5) |
+| `src/appsscript.json` — scopes or advanced services | **reload the document**, then re-authorise when Docs asks |
+
+The reason for the middle two rows: the sidebar's HTML is produced *once*, by
+the `showSidebar` call that opened it. `HtmlService.createTemplateFromFile`
+runs then and never again, so an already-open sidebar keeps serving the markup,
+CSS and browser JavaScript from the moment it opened — reloading the document
+around it does not help, because that does not re-run `showSidebar`. Closing
+and reopening the panel does. The add-on menu is likewise built by `onOpen`,
+which Docs runs when the document loads, so a renamed or added menu item only
+appears after a reload.
+
+**There is no redeploy step.** The test deployment is pinned to code version
+**Latest Code**, so what `clasp push` just uploaded is what the document runs.
+Cutting a version (Deploy → New deployment) is only for publishing.
+
+`--force` is on `clasp push` here for the same reason as on the first push: any
+change to `src/appsscript.json` makes clasp stop and ask before overwriting the
+manifest, and declining skips the entire push rather than just that file.
+
+Two things to check when a change appears not to have landed:
+
+- **Are you pushing to the script the document actually runs?** `clasp push`
+  goes to the `scriptId` in `.clasp.json`; the test deployment belongs to a
+  script id you can read in the editor under Project Settings → IDs. If you
+  have more than one copy in your Drive, these can drift apart.
+- **Did the push really succeed?** clasp prints the file list and a count.
+  A file that never appears in that list is not in `src/`, and nothing outside
+  `src/` is ever uploaded.
+
+Server-side errors go to the editor's **Executions** view (`clasp open-script`),
+not to the browser. Errors in the sidebar's own JavaScript go to the browser
+console — the sidebar is an iframe, so pick its frame in the console's frame
+selector to see them.
+
 ## Running the tests
 
 ```bash
@@ -259,8 +311,10 @@ clasp open-script
 Then set up a test deployment once, as in the [README](README.md#2-install-it-into-a-document):
 **Deploy → Test deployments**, enable the **Editor add-on** type, **Create new
 test**, code version **Latest Code**, pick a test document, **Save test**,
-**Execute**. After that, `clasp push` and reload the document — a test
-deployment runs the latest code, so there is no redeploy step per change.
+**Execute**. After that there is no redeploy step per change — a test
+deployment runs the latest code, so `clasp push` is the whole update, plus
+whatever the document itself needs to notice it: see [Updating the script in
+your test document](#updating-the-script-in-your-test-document).
 
 `console.log` from server functions goes to **Executions** in the editor.
 Errors thrown inside a `google.script.run` call surface in the sidebar's status
