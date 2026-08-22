@@ -1,5 +1,12 @@
 <style>
   :root {
+    /* One knob for the whole sidebar. Everything below is derived from --fs,
+       so bump this one number to scale the UI. */
+    --fs: 14.5px;
+    --fs-md: calc(var(--fs) - 1px);
+    --fs-sm: calc(var(--fs) - 1.5px);
+    --fs-xs: calc(var(--fs) - 2px);
+
     --fg: #202124;
     --muted: #5f6368;
     --line: #dadce0;
@@ -12,26 +19,27 @@
   }
   * { box-sizing: border-box; }
   body {
-    font: 13px/1.45 Roboto, Arial, sans-serif;
+    font: var(--fs)/1.45 Roboto, Arial, sans-serif;
     color: var(--fg); margin: 0; background: var(--bg);
   }
   .wrap { padding: 8px 10px 40px; }
 
-  h2 { font-size: 13px; margin: 14px 0 6px; font-weight: 500; }
-  h3 { font-size: 12px; margin: 10px 0 4px; font-weight: 500; color: var(--muted); }
-  p.hint { color: var(--muted); font-size: 11.5px; margin: 4px 0 8px; }
+  h2 { font-size: var(--fs); margin: 14px 0 6px; font-weight: 500; }
+  h3 { font-size: var(--fs-md); margin: 10px 0 4px; font-weight: 500; color: var(--muted); }
+  p.hint { color: var(--muted); font-size: var(--fs-sm); margin: 4px 0 8px; }
 
   /* ---- top bar ---- */
   .topbar { border-bottom: 1px solid var(--line); padding-bottom: 8px; }
-  .topbar .title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .topbar .title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+                   font-size: calc(var(--fs) * 2); line-height: 1.25; margin-bottom: 4px; }
   .row { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
-  .row > label { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+  .row > label { color: var(--muted); font-size: var(--fs-sm); white-space: nowrap; }
   .row > select, .row > input { flex: 1; min-width: 0; }
 
   /* ---- tab strip ---- */
   .tabs { display: flex; flex-wrap: wrap; gap: 2px; margin: 8px 0; }
   .tabs button {
-    flex: 1 1 auto; padding: 5px 6px; font-size: 11.5px; cursor: pointer;
+    flex: 1 1 auto; padding: 5px 6px; font-size: var(--fs-sm); cursor: pointer;
     border: 1px solid var(--line); background: #f8f9fa; border-radius: 4px; color: var(--muted);
   }
   .tabs button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
@@ -40,18 +48,18 @@
 
   /* ---- fields ---- */
   .field { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
-  .field > label { flex: 0 0 108px; color: var(--muted); font-size: 11.5px; }
+  .field > label { flex: 0 0 118px; color: var(--muted); font-size: var(--fs-sm); }
   .field > .ctl { flex: 1; display: flex; gap: 4px; min-width: 0; }
   input[type=text], input[type=number], select {
-    width: 100%; min-width: 0; padding: 3px 5px; font: inherit; font-size: 12px;
+    width: 100%; min-width: 0; padding: 3px 5px; font: inherit; font-size: var(--fs-md);
     border: 1px solid var(--line); border-radius: 3px; background: #fff; color: var(--fg);
   }
   input[type=color] { width: 30px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 3px; background: #fff; }
   input.invalid { border-color: var(--err); background: #fce8e6; }
   input.saving { border-color: var(--accent); }
-  .unit { flex: 0 0 26px; color: var(--muted); font-size: 11px; align-self: center; }
+  .unit { flex: 0 0 26px; color: var(--muted); font-size: var(--fs-xs); align-self: center; }
   .checks { display: flex; flex-wrap: wrap; gap: 8px; margin: 5px 0; }
-  .checks label { font-size: 11.5px; display: flex; align-items: center; gap: 3px; color: var(--fg); }
+  .checks label { font-size: var(--fs-sm); display: flex; align-items: center; gap: 3px; color: var(--fg); }
 
   /* ---- lists / disclosure ---- */
   .item { border: 1px solid var(--line); border-radius: 4px; margin: 5px 0; overflow: hidden; }
@@ -60,35 +68,36 @@
     align-items: center; gap: 6px; background: #f8f9fa;
   }
   .item > .head:hover { background: #f1f3f4; }
-  .item > .head .name { font-weight: 500; font-size: 12px; }
-  .item > .head .meta { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item > .head .name { font-weight: 500; font-size: var(--fs-md); }
+  .item > .head .meta { color: var(--muted); font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .item > .body { padding: 8px; border-top: 1px solid var(--line); display: none; }
   .item.open > .body { display: block; }
   .swatch { display: inline-block; width: 10px; height: 10px; border: 1px solid var(--line); vertical-align: -1px; }
 
   /* ---- buttons / status ---- */
   button.act {
-    padding: 5px 9px; font: inherit; font-size: 12px; cursor: pointer;
+    padding: 5px 9px; font: inherit; font-size: var(--fs-md); cursor: pointer;
     border: 1px solid var(--line); background: #fff; border-radius: 4px; color: var(--fg);
   }
   button.act:hover { background: #f1f3f4; }
   button.act.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   button.act.danger { color: var(--err); }
   .btnrow { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
-  .applogo { vertical-align: -3px; margin-right: 6px; flex: 0 0 auto; }
+  .applogo { width: calc(var(--fs) * 2.4); height: calc(var(--fs) * 2.4);
+             vertical-align: middle; margin-right: 8px; flex: 0 0 auto; }
   .customstyle { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
   .customstyle > button.act { flex: 0 1 auto; max-width: 60%; overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap; }
-  .customstyle > .meta { flex: 1 1 auto; color: var(--muted); font-size: 11px;
+  .customstyle > .meta { flex: 1 1 auto; color: var(--muted); font-size: var(--fs-xs);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .customstyle > button.danger { flex: 0 0 auto; }
 
   .note { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 4px;
-          padding: 6px 8px; font-size: 11.5px; margin: 6px 0; }
+          padding: 6px 8px; font-size: var(--fs-sm); margin: 6px 0; }
   .note ul { margin: 4px 0 0 16px; padding: 0; }
 
   #status {
-    position: fixed; left: 0; right: 0; bottom: 0; padding: 5px 10px; font-size: 11.5px;
+    position: fixed; left: 0; right: 0; bottom: 0; padding: 5px 10px; font-size: var(--fs-sm);
     border-top: 1px solid var(--line); background: #f8f9fa; color: var(--muted);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
@@ -96,5 +105,5 @@
   #status.ok { color: var(--ok); }
 
   textarea { width: 100%; height: 110px; font-family: Roboto Mono, Consolas, monospace;
-             font-size: 11px; border: 1px solid var(--line); border-radius: 3px; padding: 4px; }
+             font-size: var(--fs-xs); border: 1px solid var(--line); border-radius: 3px; padding: 4px; }
 </style>
