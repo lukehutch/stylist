@@ -416,10 +416,37 @@ module.exports = ({ suite, test }) => {
 
   test('a content security policy that refuses the worker is not fatal', (t) => {
     const fn = /function startPolling\(\)[^]*?\n}/.exec(clientJs)[0];
-    t.match(fn, /catch \(e\) \{\s*worker = null;/, 'construction is guarded');
-    t.match(fn, /worker\.onerror = function \(\) \{ worker = null; setTimeout\(tick, POLL_MIN_MS\); \}/,
+    t.match(fn, /catch \(e\) \{\s*pollWorker = null;/, 'construction is guarded');
+    t.match(fn, /pollWorker\.onerror = function \(\) \{ pollWorker = null; setTimeout\(tick, POLL_MIN_MS\); \}/,
       'a worker that dies later restarts the chain rather than freezing it');
     t.match(fn, /else setTimeout\(tick, ms\)/, 'setTimeout takes over');
+  });
+
+  suite('Stopping when the sidebar is not there');
+
+  test('every way back into the loop goes through one flag', (t) => {
+    t.match(clientJs, /function schedule\(\) \{ if \(polling\) scheduleNext\(nextPollDelay\(\)\); \}/);
+    t.match(clientJs, /function tick\(\) \{ poll\(\)\.then\(schedule\); \}/,
+      'a fired timer still lands on schedule, which then does nothing');
+  });
+
+  test('hiding the sidebar pauses it, showing it again resumes', (t) => {
+    t.match(clientJs,
+      /visibilitychange[^]*?if \(document\.hidden\) pausePolling\(\); else resumePolling\(\);/);
+    t.match(clientJs, /function pausePolling\(\) \{ polling = false; \}/);
+  });
+
+  test('resuming twice does not start two loops', (t) => {
+    const fn = /function resumePolling\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /if \(polling \|\| !scheduleNext\) return;/);
+  });
+
+  test('the frame going away terminates the worker', (t) => {
+    const fn = /function stopPolling\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /polling = false;/);
+    t.match(fn, /pollWorker\.terminate\(\)/);
+    t.match(clientJs, /window\.addEventListener\('pagehide', stopPolling\)/);
+    t.match(clientJs, /window\.addEventListener\('unload', stopPolling\)/);
   });
 
   suite('Editing while the poll runs');

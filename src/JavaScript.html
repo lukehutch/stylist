@@ -1449,36 +1449,68 @@ function poll() {
  * Apps Script serves no static files, so there is no URL to point a Worker at
  * and it is built from a blob instead. If the page's content security policy
  * refuses that, setTimeout does the same job on the main thread.
+ *
+ * Nothing keeps running once the sidebar is not on screen. Closing it destroys
+ * this frame, which takes the timer and the worker with it, but that is the
+ * browser tidying up after us rather than us stopping -- and it does not cover
+ * the sidebar merely being hidden, which leaves the frame alive and polling a
+ * document nobody is looking at. So the schedule is stopped explicitly:
+ * hidden pauses it, and the frame going away terminates the worker outright.
  */
 var scheduleNext = null;
+var pollWorker = null;
+var polling = false;
 
 function startPolling() {
   var src = 'onmessage = function (e) { setTimeout(function () { postMessage(1); }, e.data); };';
-  var worker = null;
   try {
-    worker = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+    pollWorker = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
   } catch (e) {
-    worker = null;
+    pollWorker = null;
   }
 
-  function tick() { poll().then(schedule); }
-
-  if (worker) {
-    worker.onmessage = tick;
+  if (pollWorker) {
+    pollWorker.onmessage = tick;
     // A worker that dies takes the pending tick with it, so restart the chain
     // on the main thread rather than leaving the sidebar silently frozen.
-    worker.onerror = function () { worker = null; setTimeout(tick, POLL_MIN_MS); };
+    pollWorker.onerror = function () { pollWorker = null; setTimeout(tick, POLL_MIN_MS); };
     scheduleNext = function (ms) {
-      if (worker) worker.postMessage(ms); else setTimeout(tick, ms);
+      if (pollWorker) pollWorker.postMessage(ms); else setTimeout(tick, ms);
     };
   } else {
     scheduleNext = function (ms) { setTimeout(tick, ms); };
   }
 
+  polling = true;
   schedule();
 }
 
-function schedule() { scheduleNext(nextPollDelay()); }
+function tick() { poll().then(schedule); }
+
+/**
+ * Every path back into the loop goes through here, so clearing `polling` is
+ * enough to stop it: a timer already in flight still fires, finds the flag
+ * down, and schedules nothing further.
+ */
+function schedule() { if (polling) scheduleNext(nextPollDelay()); }
+
+/** Hidden, but still there: keep the worker, stop asking. */
+function pausePolling() { polling = false; }
+
+function resumePolling() {
+  if (polling || !scheduleNext) return;
+  polling = true;
+  schedule();
+}
+
+/** Gone for good: give the worker back rather than leaking a thread. */
+function stopPolling() {
+  polling = false;
+  if (pollWorker) {
+    pollWorker.terminate();
+    pollWorker = null;
+  }
+}
 
 function switchTab(name) {
   ['page', 'styles', 'bullets', 'notes', 'tables', 'presets'].forEach(function (n) {
@@ -1519,6 +1551,14 @@ function boot() {
   // event this add-on can get: Docs offers no cursor or typing trigger, and a
   // server-side trigger could not reach an open sidebar anyway.
   window.addEventListener('focus', function () { setTimeout(poll, 0); });
+
+  // Closing the sidebar tears down this frame; hiding it does not. Cover both,
+  // so the poll never outlives the panel the user was looking at.
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) pausePolling(); else resumePolling();
+  });
+  window.addEventListener('pagehide', stopPolling);
+  window.addEventListener('unload', stopPolling);
 
   status('Loading document…', '');
   reload().then(function (data) {
