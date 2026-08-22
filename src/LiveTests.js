@@ -125,7 +125,7 @@ suite('Sidebar');
 test('the sidebar template renders', function (t) {
   var html = HtmlService.createTemplateFromFile('Sidebar').evaluate().getContent();
   t.match(html, /panel-page/, 'the page panel is missing from the output');
-  t.match(html, /setInterval\(poll/, 'the document poll is missing');
+  t.match(html, /startPolling\(\)/, 'the document poll is missing');
   t.comment(html.length + ' bytes');
 });
 

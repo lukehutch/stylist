@@ -193,17 +193,6 @@ module.exports = ({ suite, test }) => {
     t.match(css, /html \{ overflow-y: scroll; \}/);
   });
 
-  suite('Staying in step with the document');
-
-  test('a field the user has left behind does not count as editing', (t) => {
-    // activeElement outlives the focus, so hasFocus decides.
-    t.match(clientJs, /function editingNow\(\)[^]*?document\.hasFocus\(\)/);
-  });
-
-  test('returning to the sidebar re-reads the document at once', (t) => {
-    t.match(clientJs, /window\.addEventListener\('focus', function \(\) \{ setTimeout\(poll, 0\); \}\)/);
-  });
-
   suite('What you can do here');
 
   test('every panel opens with a short list of what it does', (t) => {
@@ -354,17 +343,133 @@ module.exports = ({ suite, test }) => {
   suite('Staying in step with the document');
 
   test('the sidebar polls the document instead of waiting to be asked', (t) => {
-    t.match(clientJs, /setInterval\(poll, POLL_MS\)/);
-    t.match(clientJs, /var POLL_MS = \d+;/);
+    t.match(clientJs, /startPolling\(\);/);
+    t.notOk(/setInterval/.test(clientJs), 'a fixed interval cannot adapt to the read cost');
   });
 
-  test('a field being edited is never overwritten by the poll', (t) => {
-    t.match(clientJs, /if \(editingNow\(\)\)/, 'the poll must check for an active field');
-    t.match(clientJs, /input\.__dirty = true/, 'typing must mark the field dirty');
+  test('returning to the sidebar re-reads the document at once', (t) => {
+    t.match(clientJs, /window\.addEventListener\('focus', function \(\) \{ setTimeout\(poll, 0\); \}\)/);
   });
 
   test('the poll stands aside while a write is in flight', (t) => {
-    t.match(clientJs, /if \(!S\.data \|\| S\.busy \|\| document\.hidden\) return;/);
+    t.match(clientJs, /if \(!S\.data \|\| S\.busy \|\| document\.hidden\) return Promise\.resolve\(\);/);
+  });
+
+  test('the wait between reads is twenty times the last read, within bounds', (t) => {
+    t.match(clientJs, /var POLL_MIN_MS = 1000;/);
+    t.match(clientJs, /var POLL_MAX_MS = 5000;/);
+    t.match(clientJs, /var POLL_DUTY = 20;/);
+    t.match(clientJs,
+      /Math\.max\(POLL_MIN_MS, Math\.min\(POLL_MAX_MS, lastFetchMs \* POLL_DUTY\)\)/);
+  });
+
+  test('the read is timed, so the next wait can follow it', (t) => {
+    const fn = /function poll\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /var t0 = Date\.now\(\)/);
+    t.match(fn, /lastFetchMs = Date\.now\(\) - t0/);
+  });
+
+  test('the next read is scheduled only once the last one has finished', (t) => {
+    t.match(clientJs, /function tick\(\) \{ poll\(\)\.then\(schedule\); \}/);
+  });
+
+  /* The two pieces above that are plain functions are pulled out and run, so
+     these are the real arithmetic rather than another look at the source. */
+  const evalFromClient = (names, tail) => {
+    const src = names.map((n) => {
+      const m = new RegExp('(?:function ' + n + '\\([^]*?\\n\\}|var ' + n + ' = [^;]*;)')
+        .exec(clientJs);
+      if (!m) throw new Error('could not find ' + n + ' in the client');
+      return m[0];
+    }).join('\n');
+    return eval('(function () {\n' + src + '\n' + tail + '\n})()');   // eslint-disable-line no-eval
+  };
+
+  test('the wait is the read cost times twenty, clamped to one and five seconds', (t) => {
+    const delay = evalFromClient(
+      ['POLL_MIN_MS', 'POLL_MAX_MS', 'POLL_DUTY', 'lastFetchMs', 'nextPollDelay'],
+      'return function (ms) { lastFetchMs = ms; return nextPollDelay(); };');
+
+    t.equal(delay(0), 1000, 'an instant read still waits a second');
+    t.equal(delay(20), 1000, '400ms of duty is below the floor');
+    t.equal(delay(50), 1000, 'exactly at the floor');
+    t.equal(delay(100), 2000, 'a tenth of a second read waits two');
+    t.equal(delay(200), 4000);
+    t.equal(delay(250), 5000, 'exactly at the ceiling');
+    t.equal(delay(4000), 5000, 'a read that takes four seconds still waits only five');
+  });
+
+  test('a checkbox is dirty on its checked state, a text box on its text', (t) => {
+    const shown = evalFromClient(['shownValue'], 'return shownValue;');
+    t.equal(shown({ type: 'checkbox', checked: true, value: 'on' }), true);
+    t.equal(shown({ type: 'checkbox', checked: false, value: 'on' }), false);
+    t.equal(shown({ type: 'text', checked: false, value: '12' }), '12');
+    t.equal(shown({ type: 'text', checked: false, value: '' }), '',
+      'an emptied box is a value, not an absence');
+  });
+
+  suite('Polling off the main thread');
+
+  test('the schedule runs in a worker, built from a blob for want of a file', (t) => {
+    t.match(clientJs, /new Worker\(URL\.createObjectURL\(new Blob\(/);
+  });
+
+  test('a content security policy that refuses the worker is not fatal', (t) => {
+    const fn = /function startPolling\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /catch \(e\) \{\s*worker = null;/, 'construction is guarded');
+    t.match(fn, /worker\.onerror = function \(\) \{ worker = null; setTimeout\(tick, POLL_MIN_MS\); \}/,
+      'a worker that dies later restarts the chain rather than freezing it');
+    t.match(fn, /else setTimeout\(tick, ms\)/, 'setTimeout takes over');
+  });
+
+  suite('Editing while the poll runs');
+
+  test('dirty is a comparison, not a flag raised by the first keystroke', (t) => {
+    t.match(clientJs, /input\.isDirty = function \(\) \{ return shownValue\(input\) !== input\.__live; \}/);
+    t.notOk(/__dirty/.test(clientJs), 'the sticky flag is gone');
+  });
+
+  test('a checkbox reports its checked state, not its value', (t) => {
+    t.match(clientJs, /function shownValue\(input\) \{\s*return input\.type === 'checkbox' \? input\.checked : input\.value;/);
+  });
+
+  test('only a field that is focused and dirty keeps its contents', (t) => {
+    const fn = /function renderKeepingEdits\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /dirty: a\.isDirty\(\)/, 'dirtiness is read before the rebuild');
+    t.match(fn, /if \(keep\.dirty\) \{\s*node\.value = keep\.value;/,
+      'and the contents go back only if it was');
+    t.match(fn, /renderAll\(\)/, 'everything else is rebuilt from the document');
+  });
+
+  test('the focused field keeps the focus even when it is clean', (t) => {
+    // Otherwise the caret jumps out of the box every time the document changes.
+    const fn = /function renderKeepingEdits\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /document\.hasFocus\(\) && a && a\.isDirty\b(?! &&)/);
+    t.match(fn, /\}\s*\n\s*\/\/ Losing the focus[^]*?node\.focus\(\);/);
+  });
+
+  test('a write that lands after more typing does not call the field clean', (t) => {
+    const fn = /function bindCommit\([^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /var sent = shownValue\(input\);/);
+    t.match(fn, /input\.__live = sent;/);
+    t.notOk(/__live = shownValue\(input\);\s*\/\/ the document/.test(fn));
+  });
+
+  test('the caret goes back where it was', (t) => {
+    const fn = /function renderKeepingEdits\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /node\.focus\(\)/);
+    t.match(fn, /setSelectionRange\(keep\.start, keep\.end\)/);
+  });
+
+  test('an edit whose field moved is dropped, not pasted somewhere else', (t) => {
+    const fn = /function renderKeepingEdits\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /if \(!node \|\| node\.tagName !== keep\.tag \|\| !node\.isDirty\) return;/);
+  });
+
+  test('the re-render cannot itself commit a half-typed value', (t) => {
+    // Removing a focused input can fire change on the way out.
+    t.match(clientJs, /function attempt\(\) \{[^]*?if \(rerendering\) return;/);
+    t.match(clientJs, /rerendering = true;\s*try \{ renderAll\(\); \} finally \{ rerendering = false; \}/);
   });
 
   test('nothing is left of the button the poll replaced', (t) => {

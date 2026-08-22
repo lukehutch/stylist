@@ -127,9 +127,18 @@ function fieldRow(labelText, control) {
  * Enter commit without waiting for focus to move. Tab commits via blur.
  * A field that fails validation is marked and never sent.
  */
+/** What is actually in a field: a checkbox says checked, everything else value. */
+function shownValue(input) {
+  return input.type === 'checkbox' ? input.checked : input.value;
+}
+
 function bindCommit(input, validate, commit) {
   var lastSent;
   function attempt() {
+    // Re-rendering removes this element from the page, and a browser may fire
+    // change on the way out. Committing then would write a half-typed value
+    // the user never confirmed.
+    if (rerendering) return;
     var v = validate(input);
     if (v.error) {
       input.classList.add('invalid');
@@ -141,12 +150,17 @@ function bindCommit(input, validate, commit) {
     input.title = '';
     if (v.skip) return;
     var key = JSON.stringify(v.value);
-    if (key === lastSent) { input.__dirty = false; return; }  // nothing actually changed
+    if (key === lastSent) { input.__live = shownValue(input); return; }  // nothing changed
     lastSent = key;
-    input.__dirty = false;
+    // What was on screen when the write went out. Reading it back when the
+    // write resolves would call the field clean against text typed since.
+    var sent = shownValue(input);
     input.classList.add('saving');
     Promise.resolve(commit(v.value))
-      .then(function () { input.classList.remove('saving'); })
+      .then(function () {
+        input.classList.remove('saving');
+        input.__live = sent;   // the document says this now
+      })
       .catch(function (e) {
         input.classList.remove('saving');
         lastSent = undefined;
@@ -157,10 +171,17 @@ function bindCommit(input, validate, commit) {
   input.addEventListener('keydown', function (ev) {
     if (ev.key === 'Enter') { ev.preventDefault(); attempt(); input.blur(); }
   });
-  // Typed but not yet committed. The poll refuses to re-render while a field
-  // in this state has the focus, so it can never discard what you are typing.
-  input.addEventListener('input', function () { input.__dirty = true; });
-  input.setLive = function (val) { lastSent = JSON.stringify(val); input.__dirty = false; };
+  /**
+   * Dirty means what is in the box differs from what the document last said --
+   * compared, not remembered. A flag set on the first keystroke would still
+   * call a field dirty after you typed a digit and deleted it again, and the
+   * poll would then leave a field alone that has nothing in it worth keeping.
+   */
+  input.isDirty = function () { return shownValue(input) !== input.__live; };
+  input.setLive = function (val) {
+    lastSent = JSON.stringify(val);
+    input.__live = shownValue(input);
+  };
   return input;
 }
 
@@ -1311,52 +1332,153 @@ function reload() {
  * Apps Script has no edit trigger for Docs -- onOpen and onInstall are the
  * only document triggers, and neither fires when someone reformats text --
  * so there is nothing to subscribe to. The sidebar polls instead: re-read
- * the document every few seconds, compare it with what is on screen, and
- * re-render only when it actually differs.
+ * the document, and if it differs from what is on screen, re-render.
  *
- * Two rules keep the poll from fighting the user:
- *   - it stands aside while any server call is in flight, so it never
- *     interleaves with a live-apply write;
- *   - it never re-renders while the focus is in a field. A value you have
- *     typed but not yet committed can therefore never be overwritten. The
- *     refresh is held and runs as soon as the focus leaves.
+ * The poll runs while you are typing. Everything on screen is overwritten
+ * with what the document now says, with one exception: the field that has
+ * the focus and holds something different from what the document last said
+ * keeps its text and its caret, because that is a value you have not
+ * finished typing. Every other field, including one you left half-typed and
+ * clicked away from, goes back to the truth.
  * ================================================================= */
-var POLL_MS = 5000;
-var pendingRefresh = false;
 
-function editingNow() {
-  // hasFocus() first, and it is the whole point of this check. activeElement
-  // keeps naming the last field the user was in long after they have clicked
-  // away into the document itself, so without this the sidebar decides you are
-  // still typing, holds every refresh, and waits for a focusout that already
-  // happened. That is what made a newly inserted table take minutes to appear.
-  if (!document.hasFocus()) return false;
-  var a = document.activeElement;
-  if (!a) return false;
-  var tag = (a.tagName || '').toLowerCase();
-  return tag === 'input' || tag === 'select' || tag === 'textarea';
+/* ---- how often ---------------------------------------------------
+ * The interval follows what a read actually costs, so reading never takes up
+ * more than a twentieth of the sidebar's time: wait twenty times the last
+ * read's duration, never under a second, never over five. The wait starts
+ * when the previous read finishes, so two reads are never closer together
+ * than a second however slow one of them was.
+ */
+var POLL_MIN_MS = 1000;
+var POLL_MAX_MS = 5000;
+var POLL_DUTY = 20;
+var lastFetchMs = 0;
+
+function nextPollDelay() {
+  return Math.max(POLL_MIN_MS, Math.min(POLL_MAX_MS, lastFetchMs * POLL_DUTY));
 }
 
+/* ---- keeping the edit you are in the middle of -------------------- */
+
+/**
+ * Where a node sits, as the chain of child indexes down from <body>.
+ *
+ * renderAll builds the page from the data, so the same data puts the same
+ * field in the same place; that is enough to find a field again on the other
+ * side of a re-render. If the document changed shape -- a table added, a
+ * section removed -- the path lands somewhere else or nowhere, and the edit
+ * is dropped rather than pasted into whatever now sits there.
+ */
+function domPath(node) {
+  var path = [];
+  for (var n = node; n && n !== document.body; n = n.parentNode) {
+    if (!n.parentNode) return null;                 // detached: no path to give
+    path.unshift(Array.prototype.indexOf.call(n.parentNode.children, n));
+  }
+  return path;
+}
+
+function atPath(path) {
+  var n = document.body;
+  for (var i = 0; n && i < path.length; i++) n = n.children[path[i]];
+  return n || null;
+}
+
+var rerendering = false;
+
+function renderKeepingEdits() {
+  var a = document.activeElement;
+  var keep = null;
+  // The focused field is found again either way. Whether its contents survive
+  // is the separate question below: dirty means you have typed something the
+  // document does not know about yet, and only that is worth keeping.
+  if (document.hasFocus() && a && a.isDirty) {
+    var path = domPath(a);
+    if (path) {
+      keep = { path: path, tag: a.tagName, dirty: a.isDirty(),
+               value: a.value, checked: a.checked,
+               start: a.selectionStart, end: a.selectionEnd };
+    }
+  }
+
+  rerendering = true;
+  try { renderAll(); } finally { rerendering = false; }
+
+  if (!keep) return;
+  var node = atPath(keep.path);
+  if (!node || node.tagName !== keep.tag || !node.isDirty) return;
+  if (keep.dirty) {
+    node.value = keep.value;
+    node.checked = keep.checked;
+  }
+  // Losing the focus every second because the document changed would make the
+  // sidebar unusable, so it goes back whether or not anything was typed.
+  node.focus();
+  // Only text-like inputs have a selection; a number or colour input throws.
+  try { node.setSelectionRange(keep.start, keep.end); } catch (e) { /* not text */ }
+}
+
+/* ---- the read ---------------------------------------------------- */
+
 function poll() {
-  if (!S.data || S.busy || document.hidden) return;
-  call('loadAll', [S.tabId])
+  if (!S.data || S.busy || document.hidden) return Promise.resolve();
+  // call() bails above when anything else is in flight, so the queue is empty
+  // here and this is the server round trip rather than time spent waiting.
+  var t0 = Date.now();
+  return call('loadAll', [S.tabId])
     .then(function (data) {
-      if (JSON.stringify(data) === S.fingerprint) { pendingRefresh = false; return; }
-      if (editingNow()) {
-        if (!pendingRefresh) {
-          pendingRefresh = true;
-          status('The document changed — fields refresh when you leave this one', '');
-        }
-        return;
-      }
-      pendingRefresh = false;
+      lastFetchMs = Date.now() - t0;
+      var fresh = JSON.stringify(data);
+      if (fresh === S.fingerprint) return;
       S.data = data;
       S.tabId = data.activeTabId;
-      S.fingerprint = JSON.stringify(data);
-      renderAll();
+      S.fingerprint = fresh;
+      renderKeepingEdits();
     })
     .catch(function () { /* transient: the next tick tries again */ });
 }
+
+/* ---- the clock ----------------------------------------------------
+ * The schedule runs in a worker. That is as much of the poll as can leave the
+ * main thread: google.script.run is injected into this page by the HtmlService
+ * bootstrap and does not exist in a worker, and a worker has no parent frame
+ * to postMessage through, so the read itself has to be issued here. What the
+ * worker does buy is a timer that is not queued behind the sidebar's own
+ * layout and rendering work.
+ *
+ * Apps Script serves no static files, so there is no URL to point a Worker at
+ * and it is built from a blob instead. If the page's content security policy
+ * refuses that, setTimeout does the same job on the main thread.
+ */
+var scheduleNext = null;
+
+function startPolling() {
+  var src = 'onmessage = function (e) { setTimeout(function () { postMessage(1); }, e.data); };';
+  var worker = null;
+  try {
+    worker = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+  } catch (e) {
+    worker = null;
+  }
+
+  function tick() { poll().then(schedule); }
+
+  if (worker) {
+    worker.onmessage = tick;
+    // A worker that dies takes the pending tick with it, so restart the chain
+    // on the main thread rather than leaving the sidebar silently frozen.
+    worker.onerror = function () { worker = null; setTimeout(tick, POLL_MIN_MS); };
+    scheduleNext = function (ms) {
+      if (worker) worker.postMessage(ms); else setTimeout(tick, ms);
+    };
+  } else {
+    scheduleNext = function (ms) { setTimeout(tick, ms); };
+  }
+
+  schedule();
+}
+
+function schedule() { scheduleNext(nextPollDelay()); }
 
 function switchTab(name) {
   ['page', 'styles', 'bullets', 'notes', 'tables', 'presets'].forEach(function (n) {
@@ -1392,12 +1514,6 @@ function boot() {
     tipItem.classList.toggle('open');
   });
 
-  // A refresh held back because the focus was in a field runs the moment
-  // the focus leaves it.
-  document.addEventListener('focusout', function () {
-    if (pendingRefresh) setTimeout(poll, 0);
-  });
-
   // Coming back to the sidebar after working in the document is the moment the
   // user most wants it to be current, and it is the closest thing to an edit
   // event this add-on can get: Docs offers no cursor or typing trigger, and a
@@ -1424,7 +1540,7 @@ function boot() {
       fl.appendChild(o);
     });
     status('Ready', 'ok');
-    setInterval(poll, POLL_MS);
+    startPolling();
   }).catch(function (e) {
     status('Could not load: ' + String((e && e.message) || e), 'err');
   });
