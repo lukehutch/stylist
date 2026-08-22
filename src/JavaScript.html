@@ -179,8 +179,18 @@ function bindCommit(input, validate, commit) {
       status(v.error, 'err');
       return;
     }
-    input.classList.remove('invalid');
-    input.title = '';
+    // A field with no inherited value to fall back on answers junk with its
+    // default rather than with a refusal, so the box shows what the document
+    // is about to get, and stays marked until the next keystroke.
+    if (v.show !== undefined) input.value = v.show;
+    if (v.bad) {
+      input.classList.add('invalid');
+      input.title = v.bad;
+      status(v.bad, 'err');
+    } else {
+      input.classList.remove('invalid');
+      input.title = '';
+    }
     if (v.skip) return;
     var key = JSON.stringify(v.value);
     if (key === lastSent) { input.__live = shownValue(input); return; }  // nothing changed
@@ -201,6 +211,12 @@ function bindCommit(input, validate, commit) {
       });
   }
   input.addEventListener('change', attempt);
+  // Typing is the acknowledgement: whatever the last value was flagged for,
+  // the mark goes as soon as the field is being worked on again.
+  input.addEventListener('input', function () {
+    input.classList.remove('invalid');
+    input.title = '';
+  });
   input.addEventListener('keydown', function (ev) {
     if (ev.key === 'Enter') { ev.preventDefault(); attempt(); input.blur(); }
   });
@@ -232,6 +248,80 @@ function bindCommit(input, validate, commit) {
  * Fields with a real default rather than an inherited one are left alone:
  * emptying them means nothing, so they keep the old no-op.
  */
+/**
+ * Defaults for the fields that cannot be left unset.
+ *
+ * A page margin, a cell padding, a border width: none of these inherit from
+ * anywhere, so there is no such thing as "not set" for them -- whatever is in
+ * the box is what the document gets. Emptying one therefore has to mean
+ * something, and the only sensible something is the value a fresh Google Doc
+ * would have. Points throughout, since that is what the writers take.
+ */
+var DEFAULTS = {
+  pageWidthPt: 612,        // Letter, the size a new Google Doc comes with
+  pageHeightPt: 792,
+  pageMarginPt: 72,        // 1 in
+  headerFooterMarginPt: 36,   // 0.5 in
+  columnGapPt: 36,         // 0.5 in
+  columnCount: 1,
+  pageNumberStart: 1,
+  cellPaddingPt: 5,        // Docs' own 0.069 in
+  borderWidthPt: 1,
+  borderPaddingPt: 0,
+  minRowHeightPt: 0,
+  pinnedHeaderRows: 0
+};
+
+/**
+ * The width columns have to share: the page less its side margins.
+ *
+ * There is no fixed default for a column width -- it depends on the page it
+ * sits on -- so the default is the width the columns would have if they split
+ * the text area evenly, which is what a column layout starts as anyway.
+ * Sections carry their own margins; where one is not set the page's stands.
+ */
+function textWidthPt(marginLeftPt, marginRightPt) {
+  var pf = (S.data && S.data.pageFormat) || {};
+  function pick(a, b) {
+    if (a !== null && a !== undefined) return a;
+    if (b !== null && b !== undefined) return b;
+    return DEFAULTS.pageMarginPt;
+  }
+  var w = pf.pageWidthPt || DEFAULTS.pageWidthPt;
+  return Math.max(1, w - pick(marginLeftPt, pf.marginLeftPt) - pick(marginRightPt, pf.marginRightPt));
+}
+
+/**
+ * What a number typed into a field means.
+ *
+ * Three cases, and which one a field gets depends on what it is. A field
+ * whose value can come from a named style is `clearable`: empty means "put it
+ * back to inherited" and that is written through. A field with a `def` has
+ * nowhere to inherit from, so empty means the default, and so does anything
+ * that is not a number at all -- with the box marked, so a typo that quietly
+ * became 1 in does not pass unnoticed. A field with neither leaves the
+ * document alone when empty, and refuses junk outright.
+ *
+ * Out of range is never a typo in the same way: a width of -3 is a number,
+ * just not a usable one, so it is refused rather than replaced.
+ */
+function numeric(raw, opts, def) {
+  if (raw === '') {
+    if (opts.clearable) return { value: null };
+    if (def === undefined) return { skip: true };
+    return { value: def, show: true };
+  }
+  var n = Number(raw);
+  if (!isFinite(n)) {
+    if (def === undefined) return { error: '"' + raw + '" is not a number' };
+    return { value: def, show: true, bad: '"' + raw + '" is not a number. Using the default instead.' };
+  }
+  if (opts.min !== undefined && n < opts.min) return { error: 'Must be at least ' + opts.min };
+  if (opts.max !== undefined && n > opts.max) return { error: 'Must be at most ' + opts.max };
+  if (opts.integer && Math.round(n) !== n) return { error: 'Must be a whole number' };
+  return { value: n };
+}
+
 /** Dimension field: displayed in the current unit, committed in points. */
 function numUnit(valuePt, commitPt, opts) {
   opts = opts || {};
@@ -245,12 +335,12 @@ function numUnit(valuePt, commitPt, opts) {
   var unitTag = el('span', 'unit', S.unit.toLowerCase());
 
   bindCommit(input, function (i) {
-    var raw = i.value.trim();
-    if (raw === '') return opts.clearable ? { value: null } : { skip: true };
-    var n = Number(raw);
-    if (!isFinite(n)) return { error: '"' + raw + '" is not a number' };
-    if (opts.min !== undefined && n < opts.min) return { error: 'Must be at least ' + opts.min };
-    return { value: toPt(n, S.unit) };
+    // The default is held in points; the box speaks the chosen unit, so it is
+    // compared and shown in that unit and converted back like any other value.
+    var def = opts.def === undefined ? undefined : Number(fromPt(opts.def, S.unit));
+    var v = numeric(i.value.trim(), opts, def);
+    if (v.error || v.skip || v.value === null) return v;
+    return { value: toPt(v.value, S.unit), show: v.show ? String(def) : undefined, bad: v.bad };
   }, function (pt) {
     input._pt = pt;
     return commitPt(pt);
@@ -270,12 +360,9 @@ function numPt(value, commit, opts) {
   input.placeholder = opts.placeholder || 'inherit';
   var tag = el('span', 'unit', 'pt');
   bindCommit(input, function (i) {
-    var raw = i.value.trim();
-    if (raw === '') return opts.clearable ? { value: null } : { skip: true };
-    var n = Number(raw);
-    if (!isFinite(n)) return { error: '"' + raw + '" is not a number' };
-    if (opts.min !== undefined && n < opts.min) return { error: 'Must be at least ' + opts.min };
-    return { value: n };
+    var v = numeric(i.value.trim(), opts, opts.def);
+    if (v.show) v.show = String(opts.def);
+    return v;
   }, commit);
   input.setLive(value);
   return [input, tag];
@@ -289,14 +376,9 @@ function numPlain(value, commit, opts) {
   input.value = (value === null || value === undefined) ? '' : value;
   input.placeholder = opts.placeholder || 'default';
   bindCommit(input, function (i) {
-    var raw = i.value.trim();
-    if (raw === '') return opts.clearable ? { value: null } : { skip: true };
-    var n = Number(raw);
-    if (!isFinite(n)) return { error: '"' + raw + '" is not a number' };
-    if (opts.min !== undefined && n < opts.min) return { error: 'Must be at least ' + opts.min };
-    if (opts.max !== undefined && n > opts.max) return { error: 'Must be at most ' + opts.max };
-    if (opts.integer && Math.round(n) !== n) return { error: 'Must be a whole number' };
-    return { value: n };
+    var v = numeric(i.value.trim(), opts, opts.def);
+    if (v.show) v.show = String(opts.def);
+    return v;
   }, commit);
   input.setLive(value);
   return input;
@@ -585,7 +667,8 @@ function buildStyleEditor(model, commit, opts) {
     gChar.appendChild(fieldRow('Text color', colorField(model.textStyle.foregroundColor,
       function (v) { return setT('foregroundColor', v); })));
     gChar.appendChild(fieldRow('Highlight', colorField(model.textStyle.backgroundColor,
-      function (v) { return setT('backgroundColor', v); })));
+      function (v) { return setT('backgroundColor', v); },
+      { blank: '#ffffff', noneTitle: 'No highlight' })));
   }
 
   /* ---- paragraph ---- */
@@ -641,7 +724,8 @@ function buildStyleEditor(model, commit, opts) {
     gPara.appendChild(flow);
 
     gPara.appendChild(fieldRow('Shading', colorField(model.paragraphStyle.shadingColor,
-      function (v) { return setP('shadingColor', v); })));
+      function (v) { return setP('shadingColor', v); },
+      { blank: '#ffffff', noneTitle: 'No shading' })));
 
     /* ---- borders ---- */
     var bItem = el('div', 'item');
@@ -662,9 +746,11 @@ function buildStyleEditor(model, commit, opts) {
         return fire('paragraphStyle', side.key);
       }
       gSide.appendChild(fieldRow('Width', numPt(cur.widthPt,
-        function (v) { return setB('widthPt', v); }, { min: 0 })));
+        function (v) { return setB('widthPt', v); },
+        { min: 0, def: DEFAULTS.borderWidthPt })));
       gSide.appendChild(fieldRow('Padding', numPt(cur.paddingPt,
-        function (v) { return setB('paddingPt', v); }, { min: 0 })));
+        function (v) { return setB('paddingPt', v); },
+        { min: 0, def: DEFAULTS.borderPaddingPt })));
       gSide.appendChild(fieldRow('Color', colorField(cur.color,
         function (v) { return setB('color', v); })));
       gSide.appendChild(fieldRow('Dash', selectField(DASH_STYLES, cur.dashStyle || 'SOLID',
@@ -684,7 +770,8 @@ function buildStyleEditor(model, commit, opts) {
  * gap in the border. Append the controls to what this returns.
  */
 /**
- * The "apply to all" switch at the head of the Lists and Tables panels.
+ * The "apply to all" switch at the head of the Lists, Tables and Sections
+ * panels.
  *
  * Ticking it does three things in one go. Everything is first brought into
  * line with the formatting most of them already have, so the document starts
@@ -695,6 +782,10 @@ function buildStyleEditor(model, commit, opts) {
  *
  * Unticking it changes nothing in the document; it just points the editor back
  * at the one thing the cursor is in.
+ *
+ * It is offered even where the document holds only one of the thing, because
+ * the other half of what it does still matters there: with it ticked the
+ * editor stops needing the cursor to be inside the thing being edited.
  */
 function applyAllSwitch(kind, label, unifyFn, unifyArgs) {
   var wrap = el('div', 'checks applyall');
@@ -791,9 +882,11 @@ function renderPage() {
     return applyPage({ pageWidthPt: p.widthPt, pageHeightPt: p.heightPt }).then(reload);
   })));
   host.appendChild(fieldRow('Width', numUnit(pf.pageWidthPt,
-    function (v) { return applyPage({ pageWidthPt: v, pageHeightPt: pf.pageHeightPt }); }, { min: 1 })));
+    function (v) { return applyPage({ pageWidthPt: v, pageHeightPt: pf.pageHeightPt }); },
+    { min: 1, def: DEFAULTS.pageWidthPt })));
   host.appendChild(fieldRow('Height', numUnit(pf.pageHeightPt,
-    function (v) { return applyPage({ pageWidthPt: pf.pageWidthPt, pageHeightPt: v }); }, { min: 1 })));
+    function (v) { return applyPage({ pageWidthPt: pf.pageWidthPt, pageHeightPt: v }); },
+    { min: 1, def: DEFAULTS.pageHeightPt })));
 
   var orient = el('div', 'checks');
   orient.appendChild(checkField('Landscape (flip dimensions)', pf.flipPageOrientation,
@@ -805,14 +898,16 @@ function renderPage() {
    ['marginLeftPt', 'Left'], ['marginRightPt', 'Right']].forEach(function (m) {
     host.appendChild(fieldRow(m[1], numUnit(pf[m[0]], function (v) {
       var p = {}; p[m[0]] = v; return applyPage(p);
-    }, { min: 0 })));
+    }, { min: 0, def: DEFAULTS.pageMarginPt })));
   });
 
   host.appendChild(el('h2', null, 'Header & footer'));
   host.appendChild(fieldRow('Header margin', numUnit(pf.marginHeaderPt,
-    function (v) { return applyPage({ marginHeaderPt: v }); }, { min: 0 })));
+    function (v) { return applyPage({ marginHeaderPt: v }); },
+    { min: 0, def: DEFAULTS.headerFooterMarginPt })));
   host.appendChild(fieldRow('Footer margin', numUnit(pf.marginFooterPt,
-    function (v) { return applyPage({ marginFooterPt: v }); }, { min: 0 })));
+    function (v) { return applyPage({ marginFooterPt: v }); },
+    { min: 0, def: DEFAULTS.headerFooterMarginPt })));
   if (!pf.useCustomHeaderFooterMargins) {
     var n = el('div', 'note');
     n.textContent = 'This document has custom header/footer margins turned off, and that flag is ' +
@@ -829,7 +924,8 @@ function renderPage() {
 
   host.appendChild(el('h2', null, 'Document'));
   host.appendChild(fieldRow('Page numbers from', numPlain(pf.pageNumberStart,
-    function (v) { return applyPage({ pageNumberStart: v }); }, { min: 0, integer: true })));
+    function (v) { return applyPage({ pageNumberStart: v }); },
+    { min: 0, integer: true, def: DEFAULTS.pageNumberStart })));
   host.appendChild(fieldRow('Mode', selectField(
     [{ id: 'PAGES', label: 'Pages' }, { id: 'PAGELESS', label: 'Pageless' }],
     pf.documentMode, function (v) { return applyPage({ documentMode: v }).then(reload); })));
@@ -855,12 +951,16 @@ function sectionBody(sec) {
   }
   var gSec = group('Margins and layout');
   box.appendChild(gSec);
-  [['marginTopPt', 'Top'], ['marginBottomPt', 'Bottom'], ['marginLeftPt', 'Left'],
-   ['marginRightPt', 'Right'], ['marginHeaderPt', 'Header'], ['marginFooterPt', 'Footer']]
+  [['marginTopPt', 'Top', DEFAULTS.pageMarginPt],
+   ['marginBottomPt', 'Bottom', DEFAULTS.pageMarginPt],
+   ['marginLeftPt', 'Left', DEFAULTS.pageMarginPt],
+   ['marginRightPt', 'Right', DEFAULTS.pageMarginPt],
+   ['marginHeaderPt', 'Header', DEFAULTS.headerFooterMarginPt],
+   ['marginFooterPt', 'Footer', DEFAULTS.headerFooterMarginPt]]
     .forEach(function (m) {
       gSec.appendChild(fieldRow(m[1], numUnit(sec[m[0]], function (v) {
         var p = {}; p[m[0]] = v; return put(p);
-      }, { min: 0 })));
+      }, { min: 0, def: m[2] })));
     });
   gSec.appendChild(fieldRow('Direction', selectField(DIRECTIONS, sec.contentDirection,
     function (v) { return put({ contentDirection: v }); })));
@@ -868,7 +968,8 @@ function sectionBody(sec) {
     [{ id: 'NONE', label: 'None' }, { id: 'BETWEEN_EACH_COLUMN', label: 'Line between columns' }],
     sec.columnSeparatorStyle, function (v) { return put({ columnSeparatorStyle: v }); })));
   gSec.appendChild(fieldRow('Page numbers from', numPlain(sec.pageNumberStart,
-    function (v) { return put({ pageNumberStart: v }); }, { min: 0, integer: true })));
+    function (v) { return put({ pageNumberStart: v }); },
+    { min: 0, integer: true, def: DEFAULTS.pageNumberStart })));
   var checks = el('div', 'checks');
   checks.appendChild(checkField('Landscape', sec.flipPageOrientation,
     function (v) { return put({ flipPageOrientation: v }); }));
@@ -884,18 +985,20 @@ function sectionBody(sec) {
     var cols = [];
     for (var i = 0; i < v; i++) cols.push({ widthPt: wPt, paddingEndPt: gPt });
     return put({ columns: cols });
-  }, { min: 1, max: 3, integer: true });
+  }, { min: 1, max: 3, integer: true, def: DEFAULTS.columnCount });
   gSCols.appendChild(fieldRow('Count (1-3)', count));
   gSCols.appendChild(fieldRow('Column width', numUnit(wPt, function (v) {
     var cols = [];
     for (var i = 0; i < sec.columnCount; i++) cols.push({ widthPt: v, paddingEndPt: gPt });
     return put({ columns: cols });
-  }, { min: 1 })));
+  }, { min: 1, def: (textWidthPt(sec.marginLeftPt, sec.marginRightPt) -
+       (gPt == null ? DEFAULTS.columnGapPt : gPt) * ((sec.columnCount || 1) - 1)) /
+       (sec.columnCount || 1) })));
   gSCols.appendChild(fieldRow('Gap after', numUnit(gPt, function (v) {
     var cols = [];
     for (var i = 0; i < sec.columnCount; i++) cols.push({ widthPt: wPt, paddingEndPt: v });
     return put({ columns: cols });
-  }, { min: 0 })));
+  }, { min: 0, def: DEFAULTS.columnGapPt })));
   return box;
 }
 
@@ -907,8 +1010,7 @@ function sectionBody(sec) {
  *
  * Which one that is comes from the cheap cursor probe, the same gate the
  * Lists and Tables panels use; the content read that finds it only happens
- * when the probe's answer changes. A document with a single section -- most
- * of them -- skips the switch and shows its editor straight out.
+ * when the probe's answer changes.
  */
 function renderSections() {
   var host = document.getElementById('panel-sections');
@@ -922,11 +1024,9 @@ function renderSections() {
     return;
   }
 
-  if (total > 1) {
-    host.appendChild(applyAllSwitch('sections', 'Apply to all sections', 'unifySections',
-      { fromStartIndex: secs[0].startIndex }));
-  }
-  if (S.all.sections && total > 1) {
+  host.appendChild(applyAllSwitch('sections', 'Apply to all sections', 'unifySections',
+    { fromStartIndex: secs[0].startIndex }));
+  if (S.all.sections) {
     // Every section now carries the same formatting, so the shown one's
     // values are all of their values, and writes fan out to every section.
     host.appendChild(sectionBody(secs[0]));
@@ -1217,9 +1317,7 @@ function renderLists() {
       'Click inside a list in the document to edit it here.'));
     return;
   }
-  if (lists.length > 1) {
-    host.appendChild(applyAllSwitch('lists', 'Apply to all lists', 'unifyLists'));
-  }
+  host.appendChild(applyAllSwitch('lists', 'Apply to all lists', 'unifyLists'));
   if (S.all.lists) {
     // Every list now carries the same formatting, so the first one's values
     // are all of their values; the editor shows them and writes to them all.
@@ -1297,8 +1395,10 @@ function listBody(list) {
   var box = el('div');
   box.appendChild(el('h2', null, 'Marker style'));
   box.appendChild(el('p', 'hint',
-    'A marker style covers all three levels at once: the Docs API defines them ' +
-    'that way, so no one level can be given a different one.'));
+    'Markers belong to the whole list, not to one level. A style names three ' +
+    'markers, one for each of the first three levels, and levels below that ' +
+    'reuse them in the same order. A single level can still have its markers ' +
+    'taken off.'));
   box.appendChild(markerPicker(list));
 
   var levels = (list || S.data.lists.lists[0]).levels;
@@ -1480,9 +1580,7 @@ function renderTables() {
     return;
   }
 
-  if (S.data.tables.length > 1) {
-    host.appendChild(applyAllSwitch('tables', 'Apply to all tables', 'unifyTables'));
-  }
+  host.appendChild(applyAllSwitch('tables', 'Apply to all tables', 'unifyTables'));
   if (S.all.tables) {
     // Every table now carries the same formatting, so the first one's values
     // are all of their values; the editor shows them and writes to them all.
@@ -1554,7 +1652,7 @@ function tableBody(t) {
       cellHost.appendChild(fieldRow(p[1], numUnit(v[p[0]], function (val) {
         var c = {}; c[p[0]] = val;
         return put({ cell: c, applyCellsTo: applyTo });
-      }, { min: 0 })));
+      }, { min: 0, def: DEFAULTS.cellPaddingPt })));
     });
     cellHost.appendChild(fieldRow('Align', selectField(
       [{ id: '', label: '—' }].concat(CONTENT_ALIGNMENTS), v.contentAlignment || '', function (val) {
@@ -1563,7 +1661,7 @@ function tableBody(t) {
       })));
     cellHost.appendChild(fieldRow('Fill', colorField(v.backgroundColor, function (val) {
       return put({ cell: { backgroundColor: val }, applyCellsTo: applyTo });
-    })));
+    }, { blank: '#ffffff', noneTitle: 'No fill' })));
   }
   renderCells();
 
@@ -1580,7 +1678,8 @@ function tableBody(t) {
       applyCellsTo: applyTo
     });
   }
-  gBord.appendChild(fieldRow('Width', numPt(bw, function (v) { bw = v; return pushBorder(); }, { min: 0 })));
+  gBord.appendChild(fieldRow('Width', numPt(bw, function (v) { bw = v; return pushBorder(); },
+    { min: 0, def: DEFAULTS.borderWidthPt })));
   gBord.appendChild(fieldRow('Color', colorField(bc, function (v) { bc = v; return pushBorder(); })));
   gBord.appendChild(fieldRow('Dash', selectField(DASH_STYLES, bd, function (v) { bd = v; return pushBorder(); })));
 
@@ -1597,7 +1696,8 @@ function tableBody(t) {
     return rows[0][key];
   }
   gRows.appendChild(fieldRow('Min height', numUnit(agreed('minRowHeightPt'),
-    function (v) { return put({ rows: { minRowHeightPt: v } }); }, { min: 0 })));
+    function (v) { return put({ rows: { minRowHeightPt: v } }); },
+    { min: 0, def: DEFAULTS.minRowHeightPt })));
   var rchecks = el('div', 'checks');
   rchecks.appendChild(checkField('First row is a header', t.headerRow, function (v) {
     return put({ rows: { tableHeader: v, rowIndices: [0] } });
@@ -1606,13 +1706,14 @@ function tableBody(t) {
     function (v) { return put({ rows: { preventOverflow: v } }); }));
   gRows.appendChild(rchecks);
   gRows.appendChild(fieldRow('Pinned header rows', numPlain(t.pinnedHeaderRows,
-    function (v) { return put({ pinnedHeaderRowsCount: v }); }, { min: 0, integer: true })));
+    function (v) { return put({ pinnedHeaderRowsCount: v }); },
+    { min: 0, integer: true, def: DEFAULTS.pinnedHeaderRows })));
 
   var gTCols = group('Columns');
   box.appendChild(gTCols);
   gTCols.appendChild(fieldRow('Width', numUnit((t.columnWidths[0] || {}).widthPt, function (v) {
     return put({ columns: { widthPt: v, widthType: 'FIXED_WIDTH' } });
-  }, { min: 1 })));
+  }, { min: 1, def: textWidthPt(null, null) / Math.max(1, t.columnWidths.length) })));
   gTCols.appendChild(fieldRow('Sizing', selectField(
     [{ id: 'EVENLY_DISTRIBUTED', label: 'Evenly distributed' }, { id: 'FIXED_WIDTH', label: 'Fixed width' }],
     (t.columnWidths[0] || {}).widthType || 'EVENLY_DISTRIBUTED',

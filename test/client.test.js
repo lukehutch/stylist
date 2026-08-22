@@ -171,14 +171,68 @@ module.exports = ({ suite, test }) => {
   test('emptying a box that can inherit writes that through to the document', (t) => {
     // Every builder used by the style editor offers the same escape hatch,
     // and the fields that can be inherited ask for it.
-    const clearable = clientJs.match(/opts\.clearable \? \{ value: null \} : \{ skip: true \}/g) || [];
-    t.equal(clearable.length, 3, 'numUnit, numPt and numPlain all honour it');
+    t.match(clientJs, /if \(opts\.clearable\) return \{ value: null \};/,
+      'an empty box on a clearable field commits null');
+    const routed = clientJs.match(/numeric\(i\.value\.trim\(\), opts/g) || [];
+    t.equal(routed.length, 3, 'numUnit, numPt and numPlain all validate through it');
     ['Size', 'Line spacing', 'Space above', 'Space below',
      'Indent left', 'Indent right', 'First line'].forEach((label) => {
       const row = new RegExp("fieldRow\\('" + label + "'[^]*?clearable: true");
       t.match(clientJs, row, label + ' can be cleared');
     });
     t.match(clientJs, /\{ value: i\.value \|\| null \}/, 'and so can the font');
+  });
+
+  /* numeric() is the one place a typed value is judged, so it is pulled out
+     and run rather than read. */
+  const judge = () => evalFromClient(['numeric'], 'return numeric;');
+
+  test('a field with nowhere to inherit from falls back to its default', (t) => {
+    const n = judge();
+    t.deepEqual(n('', { def: 72 }, 72), { value: 72, show: true },
+      'emptying a page margin means one inch, and the box says so');
+    t.deepEqual(n('', { clearable: true }, undefined), { value: null },
+      'where inheriting is a real answer, empty still means inherit');
+    t.deepEqual(n('', {}, undefined), { skip: true },
+      'and a field with neither is left alone');
+  });
+
+  test('something that is not a number becomes the default, and is marked', (t) => {
+    const n = judge();
+    const v = n('one inch', { def: 72 }, 72);
+    t.equal(v.value, 72, 'the document gets the default rather than nothing');
+    t.equal(v.show, true, 'and the box is rewritten to show it');
+    t.match(v.bad, /is not a number/, 'with the reason on the field');
+    t.ok(!v.error, 'it is not a refusal: the write goes out');
+    t.match(n('one inch', {}, undefined).error, /is not a number/,
+      'without a default there is nothing to fall back to, so it is refused');
+  });
+
+  test('a number that is merely out of range is refused, not replaced', (t) => {
+    const n = judge();
+    t.match(n('-3', { min: 0, def: 72 }, 72).error, /at least 0/);
+    t.match(n('9', { max: 3, def: 1 }, 1).error, /at most 3/);
+    t.match(n('1.5', { integer: true, def: 1 }, 1).error, /whole number/);
+    t.deepEqual(n('2.5', { min: 0, def: 72 }, 72), { value: 2.5 }, 'a usable number passes through');
+  });
+
+  test('the defaults are the ones a new document has', (t) => {
+    t.match(clientJs, /pageMarginPt: 72/, 'one inch margins');
+    t.match(clientJs, /headerFooterMarginPt: 36/, 'half an inch of header and footer');
+    t.match(clientJs, /pageNumberStart: 1/);
+    t.match(clientJs, /cellPaddingPt: 5/);
+    t.match(clientJs, /def: DEFAULTS\.pageMarginPt/, 'and the page margins ask for theirs');
+    t.match(clientJs, /def: DEFAULTS\.cellPaddingPt/);
+    t.match(clientJs, /def: textWidthPt\(null, null\) \/ Math\.max\(1, t\.columnWidths\.length\)/,
+      'a column width has no fixed default, so it is the even split of the text area');
+  });
+
+  test('the box is rewritten and marked by the commit itself', (t) => {
+    const fn = /function bindCommit\([^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /if \(v\.show !== undefined\) input\.value = v\.show;/);
+    t.match(fn, /if \(v\.bad\) \{[^]*?input\.classList\.add\('invalid'\)/);
+    t.match(clientJs, /input\.addEventListener\('input', function \(\) \{[^]*?remove\('invalid'\)/,
+      'and typing again clears the mark');
   });
 
   test('the server turns that null into "put it back to inherited"', (t) => {
@@ -796,11 +850,14 @@ module.exports = ({ suite, test }) => {
       'and a section write covers every section');
   });
 
-  test('the switch is only offered when there is more than one thing to unify', (t) => {
-    t.match(clientJs, /S\.data\.tables\.length > 1[^]*?applyAllSwitch\('tables'/);
-    t.match(clientJs, /lists\.length > 1[^]*?applyAllSwitch\('lists'/);
-    t.match(clientJs,
-      /var total = S\.data\.sectionCount \|\| 0;[^]*?if \(total > 1\) \{[^]*?applyAllSwitch\('sections'/);
+  test('every panel that has one offers it, however few things there are', (t) => {
+    // With one table in the document the tick is not about unifying anything:
+    // it is what lets the panel edit that table without the cursor being in it.
+    ['lists', 'tables', 'sections'].forEach((kind) => {
+      t.match(clientJs, new RegExp(`host\\.appendChild\\(applyAllSwitch\\('${kind}'`),
+        `the ${kind} panel appends it unconditionally`);
+    });
+    t.notOk(/length > 1[^]*?applyAllSwitch/.test(clientJs), 'no count gates it any more');
   });
 
   test('unticking changes nothing in the document', (t) => {
@@ -1224,8 +1281,8 @@ module.exports = ({ suite, test }) => {
   });
 
   test('apply-to-all survives the scoping -- it is the whole-document path', (t) => {
-    t.match(clientJs, /lists\.length > 1[^]*?applyAllSwitch\('lists'/);
-    t.match(clientJs, /S\.data\.tables\.length > 1[^]*?applyAllSwitch\('tables'/);
+    t.match(clientJs, /applyAllSwitch\('lists', 'Apply to all lists', 'unifyLists'\)/);
+    t.match(clientJs, /applyAllSwitch\('tables', 'Apply to all tables', 'unifyTables'\)/);
   });
 
   test('the sections panel shows one section -- the one the cursor is in', (t) => {
@@ -1236,7 +1293,7 @@ module.exports = ({ suite, test }) => {
       'it says which of the sections is being edited');
     t.match(fn, /sectionBody\(secs\[0\]\)/,
       'the slice already holds only the current section');
-    t.match(fn, /S\.all\.sections && total > 1[^]*?sectionBody\(secs\[0\]\)/,
+    t.match(fn, /if \(S\.all\.sections\) \{[^]*?sectionBody\(secs\[0\]\)/,
       'apply-to-all swaps the cursor scope for every-section-at-once');
   });
 
