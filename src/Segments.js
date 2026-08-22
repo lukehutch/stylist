@@ -86,6 +86,42 @@ function headerFooterParity_(content) {
   return parity;
 }
 
+/**
+ * Which sections use each header and footer.
+ *
+ * A section names its own headers and footers on its section break, but an
+ * id left unset there inherits from the section before it, and an id unset
+ * in the first section inherits from the document. So one segment usually
+ * serves a run of sections, and styling it styles all of them -- which is
+ * why the sidebar says so before it writes.
+ *
+ * Returns section indices per segment id, counted the same way the sections
+ * panel counts them: one per section break in the body, in order.
+ */
+function sectionSegmentUse_(content) {
+  var KEYS = ['defaultHeaderId', 'firstPageHeaderId', 'evenPageHeaderId',
+              'defaultFooterId', 'firstPageFooterId', 'evenPageFooterId'];
+  var ds = content.documentStyle || {};
+  var carried = {};
+  KEYS.forEach(function (k) { carried[k] = ds[k] || null; });
+
+  var use = {};
+  var count = 0;
+  (((content.body || {}).content) || []).forEach(function (el) {
+    if (!el.sectionBreak) return;
+    var ss = el.sectionBreak.sectionStyle || {};
+    var at = count++;
+    KEYS.forEach(function (k) {
+      if (ss[k]) carried[k] = ss[k];
+      var id = carried[k];
+      if (!id) return;
+      if (!use[id]) use[id] = [];
+      if (use[id].indexOf(at) === -1) use[id].push(at);
+    });
+  });
+  return { use: use, count: count };
+}
+
 /** Plain-text preview of a segment, for the segment list in the sidebar. */
 function segmentPreview_(content) {
   var text = '';
@@ -104,7 +140,11 @@ function readSegments(tabId) {
   var content = ctx.content;
   var roles = headerFooterRoles_(content);
   var parity = headerFooterParity_(content);
-  var out = { tabId: ctx.tabId, headers: [], footers: [], footnotes: [], footnoteReferenceCount: 0 };
+  var used = sectionSegmentUse_(content);
+  var out = {
+    tabId: ctx.tabId, headers: [], footers: [], footnotes: [],
+    footnoteReferenceCount: 0, sectionCount: used.count
+  };
 
   function collect(map, kind, list) {
     Object.keys(map || {}).forEach(function (id) {
@@ -114,6 +154,7 @@ function readSegments(tabId) {
         kind: kind,
         segmentId: id,
         parity: parity[id] || 'right',
+        sections: used.use[id] || [],
         role: roles[id] || ('Unreferenced ' + kind),
         preview: segmentPreview_(seg.content),
         empty: !range,
@@ -316,4 +357,58 @@ function readSegmentStyle(tabId, kind, segmentId) {
     textStyle: textStyleToUi_(run ? run.textStyle : {}),
     paragraphStyle: paragraphStyleToUi_(firstPara.paragraphStyle)
   };
+}
+
+/**
+ * Whether a section keeps its own header or footer, or continues the one
+ * before it -- Docs calls this "link to previous".
+ *
+ * The two kinds link independently: a section can have its own header while
+ * its footer is still the previous section's. Within one kind, the default,
+ * first-page and even-page variants belong to the section as a set, so a
+ * section handed back to the one before it gives up all three.
+ *
+ * payload: { tabId, kind: 'header' | 'footer', sectionIndex, link: 'own' | 'previous' }
+ *
+ * 'own' creates a header or footer for the section. The API can only create
+ * the default variant -- HeaderFooterType has no first-page or even-page
+ * member -- so a section that needs its own first-page header still has to
+ * get it from the Docs UI.
+ *
+ * 'previous' deletes the ones the section names, which is what makes it
+ * continue the previous section again. That deletes their text with them,
+ * which is why the sidebar asks first.
+ */
+function setSegmentLink(payload) {
+  payload = payload || {};
+  var doc = fetchDoc_();
+  var ctx = resolveTab_(doc, payload.tabId);
+  var scan = sectionsScan_(ctx);
+  var sec = scan.sections[payload.sectionIndex];
+  if (!sec) throw new Error('There is no section ' + (payload.sectionIndex + 1) + ' in this tab.');
+  var isHeader = payload.kind !== 'footer';
+  var own = isHeader ? sec.ownHeaderIds : sec.ownFooterIds;
+
+  if (payload.link === 'previous') {
+    if (sec.isFirst) {
+      throw new Error('The first section has nothing before it to continue from.');
+    }
+    if (!own.length) return { applied: 0 };
+    return batchUpdate_(own.map(function (id) {
+      return isHeader
+        ? { deleteHeader: { headerId: id, tabId: ctx.tabId } }
+        : { deleteFooter: { footerId: id, tabId: ctx.tabId } };
+    }));
+  }
+
+  // The first section's header is the document's, so what counts as already
+  // having one there is the document naming one at all.
+  var has = sec.isFirst ? !!(isHeader ? sec.headerId : sec.footerId) : own.length;
+  if (has) return { applied: 0 };
+  // An unset location, or the first section break, means the document rather
+  // than a section -- which is the right answer for the first section.
+  var loc = { index: sec.startIndex };
+  if (ctx.tabId) loc.tabId = ctx.tabId;
+  var req = { type: 'DEFAULT', sectionBreakLocation: loc };
+  return batchUpdate_([isHeader ? { createHeader: req } : { createFooter: req }]);
 }

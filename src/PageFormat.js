@@ -154,10 +154,18 @@ function readSections(tabId) {
  *  find-the-current-section read. */
 function sectionsScan_(tabCtx) {
   var elements = ((tabCtx.content.body || {}).content) || [];
+  var ds = tabCtx.content.documentStyle || {};
   var sections = [];
+  // The header and footer in force, carried forward: a section that does not
+  // name its own continues the one before it, and the first section continues
+  // the document's.
+  var runHeader = ds.defaultHeaderId || null;
+  var runFooter = ds.defaultFooterId || null;
   elements.forEach(function (el, i) {
     if (!el.sectionBreak) return;
     var ss = el.sectionBreak.sectionStyle || {};
+    if (ss.defaultHeaderId) runHeader = ss.defaultHeaderId;
+    if (ss.defaultFooterId) runFooter = ss.defaultFooterId;
     var cols = (ss.columnProperties || []).map(function (c) {
       return { widthPt: dimPt_(c.width), paddingEndPt: dimPt_(c.paddingEnd) };
     });
@@ -178,7 +186,16 @@ function sectionsScan_(tabCtx) {
       flipPageOrientation: !!ss.flipPageOrientation,
       useFirstPageHeaderFooter: !!ss.useFirstPageHeaderFooter,
       columnCount: cols.length || 1,
-      columns: cols
+      columns: cols,
+      headerId: runHeader,
+      footerId: runFooter,
+      // Whether this section names its own, as against continuing the one
+      // before it. Every id it names of that kind, so handing the header back
+      // to the previous section hands back all three variants at once.
+      ownHeaderIds: ['defaultHeaderId', 'firstPageHeaderId', 'evenPageHeaderId']
+        .map(function (k) { return ss[k]; }).filter(Boolean),
+      ownFooterIds: ['defaultFooterId', 'firstPageFooterId', 'evenPageFooterId']
+        .map(function (k) { return ss[k]; }).filter(Boolean)
     });
   });
   return { sections: sections, elements: elements };

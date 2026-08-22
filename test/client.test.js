@@ -374,23 +374,31 @@ module.exports = ({ suite, test }) => {
   suite('Headers and footers have their own panel');
 
   const hfEval = (tail) => evalFromClient(
-    ['HF_SCOPES', 'hfSegments', 'hfDescription', 'combineSegmentStyles'], tail);
+    ['HF_SCOPES', 'hfSegments', 'hfAlsoUsedBy', 'humanSections', 'hfDescription',
+     'combineSegmentStyles'], tail);
 
-  /** Two headers and two footers, one of each on either side of the spread. */
-  const fourSegments = `[
-    { kind: 'header', segmentId: 'h.default', parity: 'right' },
-    { kind: 'header', segmentId: 'h.even',    parity: 'left'  },
-    { kind: 'footer', segmentId: 'f.default', parity: 'right' },
-    { kind: 'footer', segmentId: 'f.even',    parity: 'left'  }
+  /**
+   * Three sections. The first two share a header, the third broke away and
+   * has its own; all three share the footers. Which is what inheritance
+   * produces: an id set on one section runs on until another sets it.
+   */
+  const threeSections = `[
+    { kind: 'header', segmentId: 'h.default', parity: 'right', sections: [0, 1] },
+    { kind: 'header', segmentId: 'h.even',    parity: 'left',  sections: [0, 1] },
+    { kind: 'header', segmentId: 'h.s2',      parity: 'right', sections: [2] },
+    { kind: 'footer', segmentId: 'f.default', parity: 'right', sections: [0, 1, 2] },
+    { kind: 'footer', segmentId: 'f.even',    parity: 'left',  sections: [0, 1, 2] }
   ]`;
-  const pick = (scope, segmentKind) => hfEval(
-    `var all = ${fourSegments};
-     var S = { hfScope: '${scope}', ctx: ${segmentKind ? `{ segmentKind: '${segmentKind}' }` : '{}'},
-       data: { segments: {
-         headers: all.filter(function (s) { return s.kind === 'header'; }),
-         footers: all.filter(function (s) { return s.kind === 'footer'; }) } } };
-     var got = hfSegments();
-     return got && got.map(function (s) { return s.segmentId; });`);
+  const world = (scope, at, count) =>
+    `var all = ${threeSections};
+     var S = { hfScope: '${scope}', ctx: {},
+       data: { activeSectionIndex: ${at || 0}, sectionCount: ${count === undefined ? 3 : count},
+         segments: {
+           headers: all.filter(function (s) { return s.kind === 'header'; }),
+           footers: all.filter(function (s) { return s.kind === 'footer'; }) } } };`;
+  const pick = (scope, at, count) => hfEval(
+    `${world(scope, at, count)}
+     return hfSegments().map(function (s) { return s.segmentId; });`);
 
   test('the tab is in the strip, and the panel it opens is empty for the client to fill', (t) => {
     t.match(sidebar, /<button id="tab-hf">/);
@@ -405,43 +413,86 @@ module.exports = ({ suite, test }) => {
       t.notOk(page.indexOf(k) !== -1, k + ' belongs to the headers panel now');
     });
     const hf = /function renderHeaders\(\)[^]*?\n}/.exec(clientJs)[0];
-    ['marginHeaderPt', 'marginFooterPt', 'useFirstPageHeaderFooter',
-     'useEvenPageHeaderFooter'].forEach((k) => t.ok(hf.indexOf(k) !== -1, k + ' arrived'));
+    ['marginHeaderPt', 'marginFooterPt', 'useEvenPageHeaderFooter']
+      .forEach((k) => t.ok(hf.indexOf(k) !== -1, k + ' arrived'));
+  });
+
+  test('"different first page" is set per section, so only the sections panel offers it', (t) => {
+    // The Docs API keeps useEvenPageHeaderFooter on the document but
+    // useFirstPageHeaderFooter on each section, so one control cannot stand
+    // for both and the per-section one belongs where a section is chosen.
+    const hf = /function renderHeaders\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.notOk(hf.indexOf('useFirstPageHeaderFooter') !== -1,
+      'the headers panel no longer writes the document-wide one');
+    t.match(hf, /set one section at a time, on the Sections tab/,
+      'and says where it went');
+    const sec = /function sectionBody\([^]*?\n}/.exec(clientJs)[0];
+    t.match(sec, /useFirstPageHeaderFooter/, 'the sections panel still has it');
   });
 
   test('the six choices are the ones offered', (t) => {
     t.deepEqual(hfEval('return HF_SCOPES.map(function (s) { return s.label; });'), [
-      'Apply to current, L+R pages',
-      'Apply to current, L pages',
-      'Apply to current, R pages',
-      'Apply to all, L+R pages',
-      'Apply to all, L pages',
-      'Apply to all, R pages'
+      'Apply to this section, L+R pages',
+      'Apply to this section, L pages',
+      'Apply to this section, R pages',
+      'Apply to all sections, L+R pages',
+      'Apply to all sections, L pages',
+      'Apply to all sections, R pages'
     ]);
   });
 
-  test('"all" needs no cursor and covers both kinds', (t) => {
-    t.deepEqual(pick('all:both', null),
-      ['h.default', 'h.even', 'f.default', 'f.even']);
-    t.deepEqual(pick('all:left', null), ['h.even', 'f.even'],
+  test('"all sections" covers both kinds, wherever the cursor is', (t) => {
+    t.deepEqual(pick('all:both', 2),
+      ['h.default', 'h.even', 'h.s2', 'f.default', 'f.even']);
+    t.deepEqual(pick('all:left', 0), ['h.even', 'f.even'],
       'left-hand pages are the even-page ones');
-    t.deepEqual(pick('all:right', null), ['h.default', 'f.default']);
+    t.deepEqual(pick('all:right', 0), ['h.default', 'h.s2', 'f.default']);
   });
 
-  test('"current" is whichever kind the cursor is in', (t) => {
-    t.deepEqual(pick('current:both', 'header'), ['h.default', 'h.even']);
-    t.deepEqual(pick('current:both', 'footer'), ['f.default', 'f.even']);
-    t.deepEqual(pick('current:right', 'header'), ['h.default'],
+  test('"this section" narrows to the ones that section actually uses', (t) => {
+    t.deepEqual(pick('sec:both', 2), ['h.s2', 'f.default', 'f.even'],
+      'the third section has its own header but shares the footers');
+    t.deepEqual(pick('sec:both', 0), ['h.default', 'h.even', 'f.default', 'f.even']);
+    t.deepEqual(pick('sec:right', 2), ['h.s2', 'f.default'],
       'and the side narrows it further');
   });
 
-  test('"current" with the cursor outside a header or footer names nothing', (t) => {
-    // Which is what puts the "click inside one" hint on screen, exactly as the
-    // lists panel does when the cursor is not in a list.
-    t.equal(pick('current:both', null), null);
-    t.equal(pick('current:both', 'footnote'), null, 'a footnote is not one of these');
+  test('one section means nothing to narrow, so the cursor does not come into it', (t) => {
+    // Which is most documents: "this section" and "all sections" name the
+    // same set, and neither waits for the cursor to be anywhere.
+    t.deepEqual(pick('sec:both', 0, 1), pick('all:both', 0, 1));
+    t.deepEqual(pick('sec:both', 0, 0), pick('all:both', 0, 0),
+      'and a tab with no section break at all is the same case');
+  });
+
+  test('a shared header is named as shared before it is written to', (t) => {
+    const shared = hfEval(
+      `${world('sec:both', 0)}
+       return hfAlsoUsedBy(hfSegments());`);
+    t.deepEqual(shared, [1, 2], 'the footers of section 1 run on into 2 and 3');
+    t.deepEqual(hfEval(`${world('sec:both', 2)}
+       return hfAlsoUsedBy(hfSegments());`), [0, 1]);
+    const say = hfEval('return humanSections;');
+    t.equal(say([1]), '2', 'counted the way the document numbers them');
+    t.equal(say([1, 2]), '2 and 3');
+    t.equal(say([0, 2, 3]), '1, 3 and 4');
     const hf = /function renderHeaders\(\)[^]*?\n}/.exec(clientJs)[0];
-    t.match(hf, /Click inside a header or footer in the document/);
+    t.match(hf, /hfAlsoUsedBy\(segs\)/);
+    t.match(hf, /inherits[^]*?the one before it/,
+      'and says why, so the warning is not a mystery');
+  });
+
+  test('a section can take its own header, or hand it back', (t) => {
+    const fn = /function hfLinkBox\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /\['header', 'footer'\]\.forEach/,
+      'the two link independently, so they get a row each');
+    t.match(fn, /Give this section its own ' \+ kind/);
+    t.match(fn, /Continue from section ' \+ \(here - 1\) \+ ' \(deletes this one\)/,
+      'the button says what it destroys');
+    t.match(fn, /Add a ' \+ kind/, 'and a document with none can get one');
+    const set = /function setLink\([^]*?\n}/.exec(clientJs)[0];
+    t.match(set, /'setSegmentLink'/);
+    t.match(set, /sectionIndex: \(S\.data\.hfLink \|\| \{\}\)\.sectionIndex/);
   });
 
   test('the editor says how many things it is about to write to', (t) => {
@@ -1016,7 +1067,7 @@ module.exports = ({ suite, test }) => {
     // Every remaining call is an error, a "working on it", or the clear that
     // takes one of those away again.
     const calls = clientJs.match(/status\((?!msg)[^;]*\);/g) || [];
-    const allowed = /'err'\)|status\('', ''\)|Loading|Converting|Bringing/;
+    const allowed = /'err'\)|status\('', ''\)|Loading|Converting|Bringing|Adding|Removing/;
     calls.forEach((c) => t.match(c, allowed, c.trim()));
     t.ok(calls.length > 4, 'the errors are still reported');
     t.notOk(/status\([^;]*✓/.test(clientJs), 'no tick-mark confirmations survive');

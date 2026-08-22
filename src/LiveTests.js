@@ -127,24 +127,43 @@ test('styling every footnote callout is accepted', function (t) {
 suite('Headers and footers');
 
 /**
- * The one thing only a real document can answer.
- *
- * DocumentApp is documented to hand back a cursor, and to model a header as
- * a HeaderSection, but nothing in the reference says whether the cursor is
- * reachable at all while it sits inside one -- and the whole "apply to
- * current" half of the headers panel rests on it being reachable. So this
- * test reports what the probe actually sees rather than asserting a
- * particular answer: put the cursor in a header and run the suite again to
- * see it change.
+ * What the probe sees from inside a header, which only a real document can
+ * answer. Nothing in the DocumentApp reference says whether a cursor is
+ * reachable at all while it sits in one. The panel no longer depends on the
+ * answer -- it picks the section from the body paragraph instead -- but the
+ * answer decides one sentence of on-screen wording, so this reports it
+ * rather than asserting it. Put the cursor in a header and run again.
  */
 test('the cursor probe can see into a header or footer', function (t) {
   var ctx = cursorContext();
   t.comment('cursorContext() = ' + JSON.stringify(ctx));
-  if (ctx.segmentKind) {
-    t.ok(true, 'the cursor is in a ' + ctx.segmentKind);
+  t.ok(true, ctx.segmentKind
+    ? 'the cursor is in a ' + ctx.segmentKind
+    : 'cursor is in the body — put it in a header and run again');
+});
+
+test('every header and footer knows which sections use it', function (t) {
+  var segs = readSegments(null);
+  var all = segs.headers.concat(segs.footers);
+  t.comment('sections in this tab: ' + segs.sectionCount);
+  all.forEach(function (s) {
+    t.comment(s.role + ' (' + s.segmentId + ') -> sections ' +
+      s.sections.map(function (i) { return i + 1; }).join(', '));
+    t.ok(s.sections.length > 0 || segs.sectionCount === 0,
+      s.role + ' is used by at least one section');
+  });
+  if (!all.length) t.ok(true, 'this document has no headers or footers');
+});
+
+test('the headers slice says whether this section keeps its own', function (t) {
+  var slice = refresh(null, 'hf', cursorContext());
+  t.comment('hfLink = ' + JSON.stringify(slice.hfLink));
+  t.equal(typeof slice.sectionCount, 'number', 'the section count came back');
+  if (slice.hfLink) {
+    t.equal(slice.hfLink.sectionIndex, slice.activeSectionIndex,
+      'and it describes the section the panel is showing');
   } else {
-    t.ok(true, 'cursor is in the body — put it in a header and run again to ' +
-      'confirm the probe reports segmentKind');
+    t.ok(true, 'no sections in this tab');
   }
 });
 

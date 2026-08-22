@@ -1520,11 +1520,121 @@ test('a segment id that belongs to another tab is skipped, not fatal', (t) => {
   t.deepEqual(ids, ['h.even']);
 });
 
+/**
+ * Three sections. The first names the document's header and footer, the
+ * second names nothing and so continues them, the third breaks away with a
+ * header of its own but keeps continuing the footer.
+ */
+function withThreeSections() {
+  const doc = makeDoc();
+  const tab = doc.tabs[0].documentTab;
+  const para = (at, text) => ({ startIndex: at, endIndex: at + text.length + 1,
+    paragraph: { paragraphStyle: {}, elements: [
+      { startIndex: at, endIndex: at + text.length + 1, textRun: { content: text } }] } });
+  tab.body.content.push(
+    { startIndex: 200, endIndex: 201, sectionBreak: { sectionStyle: {} } },
+    para(201, 'Second section'),
+    { startIndex: 300, endIndex: 301,
+      sectionBreak: { sectionStyle: { defaultHeaderId: 'h.s3' } } },
+    para(301, 'Third section'));
+  tab.headers['h.s3'] = { headerId: 'h.s3', content: [para(0, 'Third header')] };
+  return doc;
+}
+
+test('each header and footer says which sections use it', (t) => {
+  const M = makeSandbox(withThreeSections());
+  const seg = M.readSegments(null);
+  t.equal(seg.sectionCount, 3);
+  const where = {};
+  seg.headers.concat(seg.footers).forEach((s) => { where[s.segmentId] = s.sections; });
+  t.deepEqual(where['h.default'], [0, 1],
+    'the third section named its own, so the run stops there');
+  t.deepEqual(where['h.s3'], [2]);
+  t.deepEqual(where['f.default'], [0, 1, 2],
+    'nothing ever renamed the footer, so it runs to the end');
+});
+
+test('a section that names nothing continues the one before it', (t) => {
+  const M = makeSandbox(withThreeSections());
+  const secs = M.readSections(null).sections;
+  t.deepEqual(secs.map((s) => s.headerId), ['h.default', 'h.default', 'h.s3'],
+    'the header in force, inherited where it is not named');
+  t.deepEqual(secs.map((s) => s.ownHeaderIds.length > 0), [false, false, true],
+    'but only the third one owns it');
+  t.deepEqual(secs.map((s) => s.footerId), ['f.default', 'f.default', 'f.default']);
+});
+
+test('a section can be given its own header', (t) => {
+  const M = makeSandbox(withThreeSections());
+  M.__reset();
+  M.setSegmentLink({ tabId: null, kind: 'header', sectionIndex: 1, link: 'own' });
+  const reqs = allRequests(M);
+  t.equal(reqs.length, 1);
+  t.equal(reqs[0].createHeader.type, 'DEFAULT');
+  t.equal(reqs[0].createHeader.sectionBreakLocation.index, 200,
+    'named by the section break that starts it');
+  M.__reset();
+  M.setSegmentLink({ tabId: null, kind: 'footer', sectionIndex: 1, link: 'own' });
+  t.ok(allRequests(M)[0].createFooter, 'and the footer is a separate request');
+});
+
+test('a section that already has its own is left alone', (t) => {
+  // Asking twice is a 400 from the API, so the second ask is simply nothing.
+  const M = makeSandbox(withThreeSections());
+  M.__reset();
+  t.equal(M.setSegmentLink({ tabId: null, kind: 'header', sectionIndex: 2, link: 'own' }).applied, 0);
+  t.equal(M.setSegmentLink({ tabId: null, kind: 'header', sectionIndex: 0, link: 'own' }).applied, 0,
+    'and the first section already has the document\u2019s');
+  t.equal(allRequests(M).length, 0);
+});
+
+test('handing a header back deletes the ones that section named', (t) => {
+  const doc = withThreeSections();
+  const tab = doc.tabs[0].documentTab;
+  // The same section also broke away for its first page, which Docs links and
+  // unlinks together with the default one.
+  tab.body.content[tab.body.content.length - 2]
+    .sectionBreak.sectionStyle.firstPageHeaderId = 'h.s3first';
+  tab.headers['h.s3first'] = { headerId: 'h.s3first', content: [] };
+  const M = makeSandbox(doc);
+  M.__reset();
+  M.setSegmentLink({ tabId: null, kind: 'header', sectionIndex: 2, link: 'previous' });
+  t.deepEqual(allRequests(M).map((r) => r.deleteHeader.headerId), ['h.s3', 'h.s3first'],
+    'all of that section\u2019s headers go, so the whole header continues again');
+  M.__reset();
+  M.setSegmentLink({ tabId: null, kind: 'footer', sectionIndex: 2, link: 'previous' });
+  t.equal(allRequests(M).length, 0, 'the footer was never its own, so nothing to undo');
+});
+
+test('the first section has nothing before it to continue from', (t) => {
+  const M = makeSandbox(withThreeSections());
+  t.throws(() => M.setSegmentLink({ tabId: null, kind: 'header', sectionIndex: 0, link: 'previous' }),
+    /nothing before it/);
+});
+
+test('a document with no header at all can be given one', (t) => {
+  const doc = makeDoc();
+  const tab = doc.tabs[0].documentTab;
+  delete tab.documentStyle.defaultHeaderId;
+  tab.headers = {};
+  const M = makeSandbox(doc);
+  M.__reset();
+  M.setSegmentLink({ tabId: null, kind: 'header', sectionIndex: 0, link: 'own' });
+  t.equal(allRequests(M)[0].createHeader.sectionBreakLocation.index, 0,
+    'the first section break means the document itself');
+});
+
 test('the headers panel gets its segments and its two margins in one read', (t) => {
   const M = makeSandbox(makeDoc());
   const slice = M.refresh(null, 'hf');
   t.ok(slice.segments && slice.segments.headers.length, 'the segments themselves');
   t.equal(slice.pageFormat.marginHeaderPt, 36, 'and the margin that positions them');
   t.equal(slice.lists, undefined, 'and nothing the panel does not show');
+  t.equal(slice.sectionCount, 1, 'and which section the cursor is in, for "this section"');
+  t.equal(slice.activeSectionIndex, 0);
+  t.deepEqual(slice.hfLink,
+    { sectionIndex: 0, isFirst: true, ownHeader: false, ownFooter: false,
+      hasHeader: true, hasFooter: true },
+    'plus whether that section keeps its own, which the link buttons act on');
 });
 };

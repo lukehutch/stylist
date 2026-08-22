@@ -115,10 +115,26 @@ function refresh(tabId, what, ctx) {
     out.sections = readSections(tabId).sections;
   }
   // The headers/footers panel shows the segments themselves and the two
-  // margins that position them, so it wants both in one answer.
+  // margins that position them, so it wants both in one answer. It also
+  // offers to style one section's headers, and which section that is comes
+  // from the same match the sections panel makes.
   if (what === 'hf') {
     out.segments = readSegments(tabId);
     out.pageFormat = readPageFormat(tabId);
+    var hf = sectionsScan_(resolveTab_(fetchDoc_(), tabId));
+    out.activeSectionIndex = pickSection_(hf.sections, hf.elements, ctx || {});
+    out.sectionCount = hf.sections.length;
+    // Whether that section keeps its own header and footer or continues the
+    // previous section's, which is what the two link buttons act on.
+    var at = hf.sections[out.activeSectionIndex];
+    out.hfLink = at ? {
+      sectionIndex: out.activeSectionIndex,
+      isFirst: at.isFirst,
+      ownHeader: at.ownHeaderIds.length > 0,
+      ownFooter: at.ownFooterIds.length > 0,
+      hasHeader: !!at.headerId,
+      hasFooter: !!at.footerId
+    } : null;
   }
   if (!what || what === 'lists') out.lists = readLists(tabId);
   if (!what || what === 'segments') out.segments = readSegments(tabId);

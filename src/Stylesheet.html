@@ -216,6 +216,11 @@
   button.act.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   button.act.danger { color: var(--err); }
   .btnrow { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+  /* A link row says where a section's header comes from and offers the one
+     button that changes it; the sentence takes the whole width so the button
+     is not squeezed against it. */
+  .linkbox .btnrow { align-items: center; margin: 6px 0 10px; }
+  .linkstate { flex: 1 0 100%; color: var(--muted); font-size: var(--fs-sm); }
   .applogo { width: calc(var(--fs) * 3); height: calc(var(--fs) * 3);
              vertical-align: middle; margin-right: 8px; flex: 0 0 auto; }
   /* A custom-style row is an .item whose heading carries an editable name
