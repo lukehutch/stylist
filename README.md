@@ -35,9 +35,13 @@ Requires [clasp](https://github.com/google/clasp) (`npm i -g @google/clasp`).
 ```bash
 clasp login
 clasp create-script --type standalone --title "Doc Format Config" --rootDir src
-clasp push
+clasp push --force
 clasp open-script
 ```
+
+`--force` on that first push: `create-script` leaves a default manifest on the
+server, so clasp asks before overwriting it, and declining skips the whole push
+rather than just the manifest.
 
 `--type standalone`, not `--type docs`: an editor add-on is not bound to one
 document, and a test deployment makes you pick the document to try it in. A

@@ -14,6 +14,62 @@ deliberate exceptions: `src/LiveTests.js` and `src/GappTester.js` have to be
 pushed, because they are the suite that runs inside Apps Script and the runtime
 that runs it.
 
+## Setting up your own copy
+
+**Use `create-script`, not `clone-script`.**
+
+```bash
+clasp login
+clasp create-script --type standalone --title "Doc Format Config" --rootDir src
+clasp push --force
+```
+
+`clone-script` adopts a script that already exists, and it *downloads* that
+project's files into `rootDir` — pointed at this repository it would overwrite
+`src/` with whatever is on the server. It is the right command only if you
+already have a Doc Format Config script in your account and want to reconnect
+to it; then `clasp clone-script <SCRIPT_ID> --rootDir src` in an empty
+directory, or write `.clasp.json` by hand:
+
+```json
+{ "scriptId": "1a2B3c...", "rootDir": "src" }
+```
+
+Three notes on that first push:
+
+- **`--force` on the first push.** `create-script` leaves a default
+  `appsscript.json` on the server, so the first push changes the manifest and
+  clasp asks before overwriting it. Declining skips the *whole* push, not just
+  the manifest, which looks like nothing happened.
+- **`--type standalone`, not `--type docs`.** An editor add-on is not bound to
+  one document: a test deployment makes you pick the document to try it in, and
+  a published add-on runs in whichever document the user opens it from. A bound
+  script would tie this code's life to one Doc in your Drive. Google's
+  documentation does not state a requirement either way — I looked, on four
+  pages — so this is the practical choice rather than a rule.
+- **`.clasp.json` is gitignored**, because the script id is specific to your
+  copy. `.clasp.json.example` is the template.
+
+### What each goal actually needs
+
+|  | Test deployment (use it yourself) | `npm run test:live` | Publish to the Marketplace |
+|---|---|---|---|
+| A script project and `.clasp.json` | yes | yes | yes |
+| Apps Script API on for your account | — | yes | — |
+| A **standard** Cloud project attached | — | yes | yes |
+| Your own OAuth client in that project | — | yes | — |
+| OAuth consent screen configured | — | — | yes |
+| Marketplace SDK enabled in that project | — | — | yes |
+| An API Executable deployment | — | yes | — |
+| A versioned add-on deployment | — | — | yes |
+
+The row that matters: **the standard Cloud project is the same one for both**
+`test:live` and publishing. Create it once. If you intend to publish, do that
+step first and the live-test setup gets shorter.
+
+If you only want to *use* the add-on yourself, the first column is the whole
+list — `clasp push`, then Deploy → Test deployments → Install.
+
 ## Running the tests
 
 ```bash
@@ -275,8 +331,11 @@ Publishing is only needed to share the add-on beyond your own account. For
 personal use, a test deployment is enough and nothing below applies.
 
 1. **Attach a standard Cloud project.** Apps Script → Project Settings →
-   Change project, and paste a GCP project number. The default per-script
-   project cannot be published.
+   Change project, and paste a GCP project **number**. The default per-script
+   project cannot be published. This is the same Cloud project `npm run
+   test:live` needs — see the table under
+   [Setting up your own copy](#what-each-goal-actually-needs) — so if you set
+   that up already, you are done with this step.
 2. **Configure the OAuth consent screen** in that Cloud project. The scopes
    this add-on requests are in `src/appsscript.json`:
    `https://www.googleapis.com/auth/documents` and
@@ -285,10 +344,18 @@ personal use, a test deployment is enough and nothing below applies.
    verification — a security assessment and, typically, several weeks. An
    internal listing within one Workspace domain does not.
 3. **Create a versioned deployment**: Apps Script → Deploy → New deployment →
-   Add-on. Note the deployment id and the version number.
+   Add-on. A version is a frozen snapshot of the code; the published add-on
+   runs that snapshot, not your latest push, so every release means a new
+   version here.
 4. **Enable the Google Workspace Marketplace SDK** in the Cloud project, then
-   fill in App Configuration: add-on type *Editor Add-on*, the script id, the
-   version, and the icon above.
+   fill in App Configuration: add-on type *Editor Add-on*, plus two values
+   Google's SDK asks for by name —
+   - the **script id**, from Apps Script → Project Settings → IDs;
+   - the **version number**, from Apps Script → Deploy → Manage deployments,
+     under "Configuration".
+
+   Editor add-ons are configured by version number. The *deployment id* you may
+   see alongside it is what Google Workspace add-ons use; this is not one.
 5. **Fill in the Store Listing**: name, descriptions, category, the icon and
    banner, screenshots, a terms-of-service URL and a privacy-policy URL. Both
    URLs are mandatory and must resolve.
