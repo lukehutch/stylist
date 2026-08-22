@@ -1,5 +1,5 @@
 {
-  "name": "gdoc-format-config",
+  "name": "stylist",
   "version": "1.0.0",
   "description": "Fine-grained format configuration for Google Docs",
   "private": true,

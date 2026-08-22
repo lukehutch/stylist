@@ -1,4 +1,4 @@
-# gdoc-format-config
+# Stylist
 
 <img src="assets/icon-128.png" alt="" width="72" align="right">
 
@@ -34,7 +34,7 @@ Requires [clasp](https://github.com/google/clasp) (`npm i -g @google/clasp`).
 
 ```bash
 clasp login
-clasp create-script --type standalone --title "Doc Format Config" --rootDir src
+clasp create-script --type standalone --title "Stylist" --rootDir src
 clasp push --force
 clasp open-script
 ```
@@ -58,7 +58,7 @@ To attach to a script project you already have, skip `create-script`: copy
 → IDs → Script ID**, or in the editor URL between `/projects/` and `/edit`.
 
 In the Apps Script editor: **Deploy > Test deployments > Install**, then open any
-Google Doc and choose **Extensions > Doc Format Config > Open format editor**.
+Google Doc and choose **Extensions > Stylist > Open format editor**.
 
 The Docs advanced service and the required OAuth scopes are already declared in
 `src/appsscript.json`; the first run prompts for authorisation.

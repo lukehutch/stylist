@@ -17,8 +17,8 @@
  *     can live in version control and be shared.
  */
 
-var PRESET_STORE_KEY = 'gdocFormatConfig.presets';
-var STYLE_PRESET_STORE_KEY = 'gdocFormatConfig.stylePresets';
+var PRESET_STORE_KEY = 'stylist.presets';
+var STYLE_PRESET_STORE_KEY = 'stylist.stylePresets';
 
 function readStore_(key) {
   var raw = PropertiesService.getUserProperties().getProperty(key);

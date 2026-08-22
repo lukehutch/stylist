@@ -20,14 +20,14 @@ that runs it.
 
 ```bash
 clasp login
-clasp create-script --type standalone --title "Doc Format Config" --rootDir src
+clasp create-script --type standalone --title "Stylist" --rootDir src
 clasp push --force
 ```
 
 `clone-script` adopts a script that already exists, and it *downloads* that
 project's files into `rootDir` — pointed at this repository it would overwrite
 `src/` with whatever is on the server. It is the right command only if you
-already have a Doc Format Config script in your account and want to reconnect
+already have a Stylist script in your account and want to reconnect
 to it; then `clasp clone-script <SCRIPT_ID> --rootDir src` in an empty
 directory, or write `.clasp.json` by hand:
 
@@ -246,7 +246,7 @@ clasp open-script
 ```
 
 In the editor, **Deploy → Test deployments → Install**, then open a document
-and use **Extensions → Doc Format Config**. A test deployment runs the code at
+and use **Extensions → Stylist**. A test deployment runs the code at
 `HEAD`, so `clasp push` and reload the sidebar to pick up changes — no
 redeploy needed.
 

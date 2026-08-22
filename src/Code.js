@@ -22,7 +22,7 @@ function onInstall(e) {
 function showSidebar() {
   var html = HtmlService.createTemplateFromFile('Sidebar')
     .evaluate()
-    .setTitle('Document Format');
+    .setTitle('Stylist');
   DocumentApp.getUi().showSidebar(html);
 }
 
