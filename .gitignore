@@ -1,7 +1,11 @@
 # clasp's project link holds a script id specific to your own copy.
 # Copy .clasp.json.example instead.
 .clasp.json
+
+# Credentials: clasp's tokens, and the OAuth client you download from the
+# Cloud console if you set up `gapp-test live`.
 .clasprc.json
+client_secret*.json
 
 node_modules/
 package-lock.json

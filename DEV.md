@@ -132,11 +132,21 @@ terminal or in CI, because Google's Execution API asks for a fair amount
 2. Create a **standard** Cloud project and attach it to the script (Project
    Settings → Google Cloud Platform (GCP) Project). The default project Apps
    Script makes for you is explicitly not enough.
-3. In *that same* Cloud project, create an OAuth client of type **Desktop
-   App**, download `client_secret.json`, and
-   `clasp login --creds client_secret.json --use-project-scopes`. The token has
-   to cover every scope in `appsscript.json`, not just the ones `gappRunInGas`
-   touches — so `--use-project-scopes` matters.
+3. In *that same* Cloud project (clasp's own OAuth client will not do), create
+   an OAuth client of type **Desktop App**, download it as
+   `client_secret.json` — `.gitignore` already covers it — and:
+
+   ```bash
+   clasp login --user gapp-tests --creds client_secret.json \
+               --use-project-scopes --include-clasp-scopes
+   ```
+
+   `--use-project-scopes` is needed because the token must cover every scope in
+   `appsscript.json`, not just the ones `gappRunInGas` touches.
+   `--include-clasp-scopes` is needed because `--use-project-scopes` alone
+   *replaces* clasp's own scopes rather than adding to them, which drops
+   `script.projects` and breaks the `clasp push` that runs first. Then put
+   `{"live": {"user": "gapp-tests"}}` in `gapp.config.json`.
 4. Deploy once as an **API Executable** (Deploy → New deployment → API
    Executable). `devMode` runs the code you just pushed rather than the deployed
    version, but a deployment still has to exist.
