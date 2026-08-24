@@ -103,13 +103,22 @@ module.exports = ({ suite, test }) => {
 
   suite('Tab scope');
 
-  test('every write covers all tabs', (t) => {
-    t.equal(client.S.scope, 'all');
+  test('a write covers the tab you are looking at, not every tab', (t) => {
+    t.equal(client.S.scope, 'current');
   });
 
-  test('there is no Apply-to control to get out of step with that', (t) => {
-    t.notOk(/id="scope"/.test(sidebar), 'the scope selector should be gone');
-    t.notOk(/getElementById\('scope'\)/.test(clientJs), 'nothing should read it');
+  test('reaching every tab is a choice the top bar offers', (t) => {
+    t.match(sidebar, /id="scope"/, 'the selector is in the top bar');
+    t.match(sidebar, /value="current">This tab/, 'and names the local choice first');
+    t.match(clientJs, /getElementById\('scope'\)\.addEventListener/, 'the client reads it');
+  });
+
+  test('a one-tab document is offered no choice of tabs', (t) => {
+    // Both rows are revealed by the same >1 branch, so neither shows up alone.
+    t.match(clientJs,
+      /tabs\.length > 1[^]{0,400}?getElementById\('scopeRow'\)\.style\.display = 'flex'/,
+      'the scope row appears only beside the tab picker');
+    t.match(sidebar, /id="scopeRow" style="display:none"/, 'and starts hidden');
   });
 
   test('switching units re-renders, so summary lines convert too', (t) => {
@@ -1371,6 +1380,42 @@ module.exports = ({ suite, test }) => {
       'focus returns to the frame holding the document, so the next keystroke lands there');
   });
 
+  suite('A write re-reads only what it can have changed');
+
+  test('the panel-shaped writes ask for one slice', (t) => {
+    [['applyBulletPreset', 'lists'], ['removeBullets', 'lists'],
+     ['setSegmentLink', 'hf'], ['applyStylePresetToNamedStyle', 'styles']
+    ].forEach(([fn, slice]) => {
+      const at = clientJs.indexOf(fn);
+      t.ok(at > 0, fn + ' is called');
+      t.match(clientJs.slice(at, at + 400), new RegExp("refreshSlice\\('" + slice + "'\\)"),
+        fn + ' re-reads only ' + slice);
+    });
+  });
+
+  test('saving, renaming and deleting a preset never reads the document', (t) => {
+    ['saveStylePreset', 'deleteStylePreset', 'savePreset', 'deletePreset'].forEach((fn) => {
+      const at = clientJs.indexOf(fn);
+      const after = clientJs.slice(at, at + 400);
+      t.notOk(/\.then\(reload\)/.test(after), fn + ' does not reload everything');
+    });
+    t.match(clientJs, /refreshSlice\('presets'\)/, 'they ask for the preset lists alone');
+  });
+
+  test('the writes that really do change everything still reload', (t) => {
+    ['convertFootnotesToEndnotes', 'applyPreset', 'importConfig'].forEach((fn) => {
+      const at = clientJs.indexOf(fn + "', [");
+      t.match(clientJs.slice(at, at + 300), /\.then\(reload\)|return reload\(\)/,
+        fn + ' reloads');
+    });
+  });
+
+  test('the constants are asked for once and carried forward', (t) => {
+    t.match(clientJs, /call\('loadAll', \[S\.tabId, have\]\)/, 'the client says what it holds');
+    t.match(clientJs, /if \(!data\.constants\) data\.constants = S\.data\.constants;/,
+      'and keeps what it was given the first time');
+  });
+
   suite('Sync reads only what the open panel needs');
 
   test('page and styles poll on metadata alone; notes and presets never read', (t) => {
@@ -1553,8 +1598,20 @@ module.exports = ({ suite, test }) => {
       'apply-to-all swaps the cursor scope for every-section-at-once');
   });
 
+  test('one header margin, edited in one place', (t) => {
+    const fn = /function sectionBody\(sec\)[^]*?\n}/.exec(clientJs)[0];
+    t.notOk(/marginHeaderPt|marginFooterPt/.test(fn),
+      'the sections panel does not offer them a second time');
+    const hf = /function renderHeaders\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(hf, /marginHeaderPt/, 'the headers panel is where they live');
+  });
+
   test('the sections editor moved off the page panel entirely', (t) => {
     const fn = /function renderPage\(\)[^]*?\n}/.exec(clientJs)[0];
-    t.notOk(/ection/.test(fn), 'nothing section-shaped is left in renderPage');
+    t.notOk(/sectionBody|writeSection|listItem/.test(fn),
+      'nothing edits a section from renderPage');
+    // It may still say the word, because a sectioned document has to be told
+    // that these margins are only the default.
+    t.match(fn, /Default margins/, 'and says so when there is more than one');
   });
 };

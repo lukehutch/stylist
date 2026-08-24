@@ -43,6 +43,15 @@
           <label for="doctab">Tab</label>
           <select id="doctab"></select>
         </div>
+        <!-- Only ever shown beside the tab picker, because a document with one
+             tab has nowhere else for a change to go. -->
+        <div class="row" id="scopeRow" style="display:none">
+          <label for="scope">Apply to</label>
+          <select id="scope">
+            <option value="current">This tab</option>
+            <option value="all">All tabs</option>
+          </select>
+        </div>
         <div class="row">
           <label for="unit">Units</label>
           <select id="unit">

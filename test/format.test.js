@@ -137,6 +137,34 @@ test('writeNamedStyle emits one updateNamedStyle carrying the tab id', (t) => {
   t.equal(reqs[0].updateNamedStyle.namedStyle.textStyle.bold, false);
 });
 
+test('presets can be re-read without touching the document', (t) => {
+  const M = makeSandbox(makeDoc());
+  M.loadAll('t.0');
+  M.__reset();
+  const slice = M.refresh('t.0', 'presets');
+  t.ok(Array.isArray(slice.presets), 'the whole-document presets come back');
+  t.ok(Array.isArray(slice.stylePresets), 'and the custom styles');
+  t.notOk(slice.pageFormat, 'nothing document-shaped rides along');
+  t.equal(allRequests(M).length, 0, 'and no request went out');
+});
+
+test('the second load leaves the constants behind', (t) => {
+  const M = makeSandbox(makeDoc());
+  const first = M.loadAll('t.0');
+  t.ok(first.constants.fonts.length, 'the first load carries them');
+  const again = M.loadAll('t.0', true);
+  t.notOk(again.constants, 'a sidebar that already has them is not sent them twice');
+  t.ok(again.pageFormat, 'everything else still comes back');
+});
+
+test('the first load says how many sections there are, not what they hold', (t) => {
+  const one = makeSandbox(makeDoc()).loadAll('t.0');
+  t.equal(one.sectionCount, 1, 'a plain document has the one implicit section');
+  t.notOk(one.sections, 'and no section bodies ride along with it');
+  const many = makeSandbox(makeSectionedDoc()).loadAll(null);
+  t.equal(many.sectionCount, 3, 'a sectioned one counts its breaks');
+});
+
 test('scope "all" writes every tab including nested child tabs', (t) => {
   S.__reset();
   S.writeNamedStyle({ scope: 'all', namedStyleType: 'NORMAL_TEXT', textStyle: { italic: true } });

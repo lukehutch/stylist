@@ -5,7 +5,7 @@
 var S = {
   data: null,          // last full loadAll payload
   unit: 'IN',          // display unit for dimension fields
-  scope: 'all',        // every write covers all tabs; not user-selectable
+  scope: 'current',    // which tabs a style write covers; see the top bar
   tabId: null,
   unitFields: [],      // dimension inputs to re-render when the unit changes
   open: {},            // which list items are expanded, so a re-render can restore them
@@ -823,7 +823,7 @@ function applyAllSwitch(kind, label, unifyFn, unifyArgs) {
     var args = copy(unifyArgs || {});
     args.tabId = S.tabId;
     return call(unifyFn, [args])
-      .then(function () { status('', ''); return reload(); })
+      .then(function () { status('', ''); return refreshSlice(kind); })
       .catch(function (e) { status(String(e.message || e), 'err'); });
   }));
   return wrap;
@@ -905,7 +905,8 @@ function renderPage() {
   });
   host.appendChild(fieldRow('Preset', selectField(presets, match, function (v) {
     var p = S.data.constants.pageSizePresets.filter(function (x) { return x.id === v; })[0];
-    return applyPage({ pageWidthPt: p.widthPt, pageHeightPt: p.heightPt }).then(reload);
+    return applyPage({ pageWidthPt: p.widthPt, pageHeightPt: p.heightPt })
+      .then(function () { return refreshSlice('page'); });
   }, { skipBlank: true })));
   host.appendChild(fieldRow('Width', numUnit(pf.pageWidthPt,
     function (v) { return applyPage({ pageWidthPt: v, pageHeightPt: pf.pageHeightPt }); },
@@ -919,7 +920,14 @@ function renderPage() {
     function (v) { return applyPage({ flipPageOrientation: v }); }));
   host.appendChild(orient);
 
-  host.appendChild(el('h2', null, 'Margins'));
+  // A section that sets its own margins is laid out by those, not by these, so
+  // in a sectioned document these are a default rather than what is on the page.
+  var manySections = (S.data.sectionCount || 0) > 1;
+  host.appendChild(el('h2', null, manySections ? 'Default margins' : 'Margins'));
+  if (manySections) {
+    host.appendChild(el('p', 'hint',
+      'Sections that set their own margins use those instead. Sections tab.'));
+  }
   [['marginTopPt', 'Top'], ['marginBottomPt', 'Bottom'],
    ['marginLeftPt', 'Left'], ['marginRightPt', 'Right']].forEach(function (m) {
     host.appendChild(fieldRow(m[1], numUnit(pf[m[0]], function (v) {
@@ -933,7 +941,9 @@ function renderPage() {
     { min: 0, integer: true, def: DEFAULTS.pageNumberStart })));
   host.appendChild(fieldRow('Mode', selectField(
     [{ id: 'PAGES', label: 'Pages' }, { id: 'PAGELESS', label: 'Pageless' }],
-    pf.documentMode, function (v) { return applyPage({ documentMode: v }).then(reload); })));
+    pf.documentMode, function (v) {
+      return applyPage({ documentMode: v }).then(function () { return refreshSlice('page'); });
+    })));
   host.appendChild(fieldRow('Background', colorField(pf.backgroundColor,
     function (v) { return applyPage({ backgroundColor: v }); },
     { blank: '#ffffff', noneTitle: 'Back to the default white page' })));
@@ -956,12 +966,13 @@ function sectionBody(sec) {
   }
   var gSec = group('Margins and layout');
   box.appendChild(gSec);
+  // The header and footer margins belong to a section too, but they are edited
+  // beside the headers they position, on the Headers & footers tab. One value
+  // with two controls in two panels can only end up disagreeing on screen.
   [['marginTopPt', 'Top', DEFAULTS.pageMarginPt],
    ['marginBottomPt', 'Bottom', DEFAULTS.pageMarginPt],
    ['marginLeftPt', 'Left', DEFAULTS.pageMarginPt],
-   ['marginRightPt', 'Right', DEFAULTS.pageMarginPt],
-   ['marginHeaderPt', 'Header', DEFAULTS.headerFooterMarginPt],
-   ['marginFooterPt', 'Footer', DEFAULTS.headerFooterMarginPt]]
+   ['marginRightPt', 'Right', DEFAULTS.pageMarginPt]]
     .forEach(function (m) {
       gSec.appendChild(fieldRow(m[1], numUnit(sec[m[0]], function (v) {
         var p = {}; p[m[0]] = v; return put(p);
@@ -1108,7 +1119,7 @@ function renderStyles() {
           (S.data.stylePresets || []).map(function (x) { return x.name; }));
         S.open['cstyle:' + name] = true;
         call('saveStylePreset', [{ name: name, textStyle: model.textStyle, paragraphStyle: model.paragraphStyle }])
-          .then(reload);
+          .then(function () { return refreshSlice('presets'); });
       });
       row.appendChild(save);
       box.appendChild(row);
@@ -1166,7 +1177,7 @@ function renderCustomStyles(host) {
     var base = normalTextStyle();
     call('saveStylePreset', [{ name: name, textStyle: base.textStyle,
                               paragraphStyle: base.paragraphStyle }])
-      .then(reload)
+      .then(function () { return refreshSlice('presets'); })
       .catch(function (e) { status(String(e.message || e), 'err'); });
   });
   addRow.appendChild(add);
@@ -1213,7 +1224,7 @@ function customStyleRow(p) {
   });
   del.addEventListener('click', function () {
     call('deleteStylePreset', [{ name: currentName() }])
-      .then(reload)
+      .then(function () { return refreshSlice('presets'); })
       .catch(function (e) { status(String(e.message || e), 'err'); });
   });
 
@@ -1233,7 +1244,7 @@ function customStyleRow(p) {
         if (!v) return;
         return call('applyStylePresetToNamedStyle', [{
           name: currentName(), namedStyleType: v, tabId: S.tabId, scope: S.scope
-        }]).then(reload);
+        }]).then(function () { return refreshSlice('styles'); });
       })));
     // Every change saves the whole style: a preset is a stored object, not a
     // live part of the document, so there is nothing incremental to write to.
@@ -1378,7 +1389,7 @@ function markerPicker(list) {
       b.addEventListener('click', function () {
         var t = listTarget(list);
         t.bulletPreset = p.id;
-        return call('applyBulletPreset', [t]).then(reload);
+        return call('applyBulletPreset', [t]).then(function () { return refreshSlice('lists'); });
       });
       row.appendChild(b);
     });
@@ -1464,7 +1475,7 @@ function levelMarker(list, lv) {
   none.addEventListener('click', function () {
     var t = listTarget(list);
     t.level = lv.level;
-    return call('removeBullets', [t]).then(reload);
+    return call('removeBullets', [t]).then(function () { return refreshSlice('lists'); });
   });
   wrap.appendChild(none);
   return wrap;
@@ -1787,7 +1798,7 @@ function setLink(kind, link, applyAll) {
   call('setSegmentLink', [{
     tabId: S.tabId, kind: kind, link: link, applyAll: !!applyAll,
     sectionIndex: (S.data.hfLink || {}).sectionIndex
-  }]).then(function () { status('', ''); return reload(); })
+  }]).then(function () { status('', ''); return refreshSlice('hf'); })
     .catch(function (e) { status(String(e.message || e), 'err'); });
 }
 
@@ -2082,7 +2093,7 @@ function renderPresets() {
     // Named here, renamed in place below -- nothing pops up.
     var name = uniqueName('Preset', (S.data.presets || []).map(function (x) { return x.name; }));
     call('savePreset', [{ name: name, tabId: S.tabId }])
-      .then(reload)
+      .then(function () { return refreshSlice('presets'); })
       .catch(function (e) { status(String(e.message || e), 'err'); });
   });
   saveRow.appendChild(saveBtn);
@@ -2122,7 +2133,7 @@ function renderPresets() {
     del.title = 'Delete this preset';
     del.addEventListener('click', function () {
       call('deletePreset', [{ name: nameIn.value.trim() || p.name }])
-        .then(reload)
+        .then(function () { return refreshSlice('presets'); })
         .catch(function (e) { status(String(e.message || e), 'err'); });
     });
     btns.appendChild(apply);
@@ -2174,8 +2185,38 @@ function renderAll() {
   window.scrollTo(0, scroll);
 }
 
+/**
+ * Re-read one slice of the document after a write, instead of all of it.
+ *
+ * Most writes change one panel's worth of the document, and refresh() already
+ * reads exactly that much. reload() is a full read of every tab's content --
+ * seconds on a long document -- so it is kept for the writes that really do
+ * change everything: applying a preset, importing a configuration, turning
+ * footnotes into endnotes.
+ *
+ * It goes through the write queue rather than past it, so it cannot overtake
+ * the write it is reporting on.
+ */
+function refreshSlice(what) {
+  // The section-shaped slices need the cursor's paragraph to find the right
+  // section, and prefer the one already on screen -- the same arguments the
+  // poll passes.
+  var ctxArg = (what === 'sections' || what === 'hf')
+    ? Object.assign({}, S.ctx, { preferred: S.data.activeSectionIndex || 0 })
+    : undefined;
+  return call('refresh', [S.tabId, what, ctxArg]).then(function (slice) {
+    Object.keys(slice).forEach(function (k) { S.data[k] = slice[k]; });
+    S.fingerprint = JSON.stringify(S.data);
+    renderAll();
+  });
+}
+
 function reload() {
-  return call('loadAll', [S.tabId]).then(function (data) {
+  // The constants -- fonts, page sizes, bullet presets -- cannot change while
+  // the sidebar is open, so they are asked for once and carried forward.
+  var have = !!(S.data && S.data.constants);
+  return call('loadAll', [S.tabId, have]).then(function (data) {
+    if (!data.constants) data.constants = S.data.constants;
     S.data = data;
     S.tabId = data.activeTabId;
     S.fingerprint = JSON.stringify(data);
@@ -2518,6 +2559,10 @@ function boot() {
     status('Loading tab…', '');
     reload().then(function () { status('', ''); });
   });
+  document.getElementById('scope').addEventListener('change', function (e) {
+    // Nothing to re-read: this only says where the next write goes.
+    S.scope = e.target.value;
+  });
   ['page', 'styles', 'lists', 'tables', 'sections', 'hf', 'notes', 'presets'].forEach(function (n) {
     document.getElementById('tab-' + n).addEventListener('click', function () { switchTab(n); });
   });
@@ -2602,6 +2647,7 @@ function boot() {
       });
       sel.value = data.activeTabId;
       document.getElementById('tabRow').style.display = 'flex';
+      document.getElementById('scopeRow').style.display = 'flex';
     }
     status('', '');
     startPolling();

@@ -36,7 +36,12 @@ function include(filename) {
  * google.script.run calls are individually slow, so batching the initial
  * load matters more than keeping this tidy.
  */
-function loadAll(tabId) {
+/**
+ * `haveConstants` is the sidebar saying it already holds the font list, the
+ * page-size presets and the rest. They never change within a session, so
+ * every reload after the first leaves them out.
+ */
+function loadAll(tabId, haveConstants) {
   timings_ = {};
   var t0 = Date.now();
   var doc = fetchDoc_();
@@ -44,6 +49,12 @@ function loadAll(tabId) {
   var ctx = resolveTab_(doc, tabId);
   var active = ctx.tabId;
   var tables = timed_('tables', function () { return readTables(active); });
+  // Only how many, not what they are: the Page panel needs to know whether its
+  // margins are the ones in force or only a default, and the Sections panel
+  // reads the section it needs on the cursor probe.
+  var sectionCount = timed_('sections', function () {
+    return sectionsScan_(ctx).sections.length;
+  });
 
   var out = {
     documentTitle: doc.title,
@@ -51,6 +62,7 @@ function loadAll(tabId) {
       return { tabId: t.tabId, title: t.title, depth: t.depth };
     }),
     activeTabId: active,
+    sectionCount: sectionCount,
     pageFormat: timed_('page', function () { return readPageFormat(active); }),
     namedStyles: timed_('styles', function () { return readNamedStyles(active).styles; }),
     segments: timed_('segments', function () { return readSegments(active); }),
@@ -58,15 +70,17 @@ function loadAll(tabId) {
     tables: tables.tables,
     activeTableIndex: tables.activeIndex,
     presets: timed_('presets', function () { return listPresets(); }),
-    stylePresets: timed_('stylePresets', function () { return listStylePresets(); }),
-    constants: {
+    stylePresets: timed_('stylePresets', function () { return listStylePresets(); })
+  };
+  if (!haveConstants) {
+    out.constants = {
       units: SUPPORTED_UNITS,
       pageSizePresets: PAGE_SIZE_PRESETS,
       namedStyleTypes: NAMED_STYLE_TYPES,
       bulletPresets: BULLET_PRESETS,
       fonts: FONT_LIST
-    }
-  };
+    };
+  }
   timings_.serverTotal = Date.now() - t0;
   out.timings = timings_;
   return out;
@@ -99,6 +113,11 @@ var FONT_LIST = [
  */
 function refresh(tabId, what, ctx) {
   if (what === 'meta') return readDocMeta(tabId);
+  // Presets are the user's, not the document's, so this reads nothing from
+  // Docs at all -- which is the whole point of asking for them on their own.
+  if (what === 'presets') {
+    return { presets: listPresets(), stylePresets: listStylePresets() };
+  }
   var out = {};
   if (!what || what === 'page') out.pageFormat = readPageFormat(tabId);
   if (!what || what === 'styles') out.namedStyles = readNamedStyles(tabId).styles;
