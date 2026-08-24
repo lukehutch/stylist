@@ -145,9 +145,10 @@
   /* Muted, like every other label in the sidebar: a checkbox's text names the
      setting, the same job .field > label and .row > label do. */
   .checks label { font-size: var(--fs-sm); display: flex; align-items: center; gap: 3px; color: var(--muted); }
-  .checks.applyall { margin: 2px 0 10px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
-  /* The exception, deliberately: this one governs the whole panel. */
-  .checks.applyall label { font-size: var(--fs-md); font-weight: 500; color: var(--fg); }
+  /* The panel's own scope choice, ruled off from the editor it governs. */
+  .applyall { margin: 2px 0 10px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+  .applyall > .field > label { font-size: var(--fs-md); font-weight: 500; color: var(--fg); }
+  .applyall p.hint { margin-bottom: 6px; }
 
   /* Each effect checkbox shows its own name wearing the effect it turns on. */
   .face.bold { font-weight: 700; }

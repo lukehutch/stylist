@@ -797,36 +797,45 @@ function buildStyleEditor(model, commit, opts) {
  * gap in the border. Append the controls to what this returns.
  */
 /**
- * The "apply to all" switch at the head of the Lists, Tables and Sections
- * panels.
+ * Where a panel's changes go: the one thing the cursor is in, or every one of
+ * them in the tab.
  *
- * Ticking it does three things in one go. Everything is first brought into
- * line with the formatting most of them already have, so the document starts
- * from a state it largely had already rather than from one table's look
- * imposed on the rest. The editor below then shows those settled values,
- * because it reads them back from the document like it always does. And from
- * then on every change goes to all of them.
+ * Choosing "all" changes nothing in the document. It points the editor at all
+ * of them, which also means the editor stops needing the cursor to be inside
+ * anything -- and the values it shows are one of them, said plainly in the
+ * line underneath, because nothing in the Docs API reports what a hundred
+ * lists have in common.
  *
- * Unticking it changes nothing in the document; it just points the editor back
- * at the one thing the cursor is in.
- *
- * It is offered even where the document holds only one of the thing, because
- * the other half of what it does still matters there: with it ticked the
- * editor stops needing the cursor to be inside the thing being edited.
+ * Bringing them all into line is a button of its own. It rewrites the
+ * document, and a control that reads like a choice of what to look at should
+ * not do that on the way past.
  */
-function applyAllSwitch(kind, label, unifyFn, unifyArgs) {
-  var wrap = el('div', 'checks applyall');
-  wrap.appendChild(checkField(label, S.all[kind], function (on) {
-    S.all[kind] = on;
-    if (!on) { renderAll(); return; }
+function applyAllScope(kind, opts) {
+  var box = el('div', 'applyall');
+  box.appendChild(fieldRow('Apply to', selectField(
+    [{ id: 'one', label: opts.one }, { id: 'all', label: opts.all }],
+    S.all[kind] ? 'all' : 'one', function (v) {
+      S.all[kind] = (v === 'all');
+      renderAll();
+    })));
+  // Nothing to bring into line when there is only one of the thing, and
+  // nothing to say about which one is on screen either.
+  if (!S.all[kind] || opts.count < 2) return box;
+
+  box.appendChild(el('p', 'hint', opts.showing));
+  var row = el('div', 'btnrow');
+  var btn = el('button', 'act danger', opts.unify);
+  btn.addEventListener('click', function () {
     status('Bringing them into line…', '');
-    var args = copy(unifyArgs || {});
+    var args = copy(opts.unifyArgs || {});
     args.tabId = S.tabId;
-    return call(unifyFn, [args])
+    return call(opts.unifyFn, [args])
       .then(function () { status('', ''); return refreshSlice(kind); })
       .catch(function (e) { status(String(e.message || e), 'err'); });
-  }));
-  return wrap;
+  });
+  row.appendChild(btn);
+  box.appendChild(row);
+  return box;
 }
 
 /**
@@ -989,8 +998,6 @@ function sectionBody(sec) {
   var checks = el('div', 'checks');
   checks.appendChild(checkField('Landscape', sec.flipPageOrientation,
     function (v) { return put({ flipPageOrientation: v }); }));
-  checks.appendChild(checkField('Different first page', sec.useFirstPageHeaderFooter,
-    function (v) { return put({ useFirstPageHeaderFooter: v }); }));
   gSec.appendChild(checks);
 
   var gSCols = group('Columns');
@@ -1044,8 +1051,12 @@ function renderSections() {
   // that is not in the thing being edited, this one only means "and the
   // others" -- and a lone section has no others.
   if (total > 1) {
-    host.appendChild(applyAllSwitch('sections', 'Apply to all sections', 'unifySections',
-      { fromStartIndex: secs[0].startIndex }));
+    host.appendChild(applyAllScope('sections', {
+      one: 'This section', all: 'All sections', count: total,
+      unifyFn: 'unifySections', unifyArgs: { fromStartIndex: secs[0].startIndex },
+      showing: 'Showing the section your cursor is in; a change goes to every section.',
+      unify: 'Make every section match this one'
+    }));
   }
   if (S.all.sections) {
     // Every section now carries the same formatting, so the shown one's
@@ -1055,12 +1066,10 @@ function renderSections() {
   }
 
   var at = S.data.activeSectionIndex || 0;
-  if (total > 1) {
-    host.appendChild(el('p', 'hint',
-      'Editing the section your cursor is in — section ' + (at + 1) + ' of ' +
-      total + '. Click inside a different section to switch.'));
-  }
-  var row = listItem('Section ' + (at + 1), sectionMeta(secs[0]),
+  // Which of them, on the row itself. The empty state above already says the
+  // panel follows the cursor, so it is not said again on every visit.
+  var row = listItem('Section ' + (at + 1) + (total > 1 ? ' of ' + total : ''),
+    sectionMeta(secs[0]),
     function () { return sectionBody(secs[0]); }, 'sec:' + at);
   host.appendChild(row);
   if (!row.classList.contains('open')) row.querySelector('.head').click();
@@ -1338,7 +1347,12 @@ function renderLists() {
       'Click inside a list in the document to edit it here.'));
     return;
   }
-  host.appendChild(applyAllSwitch('lists', 'Apply to all lists', 'unifyLists'));
+  host.appendChild(applyAllScope('lists', {
+    one: 'This list', all: 'All lists', count: lists.length,
+    unifyFn: 'unifyLists',
+    showing: 'Showing the first list; a change goes to every list.',
+    unify: 'Make every list match this one'
+  }));
   if (S.all.lists) {
     // Every list now carries the same formatting, so the first one's values
     // are all of their values; the editor shows them and writes to them all.
@@ -1349,8 +1363,6 @@ function renderLists() {
   var active = null;
   lists.forEach(function (l) { if (l.listId === S.data.lists.activeListId) active = l; });
   if (active) {
-    host.appendChild(el('p', 'hint',
-      'Editing the list your cursor is in. Click inside a different list to switch.'));
     var row = listItem(listName(active, lists.indexOf(active) + 1), listMeta(active),
       function () { return listBody(active); }, 'list:' + active.listId);
     host.appendChild(row);
@@ -1416,10 +1428,8 @@ function listBody(list) {
   var box = el('div');
   box.appendChild(el('h2', null, 'Marker style'));
   box.appendChild(el('p', 'hint',
-    'Markers belong to the whole list, not to one level. A style names three ' +
-    'markers, one for each of the first three levels, and levels below that ' +
-    'reuse them in the same order. A single level can still have its markers ' +
-    'taken off.'));
+    'A style sets every level\u2019s marker at once. One level can still have ' +
+    'its markers taken off.'));
   box.appendChild(markerPicker(list));
 
   var levels = (list || S.data.lists.lists[0]).levels;
@@ -1491,8 +1501,7 @@ function renderNotes() {
 
   host.appendChild(el('h2', null, 'Style all footnote text'));
   host.appendChild(segmentEditor('footnotes', 'Footnote text', {
-    caveat: 'Google Docs has no footnote style, so this writes the change into ' +
-      'every footnote in the tab. New footnotes come out unstyled.'
+    caveat: 'Written into every footnote in the tab. New footnotes come out unstyled.'
   }));
 
   host.appendChild(el('h2', null, 'Footnote callout marks'));
@@ -1718,7 +1727,9 @@ function hfMargin(key) {
   return S.data.pageFormat[key];
 }
 
-function applyHfMargin(patch) {
+/** A write to the section the headers panel is showing, under its own choice
+ *  of section. */
+function applyHfSection(patch) {
   var sec = S.data.section;
   // Before the first poll answers there is no section to write to, and the
   // document's margin is the one in force anyway.
@@ -1828,14 +1839,16 @@ function renderHeaders() {
   // unless the label gives up most of its column.
   if (menus.length > 1) scope.className = 'field tightlabel';
   host.appendChild(scope);
-  // Only the even-page switch is document-wide; the first-page one belongs to
-  // a section, and lives on the Sections tab where a section can be picked.
   var checks = el('div', 'checks');
+  // The L/R switch is the document's; the first-page one belongs to a section,
+  // so it follows the sections menu above like everything else here does.
   checks.appendChild(checkField('Different L/R pages', pf.useEvenPageHeaderFooter,
     function (v) { return applyPage({ useEvenPageHeaderFooter: v }); }));
+  var here = S.data.section;
+  checks.appendChild(checkField('Different first page',
+    here ? here.useFirstPageHeaderFooter : pf.useFirstPageHeaderFooter,
+    function (v) { return applyHfSection({ useFirstPageHeaderFooter: v }); }));
   host.appendChild(checks);
-  host.appendChild(el('p', 'hint',
-    '“Different first page” is set one section at a time, on the Sections tab.'));
 
   var perSection = hfScopePart(0) === 'sec' && manySections;
   if (manySections) {
@@ -1885,19 +1898,19 @@ function renderHeaders() {
   // header on the page by it, L and R alike.
   host.appendChild(el('h2', null, hfSectionSuffix('Margins', manySections)));
   host.appendChild(fieldRow('Header margin', numUnit(hfMargin('marginHeaderPt'),
-    function (v) { return applyHfMargin({ marginHeaderPt: v }); },
+    function (v) { return applyHfSection({ marginHeaderPt: v }); },
     { min: 0, def: DEFAULTS.headerFooterMarginPt })));
   host.appendChild(fieldRow('Footer margin', numUnit(hfMargin('marginFooterPt'),
-    function (v) { return applyHfMargin({ marginFooterPt: v }); },
+    function (v) { return applyHfSection({ marginFooterPt: v }); },
     { min: 0, def: DEFAULTS.headerFooterMarginPt })));
   if (!pf.useCustomHeaderFooterMargins) {
     var n = el('div', 'note');
-    n.textContent = 'Custom header/footer margins are off here, and the flag is read-only ' +
-      'in the Docs API. Set one once in Docs (Format > Headers & footers) and these ' +
-      'two fields take effect.';
+    n.textContent = 'These take effect once a custom header or footer margin has been ' +
+      'set in Docs, under Format > Headers & footers. Nothing outside Docs can turn ' +
+      'that on.';
     host.appendChild(n);
   }
-  host.appendChild(el('h2', null, 'One at a time'));
+  host.appendChild(el('h2', null, 'Each header and footer'));
   segs.forEach(function (seg) {
     // Not the segment id: h.default is Google's internal name for it and
     // means nothing to anyone reading the sidebar. With more than one
@@ -1938,7 +1951,12 @@ function renderTables() {
     return;
   }
 
-  host.appendChild(applyAllSwitch('tables', 'Apply to all tables', 'unifyTables'));
+  host.appendChild(applyAllScope('tables', {
+    one: 'This table', all: 'All tables', count: S.data.tables.length,
+    unifyFn: 'unifyTables',
+    showing: 'Showing the first table; a change goes to every table.',
+    unify: 'Make every table match this one'
+  }));
   if (S.all.tables) {
     // Every table now carries the same formatting, so the first one's values
     // are all of their values; the editor shows them and writes to them all.
@@ -1955,11 +1973,9 @@ function renderTables() {
     return;
   }
 
-  host.appendChild(el('p', 'hint',
-    'Editing the table your cursor is in — table ' + (chosen.index + 1) + ' of ' +
-    S.data.tables.length + '. Click inside a different table to switch.'));
   var row = listItem(
-    'Table ' + (chosen.index + 1),
+    'Table ' + (chosen.index + 1) +
+      (S.data.tables.length > 1 ? ' of ' + S.data.tables.length : ''),
     chosen.rows + '×' + chosen.columns + (chosen.preview ? ' · ' + chosen.preview : ''),
     function () { return tableBody(chosen); });
   host.appendChild(row);

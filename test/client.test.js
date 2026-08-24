@@ -426,17 +426,20 @@ module.exports = ({ suite, test }) => {
       .forEach((k) => t.ok(hf.indexOf(k) !== -1, k + ' arrived'));
   });
 
-  test('"different first page" is set per section, so only the sections panel offers it', (t) => {
+  test('both header/footer switches sit with the headers, each on its own axis', (t) => {
     // The Docs API keeps useEvenPageHeaderFooter on the document but
-    // useFirstPageHeaderFooter on each section, so one control cannot stand
-    // for both and the per-section one belongs where a section is chosen.
+    // useFirstPageHeaderFooter on each section. They are still two different
+    // writes; they are just no longer two different panels.
     const hf = /function renderHeaders\(\)[^]*?\n}/.exec(clientJs)[0];
-    t.notOk(hf.indexOf('useFirstPageHeaderFooter') !== -1,
-      'the headers panel no longer writes the document-wide one');
-    t.match(hf, /set one section at a time, on the Sections tab/,
-      'and says where it went');
+    t.match(hf, /applyPage\(\{ useEvenPageHeaderFooter: v \}\)/,
+      'L/R pages is written to the document');
+    t.match(hf, /applyHfSection\(\{ useFirstPageHeaderFooter: v \}\)/,
+      'first page is written to the section the panel is showing');
+    t.notOk(/set one section at a time, on the Sections tab/.test(hf),
+      'and nothing is left apologising for a split');
     const sec = /function sectionBody\([^]*?\n}/.exec(clientJs)[0];
-    t.match(sec, /useFirstPageHeaderFooter/, 'the sections panel still has it');
+    t.notOk(/useFirstPageHeaderFooter/.test(sec),
+      'the sections panel does not offer it a second time');
   });
 
   test('the two axes get a menu each, so a closed menu still reads', (t) => {
@@ -533,13 +536,13 @@ module.exports = ({ suite, test }) => {
     const hf = /function renderHeaders\(\)[^]*?\n}/.exec(clientJs)[0];
     t.notOk(hf.indexOf('applyPage({ marginHeaderPt') !== -1,
       'the margins are no longer written document-wide behind the choice');
-    t.match(hf, /applyHfMargin\(\{ marginHeaderPt: v \}\)/);
-    t.match(hf, /applyHfMargin\(\{ marginFooterPt: v \}\)/);
-    const apply = /function applyHfMargin\([^]*?\n}/.exec(clientJs)[0];
+    t.match(hf, /applyHfSection\(\{ marginHeaderPt: v \}\)/);
+    t.match(hf, /applyHfSection\(\{ marginFooterPt: v \}\)/);
+    const apply = /function applyHfSection\([^]*?\n}/.exec(clientJs)[0];
     t.match(apply, /patch\.applyAll = hfScopePart\(0\) === 'all';/,
       'this section or all of them, the same as the styling');
     t.match(apply, /'writeSection'/, 'which means a section write, not a document one');
-    t.match(hf, /'One at a time'\)\);\s*\n\s*segs\.forEach/,
+    t.match(hf, /'Each header and footer'\)\);\s*\n\s*segs\.forEach/,
       'and the list below names the same segments the editor above writes to');
   });
 
@@ -550,8 +553,8 @@ module.exports = ({ suite, test }) => {
     t.match(hf, /if \(menus\.length > 1\) scope\.className = 'field tightlabel';/,
       'and the one menu left gets the whole row');
     const sec = /function renderSections\(\)[^]*?\n}/.exec(clientJs)[0];
-    t.match(sec, /if \(total > 1\) \{\s*\n\s*host\.appendChild\(applyAllSwitch\('sections'/,
-      'and the sections panel drops "apply to all" with nothing to apply to');
+    t.match(sec, /if \(total > 1\) \{\s*\n\s*host\.appendChild\(applyAllScope\('sections'/,
+      'and the sections panel drops the scope menu with nothing to scope');
     const suffix = /function hfSectionSuffix\([^]*?\n}/.exec(clientJs)[0];
     t.match(suffix, /if \(!manySections\) return heading;/,
       'headings stop naming sections too');
@@ -1065,32 +1068,52 @@ module.exports = ({ suite, test }) => {
 
   suite('Apply to all');
 
-  test('ticking it settles the document first, then keeps writing to everything', (t) => {
-    t.match(clientJs, /var args = copy\(unifyArgs \|\| \{\}\);\s*\n\s*args\.tabId = S\.tabId;\s*\n\s*return call\(unifyFn, \[args\]\)/,
-      'the tick brings them into line, carrying whatever identifies the source');
-    t.match(clientJs, /S\.all\[kind\] = on;/);
+  test('choosing "all" changes where writes go, and nothing in the document', (t) => {
+    t.match(clientJs, /S\.all\[kind\] = \(v === 'all'\);\s*\n\s*renderAll\(\);/,
+      'the menu only re-renders');
+    const fn = /function applyAllScope\(kind, opts\)[^]*?\n}/.exec(clientJs)[0];
+    t.notOk(/call\(opts\.unifyFn[^]*?selectField/.test(fn),
+      'nothing is written on the way through the menu');
     t.match(clientJs, /patch\.allTables = true;/, 'a table write then covers all of them');
     t.match(clientJs, /allLists: true/, 'and a list write likewise');
     t.match(clientJs, /patch\.applyAll = !!S\.all\.sections;/,
       'and a section write covers every section');
   });
 
-  test('every panel that has one offers it, however few things there are', (t) => {
-    // With one table in the document the tick is not about unifying anything:
+  test('bringing them into line is a button that says so', (t) => {
+    const fn = /function applyAllScope\(kind, opts\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /el\('button', 'act danger', opts\.unify\)/,
+      'it is a button, and marked as one that changes things');
+    t.match(fn, /var args = copy\(opts\.unifyArgs \|\| \{\}\);\s*\n\s*args\.tabId = S\.tabId;\s*\n\s*return call\(opts\.unifyFn, \[args\]\)/,
+      'and carries whatever identifies the source');
+    ['Make every list match this one', 'Make every table match this one',
+     'Make every section match this one'].forEach((label) => {
+      t.match(clientJs, new RegExp(label), label + ' is offered');
+    });
+  });
+
+  test('nothing to unify, nothing offered', (t) => {
+    const fn = /function applyAllScope\(kind, opts\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /if \(!S\.all\[kind\] \|\| opts\.count < 2\) return box;/,
+      'one list, one table, one section: the menu alone');
+  });
+
+  test('every panel that has one offers the menu, however few things there are', (t) => {
+    // With one table in the document the choice is not about covering several:
     // it is what lets the panel edit that table without the cursor being in it.
-    // Sections are the exception: there the tick only means "and the others",
-    // so a lone section gets no tick. A lone list or table still does, because
-    // the tick is also what lets the panel edit one the cursor is not in.
+    // Sections are the exception -- there "all" only means "and the others",
+    // so a lone section gets no menu.
     ['lists', 'tables'].forEach((kind) => {
-      t.match(clientJs, new RegExp(`host\\.appendChild\\(applyAllSwitch\\('${kind}'`),
+      t.match(clientJs, new RegExp(`host\\.appendChild\\(applyAllScope\\('${kind}'`),
         `the ${kind} panel appends it unconditionally`);
     });
-    t.notOk(/length > 1[^]{0,80}?applyAllSwitch/.test(clientJs),
+    t.notOk(/length > 1[^]{0,80}?applyAllScope/.test(clientJs),
       'no count of the things themselves gates it');
   });
 
-  test('unticking changes nothing in the document', (t) => {
-    t.match(clientJs, /if \(!on\) \{ renderAll\(\); return; \}/);
+  test('the editor says which one it is showing', (t) => {
+    t.match(clientJs, /showing: 'Showing the first list; a change goes to every list\.'/);
+    t.match(clientJs, /showing: 'Showing the section your cursor is in; a change goes to every section\.'/);
   });
 
   suite('Writing only what changed');
@@ -1215,8 +1238,23 @@ module.exports = ({ suite, test }) => {
       'the old single-line rule would stop it wrapping');
   });
 
+  test('the hints explain the document, not the implementation', (t) => {
+    t.notOk(/the flag is read-only/.test(clientJs),
+      'the header-margin note no longer names an API flag');
+    t.match(clientJs, /These take effect once a custom header or footer margin has been/,
+      'it says what to do instead');
+  });
+
+  test('the caveats say the consequence, not the cause', (t) => {
+    t.notOk(/Google Docs has no footnote style/.test(clientJs),
+      'the footnote note leads with what happens, not with why');
+    t.match(clientJs, /Written into every footnote in the tab/);
+    t.match(clientJs, /A style sets every level.{0,8}s marker at once/,
+      'the marker explanation is one sentence, not four');
+  });
+
   test('the heading names the add-on, not the document', (t) => {
-    t.match(sidebar, /<span>Configure Styles<\/span>/);
+    t.match(sidebar, /<span>Stylist<\/span>/, 'the add-on\u2019s own name');
     t.notOk(/docTitle/.test(sidebar + clientJs), 'nothing writes the document name there');
     t.notOk(/data\.documentTitle/.test(clientJs), 'the client no longer reads it');
   });
@@ -1538,7 +1576,7 @@ module.exports = ({ suite, test }) => {
     t.match(css, /\.checks label \{[^}]*color: var\(--muted\)/);
     t.match(css, /\.field > label \{[^}]*color: var\(--muted\)/);
     t.match(css, /\.row > label \{ color: var\(--muted\)/);
-    t.match(css, /\.checks\.applyall label \{[^}]*color: var\(--fg\)/,
+    t.match(css, /\.applyall > \.field > label \{[^}]*color: var\(--fg\)/,
       'except the one that governs a whole panel');
   });
 
@@ -1581,17 +1619,19 @@ module.exports = ({ suite, test }) => {
     t.notOk(/S\.data\.tables\.forEach/.test(fn), 'no row per table');
   });
 
-  test('apply-to-all survives the scoping -- it is the whole-document path', (t) => {
-    t.match(clientJs, /applyAllSwitch\('lists', 'Apply to all lists', 'unifyLists'\)/);
-    t.match(clientJs, /applyAllSwitch\('tables', 'Apply to all tables', 'unifyTables'\)/);
+  test('the every-one-of-them choice survives the scoping', (t) => {
+    t.match(clientJs, /applyAllScope\('lists', \{[^]*?all: 'All lists'/);
+    t.match(clientJs, /applyAllScope\('tables', \{[^]*?all: 'All tables'/);
   });
 
   test('the sections panel shows one section -- the one the cursor is in', (t) => {
     const fn = /function renderSections\(\)[^]*?\n}/.exec(clientJs)[0];
     t.match(fn, /Click inside a section in the document to edit it here/);
     t.notOk(/secs\.forEach/.test(fn), 'no row per section');
-    t.match(fn, /section ' \+ \(at \+ 1\) \+ ' of '/,
-      'it says which of the sections is being edited');
+    t.match(fn, /'Section ' \+ \(at \+ 1\) \+ \(total > 1 \? ' of ' \+ total : ''\)/,
+      'the row itself says which of the sections is being edited');
+    t.notOk(/Click inside a different section to switch/.test(fn),
+      'and does not repeat what the empty state already taught');
     t.match(fn, /sectionBody\(secs\[0\]\)/,
       'the slice already holds only the current section');
     t.match(fn, /if \(S\.all\.sections\) \{[^]*?sectionBody\(secs\[0\]\)/,
