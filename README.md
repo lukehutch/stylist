@@ -119,13 +119,13 @@ forces everyone who has authorised the script to authorise it again.
 
 | Tab | What it configures |
 |---|---|
-| **Page** | Page size (10 presets or custom W×H), landscape, all four page margins, page-number start, paged/pageless mode, page background. |
+| **Page** | Page size (10 presets or custom W×H), landscape, all four page margins (a default, in a document whose sections set their own), page-number start, paged/pageless mode, page background. |
 | **Text** | All nine named styles — Normal text, Title, Subtitle, Heading 1–6. Each opens a full editor: font family, weight 100–900, size, bold/italic/underline/strikethrough/small-caps, superscript/subscript, text and highlight colour; alignment, line spacing, space above/below, spacing mode, left/right/first-line indents, direction, keep-lines-together, keep-with-next, widow/orphan control, page-break-before, shading, and all five paragraph borders (width, padding, colour, dash). Below them, a second list of your own custom styles, applied to whatever you have selected. |
-| **Lists** | The list your cursor is in, bulleted or numbered, or all of them grouped by kind when the cursor is elsewhere. Pick a marker by the character it is from the 15 presets, remove the markers, and style each nesting level's indentation, spacing and text. Tick "apply to all lists" to bring every list into line with the formatting most of them already have, and to keep every later change going to all of them. |
-| **Sections** | The section your cursor is in: section margins, column count/width/gap, column separators, section page numbering, landscape, per-section first-page and even-page headers and footers. "Apply to all sections" works the same way it does for lists. |
-| **Headers & footers** | A style editor over whichever headers and footers you name. Two menus set that: which sections (only shown when the tab has more than one) and which side of the spread -- L pages, R pages or both. Everything below follows the same choice: the shared-with warning, the header and footer margins (written to that section or to all of them), the buttons that give a section its own header or footer or hand it back, and the list of individual headers and footers underneath. "Different L/R pages" is the one document-wide switch. |
+| **Lists** | The list your cursor is in, bulleted or numbered, or all of them grouped by kind when the cursor is elsewhere. Pick a marker by the character it is from the 15 presets, remove the markers, and style each nesting level's indentation, spacing and text. Set **Apply to → All lists** to send every later change to all of them; a separate button brings every list into line with the one on screen. |
+| **Sections** | The section your cursor is in: section margins, column count/width/gap, column separators, section page numbering, landscape. **Apply to** works the same way it does for lists. Header and footer margins and "different first page" live on the Headers & footers tab instead, beside the headers they govern. |
+| **Headers & footers** | A style editor over whichever headers and footers you name. Two menus set that: which sections (only shown when the tab has more than one) and which side of the spread -- L pages, R pages or both. Everything below follows the same choice: the shared-with warning, the header and footer margins (written to that section or to all of them), the buttons that give a section its own header or footer or hand it back, and the list of individual headers and footers underneath. "Different first page" is here too, set one section at a time; "Different L/R pages" beside it is the one document-wide switch. |
 | **Footnotes** | Style all footnote text at once, restyle every footnote callout mark in the document in one pass. Also converts footnotes to an emulated endnote section. |
-| **Tables** | The table your cursor is in, or all of them listed: cell padding, borders, fill and vertical alignment (all cells or header row); row minimum height, header row, prevent-overflow; column width and sizing mode; pinned header rows. "Apply to all tables" works the same way it does for lists. |
+| **Tables** | The table your cursor is in, or all of them listed: cell padding, borders, fill and vertical alignment (all cells or header row); row minimum height, header row, prevent-overflow; column width and sizing mode; pinned header rows. **Apply to** works the same way it does for lists. |
 | **Presets** | Save the whole configuration under a name and re-apply it to any document. Save individual style presets and bind them to a named style. Export/import the configuration as JSON for version control. |
 
 Units are chosen once in the top bar and every dimension field re-renders in
@@ -232,9 +232,10 @@ each one where you would otherwise expect the control:
   handing the header back gives up all three at once.
 - **"Different first page" is per section; "different even pages" is not.**
   `SectionStyle` carries `useFirstPageHeaderFooter`, but `useEvenPageHeaderFooter`
-  exists only on `DocumentStyle`. So the first sits on the Sections tab, where a
-  section is chosen, and the second on the Headers & footers tab, labelled
-  "Different L/R pages" to match the menu above it.
+  exists only on `DocumentStyle`. Both switches sit on the Headers & footers
+  tab: the first follows that tab's section menu, the second is labelled
+  "Different L/R pages" to match the side menu beside it and covers the
+  whole document.
 
 ## Footnote recipes
 
