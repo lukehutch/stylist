@@ -1483,8 +1483,22 @@ module.exports = ({ suite, test }) => {
     // Matched as one contiguous source pattern rather than inside a captured
     // span: brace-counting these template-built panels is how a mutant hides.
     t.match(clientJs,
-      /activePanel = name;\s*\n\s*lastCtx = null;\s*\n\s*lastCtxObj = null;\s*\n\s*setTimeout\(poll, 0\);/,
-      'the panel is recorded, the old cursor answer discarded, and a read prompted');
+      /lastCtx = null;\s*\n\s*lastCtxObj = null;\s*\n\s*setTimeout\(poll, 0\);/,
+      'the old cursor answer is discarded and a read prompted');
+    const fn = /function switchTab\(name\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /activePanel = name;/, 'the panel is recorded');
+    t.match(fn, /if \(panelStale\[name\] && S\.data\) \{[^]*?PANEL_RENDER\[name\]\(\);/,
+      'and a display built from an older payload is rebuilt before it is seen');
+  });
+
+  test('only the panel on screen is rebuilt after a write', (t) => {
+    const fn = /function renderAll\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.notOk(/renderStyles\(\);\s*\n\s*renderLists\(\)/.test(fn),
+      'no run of every renderer');
+    t.match(fn, /panelStale\[n\] = n !== activePanel;/, 'the rest are marked out of date');
+    t.match(fn, /PANEL_RENDER\[activePanel\]\(\);/, 'and only the open one is built');
+    t.match(clientJs, /var PANEL_RENDER = \{[^]*?presets: renderPresets/,
+      'every panel has an entry, so switching to any of them can build it');
   });
 
   test('a write carries the tab list the sidebar already has', (t) => {

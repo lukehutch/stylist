@@ -935,7 +935,8 @@ function renderPage() {
   host.appendChild(el('h2', null, manySections ? 'Default margins' : 'Margins'));
   if (manySections) {
     host.appendChild(el('p', 'hint',
-      'Sections that set their own margins use those instead. Sections tab.'));
+      'Sections that set their own margins use those instead \u2014 see the ' +
+      'Sections tab.'));
   }
   [['marginTopPt', 'Top'], ['marginBottomPt', 'Bottom'],
    ['marginLeftPt', 'Left'], ['marginRightPt', 'Right']].forEach(function (m) {
@@ -2187,17 +2188,33 @@ function renderPresets() {
 /* =================================================================
  * Shell
  * ================================================================= */
+var PANEL_RENDER = {
+  page: renderPage,
+  styles: renderStyles,
+  lists: renderLists,
+  tables: renderTables,
+  sections: renderSections,
+  hf: renderHeaders,
+  notes: renderNotes,
+  presets: renderPresets
+};
+
+/** Panels holding a display older than the payload. Rebuilt on the way in. */
+var panelStale = {};
+
+/**
+ * Rebuild what is on screen, and note that the rest is out of date.
+ *
+ * A write can change any panel, so all eight used to be rebuilt on every
+ * apply -- seven of them into a hidden div nobody was looking at. Only the
+ * open one is built now; the others are marked and built when you switch to
+ * them, which is a paint the switch was going to cost anyway.
+ */
 function renderAll() {
   var scroll = window.pageYOffset || document.documentElement.scrollTop || 0;
   S.unitFields = [];
-  renderPage();
-  renderStyles();
-  renderLists();
-  renderTables();
-  renderSections();
-  renderHeaders();
-  renderNotes();
-  renderPresets();
+  Object.keys(PANEL_RENDER).forEach(function (n) { panelStale[n] = n !== activePanel; });
+  PANEL_RENDER[activePanel]();
   window.scrollTo(0, scroll);
 }
 
@@ -2549,9 +2566,15 @@ function switchTab(name) {
     document.getElementById('panel-' + n).classList.toggle('active', n === name);
     document.getElementById('tab-' + n).classList.toggle('active', n === name);
   });
+  activePanel = name;
+  // Whatever it was showing was built from an older payload, so build it again
+  // before it is looked at. Its dimension fields join the unit-change list here.
+  if (panelStale[name] && S.data) {
+    panelStale[name] = false;
+    PANEL_RENDER[name]();
+  }
   // A panel you have just come back to should not wait out the clock, and a
   // context panel should not trust a cursor answer from before you left.
-  activePanel = name;
   lastCtx = null;
   lastCtxObj = null;
   setTimeout(poll, 0);
