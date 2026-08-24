@@ -12,7 +12,7 @@ var S = {
   all: { lists: false, tables: false, sections: false },   // panels editing everything at once
   hfScope: 'all:both', // which headers and footers the headers panel writes to
   ctx: {},             // last cursorContext answer, for panels that key off it
-  fingerprint: null,   // JSON of the last payload, to spot document-side changes
+  fingerprint: {},     // JSON of each slice last seen, to spot document-side changes
   busy: 0              // server calls in flight; polling stands aside while any are
 };
 
@@ -2239,7 +2239,9 @@ function refreshSlice(what) {
     : undefined;
   return call('refresh', [S.tabId, what, ctxArg]).then(function (slice) {
     Object.keys(slice).forEach(function (k) { S.data[k] = slice[k]; });
-    S.fingerprint = JSON.stringify(S.data);
+    // Recorded so the next poll for this slice recognises its own answer and
+    // does not draw the panel a second time.
+    S.fingerprint[what] = JSON.stringify(slice);
     renderAll();
   });
 }
@@ -2252,7 +2254,8 @@ function reload() {
     if (!data.constants) data.constants = S.data.constants;
     S.data = data;
     S.tabId = data.activeTabId;
-    S.fingerprint = JSON.stringify(data);
+    // A whole new payload: nothing that was seen before still stands.
+    S.fingerprint = {};
     renderAll();
     return data;
   });
@@ -2468,11 +2471,14 @@ function poll() {
         // A write went out while this read was in the air, so what came back
         // predates it. Drawing it would put the old value back on screen.
         if (at !== writes) return null;
+        // Compared slice against slice. The meta poll runs every tick, and
+        // stringifying the whole payload -- font list and all -- to find out
+        // whether four page-setup numbers moved was most of that tick's work.
+        var fresh = JSON.stringify(slice);
+        if (fresh === S.fingerprint[what]) return null;
+        S.fingerprint[what] = fresh;
         Object.keys(slice).forEach(function (k) { S.data[k] = slice[k]; });
         if (slice.activeTabId) S.tabId = slice.activeTabId;
-        var fresh = JSON.stringify(S.data);
-        if (fresh === S.fingerprint) return null;
-        S.fingerprint = fresh;
         return true;
       });
     })

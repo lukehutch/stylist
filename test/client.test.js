@@ -1491,6 +1491,19 @@ module.exports = ({ suite, test }) => {
       'and a display built from an older payload is rebuilt before it is seen');
   });
 
+  test('a poll compares the slice it asked for, not the whole payload', (t) => {
+    const fn = /function poll\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.notOk(/JSON\.stringify\(S\.data\)/.test(fn),
+      'the font list is not re-stringified every tick');
+    t.match(fn, /var fresh = JSON\.stringify\(slice\);/);
+    t.match(fn, /if \(fresh === S\.fingerprint\[what\]\) return null;/,
+      'each slice is remembered under its own name');
+    t.match(clientJs, /fingerprint: \{\}/, 'so the store is a map, not one string');
+    const rl = /function reload\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(rl, /S\.fingerprint = \{\};/,
+      'and a fresh payload drops every one of them');
+  });
+
   test('only the panel on screen is rebuilt after a write', (t) => {
     const fn = /function renderAll\(\)[^]*?\n}/.exec(clientJs)[0];
     t.notOk(/renderStyles\(\);\s*\n\s*renderLists\(\)/.test(fn),
