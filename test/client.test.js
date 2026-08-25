@@ -1250,6 +1250,16 @@ module.exports = ({ suite, test }) => {
       'it says what to do instead');
   });
 
+  test('no heading says "Style", because the whole add-on is for styling', (t) => {
+    const heads = (clientJs.match(/el\('h[123]', [^,]+, '[^']*'/g) || [])
+      .map((m) => /'([^']*)'$/.exec(m)[1]);
+    t.ok(heads.length > 8, 'the headings were actually found: ' + heads.length);
+    const shouty = heads.filter((h) => /^Style\b/.test(h));
+    t.equal(shouty.length, 0, 'no heading opens with it: ' + shouty.join(' | '));
+    t.ok(heads.indexOf('Headers and footers') !== -1, 'the header editor keeps its subject');
+    t.ok(heads.indexOf('All footnote text') !== -1, 'and so does the footnote one');
+  });
+
   test('the caveats say the consequence, not the cause', (t) => {
     t.notOk(/Google Docs has no footnote style/.test(clientJs),
       'the footnote note leads with what happens, not with why');

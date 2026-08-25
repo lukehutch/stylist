@@ -1500,7 +1500,7 @@ function renderNotes() {
   var host = document.getElementById('panel-notes');
   host.innerHTML = '';
 
-  host.appendChild(el('h2', null, 'Style all footnote text'));
+  host.appendChild(el('h2', null, 'All footnote text'));
   host.appendChild(segmentEditor('footnotes', 'Footnote text', {
     caveat: 'Written into every footnote in the tab. New footnotes come out unstyled.'
   }));
@@ -1823,7 +1823,7 @@ function renderHeaders() {
   var at = S.data.activeSectionIndex || 0;
   var manySections = total > 1;
 
-  host.appendChild(el('h2', null, 'Style headers and footers'));
+  host.appendChild(el('h2', null, 'Headers and footers'));
   // One section means there is no choice of sections to make, so that menu
   // is left out and hfSegments ignores which half of it is set.
   var menus = [];
