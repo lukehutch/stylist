@@ -1629,7 +1629,11 @@ function hfSegments() {
     var at = S.data.activeSectionIndex || 0;
     pool = pool.filter(function (s) { return (s.sections || []).indexOf(at) !== -1; });
   }
-  return pool.filter(function (s) { return parts[1] === 'both' || s.parity === parts[1]; });
+  // A choice made while the L/R split was on is still in S.hfScope after it is
+  // turned off. It names nothing then -- every segment prints on both sides --
+  // so the axis is ignored rather than left to empty the panel.
+  var pages = (S.data.pageFormat || {}).useEvenPageHeaderFooter ? parts[1] : 'both';
+  return pool.filter(function (s) { return pages === 'both' || s.parity === pages; });
 }
 
 /**
@@ -1832,9 +1836,15 @@ function renderHeaders() {
       setHfScope(v, hfScopePart(1));
     }));
   }
-  menus.push(selectField(HF_PAGE_SCOPES, hfScopePart(1), function (v) {
-    setHfScope(hfScopePart(0), v);
-  }));
+  // Likewise the L/R menu: without "different L/R pages" Docs keeps one header
+  // per section and prints it on every page, so there is no L and no R to
+  // choose between. Offering the choice anyway made "L pages only" name
+  // nothing at all, and "R pages only" the same set as "L+R pages".
+  if (pf.useEvenPageHeaderFooter) {
+    menus.push(selectField(HF_PAGE_SCOPES, hfScopePart(1), function (v) {
+      setHfScope(hfScopePart(0), v);
+    }));
+  }
   var scope = fieldRow('Apply to', menus);
   // Two menus sharing the row leaves neither wide enough to show its choice
   // unless the label gives up most of its column.
@@ -1869,9 +1879,15 @@ function renderHeaders() {
 
   var segs = hfSegments();
   if (!segs.length) {
-    host.appendChild(el('p', 'hint',
-      'Nothing in this tab matches that choice. Headers and footers are added in ' +
-      'the document itself, under Insert > Headers & footers.'));
+    // Two different situations, and the advice differs. Either the tab has no
+    // headers or footers at all, or it has some and none of them is on the
+    // side or in the section that is currently named.
+    var any = S.data.segments.headers.length + S.data.segments.footers.length;
+    host.appendChild(el('p', 'hint', any
+      ? 'This tab has headers and footers, but none matching that choice. Docs ' +
+        'creates one the first time you type into it.'
+      : 'This tab has no headers or footers yet. They are added in the document ' +
+        'itself, under Insert > Headers & footers.'));
   } else {
     if (perSection) {
       var shared = hfAlsoUsedBy(segs);

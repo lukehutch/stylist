@@ -398,15 +398,19 @@ module.exports = ({ suite, test }) => {
     { kind: 'footer', segmentId: 'f.default', parity: 'right', sections: [0, 1, 2] },
     { kind: 'footer', segmentId: 'f.even',    parity: 'left',  sections: [0, 1, 2] }
   ]`;
-  const world = (scope, at, count) =>
+  // The even-page segments above only exist when "different L/R pages" is on,
+  // so the world that holds them says so; `split: false` models the same tab
+  // after the switch is turned off again.
+  const world = (scope, at, count, split) =>
     `var all = ${threeSections};
      var S = { hfScope: '${scope}', ctx: {},
        data: { activeSectionIndex: ${at || 0}, sectionCount: ${count === undefined ? 3 : count},
+         pageFormat: { useEvenPageHeaderFooter: ${split === false ? 'false' : 'true'} },
          segments: {
            headers: all.filter(function (s) { return s.kind === 'header'; }),
            footers: all.filter(function (s) { return s.kind === 'footer'; }) } } };`;
-  const pick = (scope, at, count) => hfEval(
-    `${world(scope, at, count)}
+  const pick = (scope, at, count, split) => hfEval(
+    `${world(scope, at, count, split)}
      return hfSegments().map(function (s) { return s.segmentId; });`);
 
   test('the tab is in the strip, and the panel it opens is empty for the client to fill', (t) => {
@@ -468,6 +472,30 @@ module.exports = ({ suite, test }) => {
     t.deepEqual(pick('sec:both', 0), ['h.default', 'h.even', 'f.default', 'f.even']);
     t.deepEqual(pick('sec:right', 2), ['h.s2', 'f.default'],
       'and the side narrows it further');
+  });
+
+  test('with no L/R split there is no L and no R to choose between', (t) => {
+    // Docs only keeps an even-page header when "different L/R pages" is on.
+    // Without it one header prints on every page, so "L pages only" named
+    // nothing at all and "R pages only" named the same set as "L+R pages".
+    t.deepEqual(pick('all:left', 0, 3, false), pick('all:both', 0, 3, false),
+      'a stale L choice does not empty the panel');
+    t.deepEqual(pick('all:right', 0, 3, false), pick('all:both', 0, 3, false),
+      'and R is not a narrowing either');
+    t.notEqual(pick('all:left', 0, 3, false).length, 0, 'the editor still has something to write to');
+    const hf = /function renderHeaders\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(hf, /if \(pf\.useEvenPageHeaderFooter\) \{\s*\n\s*menus\.push\(selectField\(HF_PAGE_SCOPES/,
+      'so the menu is only offered when the document has the split');
+  });
+
+  test('an empty panel says which of the two reasons it is empty', (t) => {
+    const hf = /function renderHeaders\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(hf, /This tab has no headers or footers yet/,
+      'nothing to style, so it points at Insert');
+    t.match(hf, /This tab has headers and footers, but none matching that choice/,
+      'something to style but not here, which Insert would not fix');
+    t.notOk(/Nothing in this tab matches that choice\. Headers and footers are added/.test(hf),
+      'the old message gave the Insert advice in both cases');
   });
 
   test('one section means nothing to narrow, so the cursor does not come into it', (t) => {
