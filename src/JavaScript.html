@@ -10,6 +10,7 @@ var S = {
   unitFields: [],      // dimension inputs to re-render when the unit changes
   open: {},            // which list items are expanded, so a re-render can restore them
   all: { lists: false, tables: false, sections: false },   // panels editing everything at once
+  marginsEqual: null,  // one page-margin box or four; null until you choose, then sticky
   hfScope: 'all:both', // which headers and footers the headers panel writes to
   ctx: {},             // last cursorContext answer, for panels that key off it
   fingerprint: {},     // JSON of each slice last seen, to spot document-side changes
@@ -500,8 +501,17 @@ function colorField(hex, commit, opts) {
   // deliberately is a real change -- from nothing to that colour -- so the
   // document's null is what a pick is compared against.
   var none = !hex;
+  // An <input type=color> always shows a swatch, so with no colour set it
+  // shows the blank one and looks like a deliberate white. Struck through, it
+  // reads as "no colour" -- the mark colour pickers use for it everywhere.
+  var swatch = el('span', 'colorbox');
+  swatch.appendChild(input);
+  function markNone(on) { swatch.classList.toggle('none', on); }
+  markNone(none);
+
   bindCommit(input, function (i) { return { value: i.value }; }, function (v) {
     none = false;
+    markNone(false);
     return commit(v);
   });
   input.setLive(hex || null);
@@ -513,9 +523,10 @@ function colorField(hex, commit, opts) {
     none = true;
     input.value = blank;
     input.setLive(null);
+    markNone(true);
     Promise.resolve(commit(''));
   });
-  return [input, clear];
+  return [swatch, clear];
 }
 </script>
 <script>
@@ -900,33 +911,90 @@ function listItem(name, meta, buildBody, key) {
 /* =================================================================
  * Panel: Page setup
  * ================================================================= */
+/**
+ * "Letter (8.5 x 11 in)" the other way round, for a flipped page.
+ *
+ * Each preset carries its dimensions inside the label the menu shows, in
+ * whichever unit that size is conventionally quoted in -- inches for Letter,
+ * millimetres for A4 -- so the two numbers are swapped where they are
+ * written rather than the label being rebuilt from the points behind it.
+ */
+function flipLabel(label) {
+  return label.replace(/\(([\d.]+) x ([\d.]+) (\w+)\)/, '($2 x $1 $3)');
+}
+
+var MARGIN_KEYS = ['marginTopPt', 'marginBottomPt', 'marginLeftPt', 'marginRightPt'];
+
+/** Whether one number would do for all four. Points, so compared loosely. */
+function marginsAllEqual(pf) {
+  var top = pf[MARGIN_KEYS[0]];
+  if (typeof top !== 'number' || !isFinite(top)) return false;
+  return MARGIN_KEYS.every(function (k) {
+    return typeof pf[k] === 'number' && Math.abs(pf[k] - top) < 0.01;
+  });
+}
+
+/**
+ * The smallest of the four that is a real measurement, for collapsing them
+ * into one. A margin that is missing or nonsense is not a candidate, and if
+ * none of them is usable the answer is Docs' own inch.
+ */
+function smallestMargin(pf) {
+  var real = MARGIN_KEYS.map(function (k) { return pf[k]; })
+    .filter(function (v) { return typeof v === 'number' && isFinite(v) && v >= 0; });
+  return real.length ? Math.min.apply(Math, real) : DEFAULTS.pageMarginPt;
+}
+
 function renderPage() {
   var host = document.getElementById('panel-page');
   host.innerHTML = '';
   var pf = S.data.pageFormat;
 
   host.appendChild(el('h2', null, 'Page size'));
+  // Docs stores the page size portrait-way-round whatever the orientation and
+  // flips it when it lays the page out. So on a landscape page the width you
+  // measure is the stored height: everything here is shown the way it prints
+  // and swapped back on the way into the document.
+  var flipped = !!pf.flipPageOrientation;
   var presets = [{ id: '', label: 'Custom…' }].concat(
-    S.data.constants.pageSizePresets.map(function (p) { return { id: p.id, label: p.label }; }));
+    S.data.constants.pageSizePresets.map(function (p) {
+      return { id: p.id, label: flipped ? flipLabel(p.label) : p.label };
+    }));
   var match = '';
   S.data.constants.pageSizePresets.forEach(function (p) {
     if (Math.abs((pf.pageWidthPt || 0) - p.widthPt) < 1 && Math.abs((pf.pageHeightPt || 0) - p.heightPt) < 1) match = p.id;
   });
   host.appendChild(fieldRow('Preset', selectField(presets, match, function (v) {
+    // The preset's own numbers, unswapped: on a flipped page Letter's stored
+    // 8.5 x 11 is laid out as the 11 x 8.5 the menu just offered.
     var p = S.data.constants.pageSizePresets.filter(function (x) { return x.id === v; })[0];
     return applyPage({ pageWidthPt: p.widthPt, pageHeightPt: p.heightPt })
       .then(function () { return refreshSlice('page'); });
   }, { skipBlank: true })));
-  host.appendChild(fieldRow('Width', numUnit(pf.pageWidthPt,
-    function (v) { return applyPage({ pageWidthPt: v, pageHeightPt: pf.pageHeightPt }); },
-    { min: 1, def: DEFAULTS.pageWidthPt })));
-  host.appendChild(fieldRow('Height', numUnit(pf.pageHeightPt,
-    function (v) { return applyPage({ pageWidthPt: pf.pageWidthPt, pageHeightPt: v }); },
-    { min: 1, def: DEFAULTS.pageHeightPt })));
+  host.appendChild(fieldRow('Width', numUnit(flipped ? pf.pageHeightPt : pf.pageWidthPt,
+    function (v) {
+      return applyPage(flipped ? { pageWidthPt: pf.pageWidthPt, pageHeightPt: v }
+                               : { pageWidthPt: v, pageHeightPt: pf.pageHeightPt });
+    },
+    { min: 1, def: flipped ? DEFAULTS.pageHeightPt : DEFAULTS.pageWidthPt })));
+  host.appendChild(fieldRow('Height', numUnit(flipped ? pf.pageWidthPt : pf.pageHeightPt,
+    function (v) {
+      return applyPage(flipped ? { pageWidthPt: v, pageHeightPt: pf.pageHeightPt }
+                               : { pageWidthPt: pf.pageWidthPt, pageHeightPt: v });
+    },
+    { min: 1, def: flipped ? DEFAULTS.pageWidthPt : DEFAULTS.pageHeightPt })));
 
-  var orient = el('div', 'checks');
-  orient.appendChild(checkField('Landscape (flip dimensions)', pf.flipPageOrientation,
-    function (v) { return applyPage({ flipPageOrientation: v }); }));
+  // Orientation is a state the page is in, not an option to tick. The button
+  // says which way it will go, and the fields above already show the page as
+  // it prints, so there is nothing left for a checkbox label to explain.
+  var orient = el('div', 'btnrow');
+  var flip = el('button', 'act', flipped ? 'Switch to portrait' : 'Switch to landscape');
+  flip.addEventListener('click', function () {
+    return applyPage({ flipPageOrientation: !flipped })
+      .then(function () { return refreshSlice('page'); })
+      .catch(function (e) { status(String(e.message || e), 'err'); });
+  });
+  orient.appendChild(flip);
   host.appendChild(orient);
 
   // A section that sets its own margins is laid out by those, not by these, so
@@ -938,12 +1006,40 @@ function renderPage() {
       'Sections that set their own margins use those instead \u2014 see the ' +
       'Sections tab.'));
   }
-  [['marginTopPt', 'Top'], ['marginBottomPt', 'Bottom'],
-   ['marginLeftPt', 'Left'], ['marginRightPt', 'Right']].forEach(function (m) {
-    host.appendChild(fieldRow(m[1], numUnit(pf[m[0]], function (v) {
-      var p = {}; p[m[0]] = v; return applyPage(p);
-    }, { min: 0, def: DEFAULTS.pageMarginPt })));
-  });
+  // Four boxes holding the same number four times is the common case, so the
+  // panel offers one box instead. The tick starts out saying what the document
+  // already is; once you set it either way it stays where you put it, because
+  // otherwise unticking it would be undone by the very next render.
+  var equal = S.marginsEqual === null ? marginsAllEqual(pf) : S.marginsEqual;
+  var box = el('div', 'checks');
+  box.appendChild(checkField('All equal', equal, function (v) {
+    S.marginsEqual = v;
+    if (!v) { renderAll(); return; }   // the four already hold the one value
+    // The smallest of the four, so nothing on the page grows unasked; if not
+    // one of them is a usable number, an inch.
+    var one = smallestMargin(pf);
+    var patch = {};
+    MARGIN_KEYS.forEach(function (k) { patch[k] = one; });
+    return applyPage(patch).then(function () { return refreshSlice('page'); });
+  }));
+  host.appendChild(box);
+
+  if (equal) {
+    host.appendChild(fieldRow('Margin',
+      numUnit(marginsAllEqual(pf) ? pf[MARGIN_KEYS[0]] : smallestMargin(pf),
+        function (v) {
+          var patch = {};
+          MARGIN_KEYS.forEach(function (k) { patch[k] = v; });
+          return applyPage(patch);
+        }, { min: 0, def: DEFAULTS.pageMarginPt })));
+  } else {
+    [['marginTopPt', 'Top'], ['marginBottomPt', 'Bottom'],
+     ['marginLeftPt', 'Left'], ['marginRightPt', 'Right']].forEach(function (m) {
+      host.appendChild(fieldRow(m[1], numUnit(pf[m[0]], function (v) {
+        var p = {}; p[m[0]] = v; return applyPage(p);
+      }, { min: 0, def: DEFAULTS.pageMarginPt })));
+    });
+  }
 
   host.appendChild(el('h2', null, 'Document'));
   host.appendChild(fieldRow('Page numbers from', numPlain(pf.pageNumberStart,

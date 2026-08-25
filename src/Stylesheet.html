@@ -136,6 +136,17 @@
      has to be stated. 31px is that button, measured. */
   input[type=color] { width: 30px; min-height: 31px; align-self: stretch; padding: 0;
     border: 1px solid var(--line); border-radius: 3px; background: #fff; }
+  /* A colour field holding no colour still shows a swatch, because the native
+     control always draws one. The diagonal says the document has nothing set
+     here rather than a deliberate white. It is painted over the swatch and
+     takes no clicks, so the picker still opens through it. */
+  .colorbox { position: relative; display: flex; flex: 0 0 auto; align-self: stretch; }
+  .colorbox.none::after {
+    content: ''; position: absolute; inset: 1px; pointer-events: none;
+    background: linear-gradient(to top right,
+      transparent calc(50% - 0.5px), #000 calc(50% - 0.5px),
+      #000 calc(50% + 0.5px), transparent calc(50% + 0.5px)) #fff;
+  }
   input.invalid { border-color: var(--err); background: #fce8e6; }
   input.saving { border-color: var(--accent); }
   .unit { flex: 0 0 auto; color: var(--muted); font-size: var(--fs-xs); align-self: center; }

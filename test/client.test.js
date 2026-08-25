@@ -196,6 +196,80 @@ module.exports = ({ suite, test }) => {
      and run rather than read. */
   const judge = () => evalFromClient(['numeric'], 'return numeric;');
 
+  test('four margins that agree are offered as one box', (t) => {
+    const [allEqual, smallest] = evalFromClient(
+      ['MARGIN_KEYS', 'marginsAllEqual', 'smallestMargin'],
+      'return [marginsAllEqual, smallestMargin];');
+    const pf = (t_, b, l, r) => ({ marginTopPt: t_, marginBottomPt: b,
+                                   marginLeftPt: l, marginRightPt: r });
+    t.ok(allEqual(pf(72, 72, 72, 72)), 'all four the same');
+    t.notOk(allEqual(pf(72, 72, 72, 36)), 'one of them differing is enough');
+    t.ok(allEqual(pf(72, 72.005, 72, 72)), 'points, so a hair apart still counts');
+    t.notOk(allEqual(pf(72, 72, 72, undefined)), 'a missing one is not equal to anything');
+  });
+
+  test('collapsing four margins takes the smallest real one', (t) => {
+    const smallest = evalFromClient(
+      ['MARGIN_KEYS', 'DEFAULTS', 'smallestMargin'], 'return smallestMargin;');
+    t.equal(smallest({ marginTopPt: 72, marginBottomPt: 36,
+                       marginLeftPt: 90, marginRightPt: 72 }), 36,
+      'nothing on the page grows unasked');
+    t.equal(smallest({ marginTopPt: undefined, marginBottomPt: null,
+                       marginLeftPt: 54, marginRightPt: NaN }), 54,
+      'the unusable ones are not candidates');
+    t.equal(smallest({}), 72, 'and with nothing usable at all, one inch');
+    t.equal(smallest({ marginTopPt: -5, marginBottomPt: 72,
+                       marginLeftPt: 72, marginRightPt: 72 }), 72,
+      'a negative margin is not a real measurement');
+  });
+
+  test('the "all equal" tick stays where you put it', (t) => {
+    const fn = /function renderPage\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /S\.marginsEqual === null \? marginsAllEqual\(pf\) : S\.marginsEqual/,
+      'the document decides only until you decide');
+    t.match(clientJs, /marginsEqual: null/, 'so the state starts undecided');
+    t.match(fn, /S\.marginsEqual = v;/);
+    t.match(fn, /if \(!v\) \{ renderAll\(\); return; \}/,
+      'unticking shows the four, which already hold the one value: no write');
+    t.match(fn, /var one = smallestMargin\(pf\);/, 'ticking collapses them');
+    t.match(fn, /fieldRow\('Margin',/, 'and one box replaces the four');
+  });
+
+  test('landscape is a state you switch, not a box you tick', (t) => {
+    const fn = /function renderPage\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.notOk(/Landscape \(flip dimensions\)/.test(fn), 'the checkbox is gone');
+    t.match(fn, /flipped \? 'Switch to portrait' : 'Switch to landscape'/,
+      'the button says which way it will go');
+    t.match(fn, /applyPage\(\{ flipPageOrientation: !flipped \}\)/,
+      'and flips whichever way the page currently is');
+  });
+
+  test('a flipped page shows the dimensions the way it prints', (t) => {
+    // Docs keeps the size portrait-way-round and flips it at layout time, so
+    // on a landscape page the stored height is the width you measure.
+    const fn = /function renderPage\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /numUnit\(flipped \? pf\.pageHeightPt : pf\.pageWidthPt/,
+      'Width shows the stored height');
+    t.match(fn, /numUnit\(flipped \? pf\.pageWidthPt : pf\.pageHeightPt/,
+      'and Height the stored width');
+    t.match(fn, /flipped \? \{ pageWidthPt: pf\.pageWidthPt, pageHeightPt: v \}/,
+      'so editing Width writes the stored height back');
+    t.match(fn, /def: flipped \? DEFAULTS\.pageHeightPt : DEFAULTS\.pageWidthPt/,
+      'and emptying it falls back to the matching default, not the other one');
+  });
+
+  test('the preset menu quotes flipped dimensions but writes the stored ones', (t) => {
+    const flipLabel = evalFromClient(['flipLabel'], 'return flipLabel;');
+    t.equal(flipLabel('Letter (8.5 x 11 in)'), 'Letter (11 x 8.5 in)');
+    t.equal(flipLabel('A4 (210 x 297 mm)'), 'A4 (297 x 210 mm)');
+    t.equal(flipLabel('Custom\u2026'), 'Custom\u2026',
+      'a label with no dimensions in it is left alone');
+    const fn = /function renderPage\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /label: flipped \? flipLabel\(p\.label\) : p\.label/);
+    t.match(fn, /applyPage\(\{ pageWidthPt: p\.widthPt, pageHeightPt: p\.heightPt \}\)/,
+      'picking one still writes the size as Docs stores it');
+  });
+
   test('a field with nowhere to inherit from falls back to its default', (t) => {
     const n = judge();
     t.deepEqual(n('', { def: 72 }, 72), { value: 72, show: true },
@@ -1335,8 +1409,22 @@ module.exports = ({ suite, test }) => {
     const fn = /function colorField\(hex, commit, opts\)[^]*?\n}/.exec(clientJs)[0];
     t.match(fn, /var none = !hex;/, 'it knows whether the document holds a colour');
     t.match(fn, /if \(none\) return;/, 'and a second press does nothing');
-    t.match(fn, /none = false;\s*\n\s*return commit\(v\);/,
+    t.match(fn, /none = false;\s*\n\s*markNone\(false\);\s*\n\s*return commit\(v\);/,
       'picking a colour puts it back in play');
+  });
+
+  test('a swatch holding no colour is struck through', (t) => {
+    // A native colour input always paints a swatch, so an unset one looks
+    // like a deliberate white unless it is marked.
+    const fn = /function colorField\(hex, commit, opts\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /var swatch = el\('span', 'colorbox'\);/);
+    t.match(fn, /swatch\.appendChild\(input\);/);
+    t.match(fn, /swatch\.classList\.toggle\('none', on\);/);
+    t.match(fn, /markNone\(none\);/, 'and it is marked on the way in, not only on a click');
+    t.match(fn, /markNone\(true\);[^]*?commit\(''\)/, 'pressing "none" marks it too');
+    t.match(fn, /return \[swatch, clear\];/, 'the wrapper is what goes in the row');
+    t.match(css, /\.colorbox\.none::after \{/, 'the line itself is drawn in CSS');
+    t.match(css, /pointer-events: none/, 'and takes no clicks, so the picker still opens');
   });
 
   test('a pick is judged against the document, not against the swatch', (t) => {
