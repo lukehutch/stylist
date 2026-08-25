@@ -224,24 +224,39 @@ module.exports = ({ suite, test }) => {
   });
 
   test('the "all equal" tick stays where you put it', (t) => {
-    const fn = /function renderPage\(\)[^]*?\n}/.exec(clientJs)[0];
-    t.match(fn, /S\.marginsEqual === null \? marginsAllEqual\(pf\) : S\.marginsEqual/,
+    const fn = /function marginFields\(host, holder, write, opts\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /remembered === undefined \? marginsAllEqual\(holder\) : remembered/,
       'the document decides only until you decide');
-    t.match(clientJs, /marginsEqual: null/, 'so the state starts undecided');
-    t.match(fn, /S\.marginsEqual = v;/);
+    t.match(clientJs, /marginsEqual: \{\},/, 'so the state starts undecided');
+    t.match(fn, /S\.marginsEqual\[opts\.key\] = v;/,
+      'and each editor remembers its own, since the page and a section decide apart');
     t.match(fn, /if \(!v\) \{ renderAll\(\); return; \}/,
       'unticking shows the four, which already hold the one value: no write');
-    t.match(fn, /var one = smallestMargin\(pf\);/, 'ticking collapses them');
+    t.match(fn, /var one = smallestMargin\(holder\);/, 'ticking collapses them');
     t.match(fn, /fieldRow\('Margin',/, 'and one box replaces the four');
   });
 
+  test('the page and a section offer their margins the same way', (t) => {
+    t.match(clientJs,
+      /marginFields\(host, pf, applyPage, \{ key: 'page', slice: 'page' \}\);/);
+    t.match(clientJs,
+      /marginFields\(gSec, sec, put, \{ key: 'section:' \+ sec\.startIndex, slice: 'sections' \}\);/,
+      'a section keeps its own tick, so two sections do not fight over one');
+    const sec = /function sectionBody\(sec\)[^]*?\n}/.exec(clientJs)[0];
+    t.notOk(/'marginTopPt', 'Top'/.test(sec), 'the four hand-built rows are gone');
+  });
+
   test('landscape is a state you switch, not a box you tick', (t) => {
-    const fn = /function renderPage\(\)[^]*?\n}/.exec(clientJs)[0];
-    t.notOk(/Landscape \(flip dimensions\)/.test(fn), 'the checkbox is gone');
+    const fn = /function orientationButton\(flipped, write\)[^]*?\n}/.exec(clientJs)[0];
+    t.notOk(/Landscape \(flip dimensions\)|checkField\('Landscape'/.test(clientJs),
+      'the checkbox is gone from every panel that had one');
     t.match(fn, /flipped \? 'Switch to portrait' : 'Switch to landscape'/,
       'the button says which way it will go');
-    t.match(fn, /applyPage\(\{ flipPageOrientation: !flipped \}\)/,
-      'and flips whichever way the page currently is');
+    t.match(fn, /write\(!flipped\)/, 'and flips whichever way it currently is');
+    t.match(clientJs, /orientationButton\(flipped, function \(to\) \{\s*\n\s*return applyPage\(\{ flipPageOrientation: to \}\)/,
+      'the page uses it');
+    t.match(clientJs, /orientationButton\(sec\.flipPageOrientation, function \(to\) \{\s*\n\s*return put\(\{ flipPageOrientation: to \}\)/,
+      'and so does a section');
   });
 
   test('a flipped page shows the dimensions the way it prints', (t) => {
@@ -1402,7 +1417,8 @@ module.exports = ({ suite, test }) => {
     t.ok(heads.length > 8, 'the headings were actually found: ' + heads.length);
     const shouty = heads.filter((h) => /^Style\b/.test(h));
     t.equal(shouty.length, 0, 'no heading opens with it: ' + shouty.join(' | '));
-    t.ok(heads.indexOf('Headers and footers') !== -1, 'the header editor keeps its subject');
+    t.notOk(/'Headers and footers'/.test(clientJs),
+      'and no heading repeats the name of the tab it is on');
     t.ok(heads.indexOf('All footnote text') !== -1, 'and so does the footnote one');
   });
 

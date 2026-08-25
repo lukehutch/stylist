@@ -10,7 +10,7 @@ var S = {
   unitFields: [],      // dimension inputs to re-render when the unit changes
   open: {},            // which list items are expanded, so a re-render can restore them
   all: { lists: false, tables: false, sections: false },   // panels editing everything at once
-  marginsEqual: null,  // one page-margin box or four; null until you choose, then sticky
+  marginsEqual: {},    // one margin box or four, per editor; unset until you choose
   hfScope: 'all:both', // which headers and footers the headers panel writes to
   ctx: {},             // last cursorContext answer, for panels that key off it
   fingerprint: {},     // JSON of each slice last seen, to spot document-side changes
@@ -939,6 +939,71 @@ function marginsAllEqual(pf) {
  * into one. A margin that is missing or nonsense is not a candidate, and if
  * none of them is usable the answer is Docs' own inch.
  */
+/**
+ * Four margins, or the one number they all are.
+ *
+ * The page and a section hold the same four values and offer the same choice
+ * about them, so both get this. Four boxes holding the same number four times
+ * is the common case, and one box says it once.
+ *
+ * `opts.key` is where the tick is remembered -- per editor, since the page and
+ * each section decide separately. The tick starts out saying what the document
+ * already is; once set either way it stays where it was put, because four
+ * equal margins would otherwise re-tick it on the very next render.
+ *
+ * `opts.slice` is what to re-read after collapsing four values into one, so
+ * the rest of the panel stops showing the four it had.
+ */
+function marginFields(host, holder, write, opts) {
+  var remembered = S.marginsEqual[opts.key];
+  var equal = remembered === undefined ? marginsAllEqual(holder) : remembered;
+
+  var box = el('div', 'checks');
+  box.appendChild(checkField('All equal', equal, function (v) {
+    S.marginsEqual[opts.key] = v;
+    if (!v) { renderAll(); return; }   // the four already hold the one value
+    // The smallest of the four, so nothing on the page grows unasked; if not
+    // one of them is a usable number, an inch.
+    var one = smallestMargin(holder);
+    var patch = {};
+    MARGIN_KEYS.forEach(function (k) { patch[k] = one; });
+    return write(patch).then(function () { return refreshSlice(opts.slice); });
+  }));
+  host.appendChild(box);
+
+  if (equal) {
+    host.appendChild(fieldRow('Margin',
+      numUnit(marginsAllEqual(holder) ? holder[MARGIN_KEYS[0]] : smallestMargin(holder),
+        function (v) {
+          var patch = {};
+          MARGIN_KEYS.forEach(function (k) { patch[k] = v; });
+          return write(patch);
+        }, { min: 0, def: DEFAULTS.pageMarginPt })));
+    return;
+  }
+  [['marginTopPt', 'Top'], ['marginBottomPt', 'Bottom'],
+   ['marginLeftPt', 'Left'], ['marginRightPt', 'Right']].forEach(function (m) {
+    host.appendChild(fieldRow(m[1], numUnit(holder[m[0]], function (v) {
+      var p = {}; p[m[0]] = v; return write(p);
+    }, { min: 0, def: DEFAULTS.pageMarginPt })));
+  });
+}
+
+/**
+ * Portrait or landscape as the one button that changes it, for the page and
+ * for a section alike: there are two states, you are in one of them, and the
+ * button is the way to the other.
+ */
+function orientationButton(flipped, write) {
+  var row = el('div', 'btnrow');
+  var flip = el('button', 'act', flipped ? 'Switch to portrait' : 'Switch to landscape');
+  flip.addEventListener('click', function () {
+    return write(!flipped).catch(function (e) { status(String(e.message || e), 'err'); });
+  });
+  row.appendChild(flip);
+  return row;
+}
+
 function smallestMargin(pf) {
   var real = MARGIN_KEYS.map(function (k) { return pf[k]; })
     .filter(function (v) { return typeof v === 'number' && isFinite(v) && v >= 0; });
@@ -987,15 +1052,10 @@ function renderPage() {
   // Orientation is a state the page is in, not an option to tick. The button
   // says which way it will go, and the fields above already show the page as
   // it prints, so there is nothing left for a checkbox label to explain.
-  var orient = el('div', 'btnrow');
-  var flip = el('button', 'act', flipped ? 'Switch to portrait' : 'Switch to landscape');
-  flip.addEventListener('click', function () {
-    return applyPage({ flipPageOrientation: !flipped })
-      .then(function () { return refreshSlice('page'); })
-      .catch(function (e) { status(String(e.message || e), 'err'); });
-  });
-  orient.appendChild(flip);
-  host.appendChild(orient);
+  host.appendChild(orientationButton(flipped, function (to) {
+    return applyPage({ flipPageOrientation: to })
+      .then(function () { return refreshSlice('page'); });
+  }));
 
   // A section that sets its own margins is laid out by those, not by these, so
   // in a sectioned document these are a default rather than what is on the page.
@@ -1006,40 +1066,7 @@ function renderPage() {
       'Sections that set their own margins use those instead \u2014 see the ' +
       'Sections tab.'));
   }
-  // Four boxes holding the same number four times is the common case, so the
-  // panel offers one box instead. The tick starts out saying what the document
-  // already is; once you set it either way it stays where you put it, because
-  // otherwise unticking it would be undone by the very next render.
-  var equal = S.marginsEqual === null ? marginsAllEqual(pf) : S.marginsEqual;
-  var box = el('div', 'checks');
-  box.appendChild(checkField('All equal', equal, function (v) {
-    S.marginsEqual = v;
-    if (!v) { renderAll(); return; }   // the four already hold the one value
-    // The smallest of the four, so nothing on the page grows unasked; if not
-    // one of them is a usable number, an inch.
-    var one = smallestMargin(pf);
-    var patch = {};
-    MARGIN_KEYS.forEach(function (k) { patch[k] = one; });
-    return applyPage(patch).then(function () { return refreshSlice('page'); });
-  }));
-  host.appendChild(box);
-
-  if (equal) {
-    host.appendChild(fieldRow('Margin',
-      numUnit(marginsAllEqual(pf) ? pf[MARGIN_KEYS[0]] : smallestMargin(pf),
-        function (v) {
-          var patch = {};
-          MARGIN_KEYS.forEach(function (k) { patch[k] = v; });
-          return applyPage(patch);
-        }, { min: 0, def: DEFAULTS.pageMarginPt })));
-  } else {
-    [['marginTopPt', 'Top'], ['marginBottomPt', 'Bottom'],
-     ['marginLeftPt', 'Left'], ['marginRightPt', 'Right']].forEach(function (m) {
-      host.appendChild(fieldRow(m[1], numUnit(pf[m[0]], function (v) {
-        var p = {}; p[m[0]] = v; return applyPage(p);
-      }, { min: 0, def: DEFAULTS.pageMarginPt })));
-    });
-  }
+  marginFields(host, pf, applyPage, { key: 'page', slice: 'page' });
 
   host.appendChild(el('h2', null, 'Document'));
   host.appendChild(fieldRow('Page numbers from', numPlain(pf.pageNumberStart,
@@ -1075,15 +1102,7 @@ function sectionBody(sec) {
   // The header and footer margins belong to a section too, but they are edited
   // beside the headers they position, on the Headers & footers tab. One value
   // with two controls in two panels can only end up disagreeing on screen.
-  [['marginTopPt', 'Top', DEFAULTS.pageMarginPt],
-   ['marginBottomPt', 'Bottom', DEFAULTS.pageMarginPt],
-   ['marginLeftPt', 'Left', DEFAULTS.pageMarginPt],
-   ['marginRightPt', 'Right', DEFAULTS.pageMarginPt]]
-    .forEach(function (m) {
-      gSec.appendChild(fieldRow(m[1], numUnit(sec[m[0]], function (v) {
-        var p = {}; p[m[0]] = v; return put(p);
-      }, { min: 0, def: m[2] })));
-    });
+  marginFields(gSec, sec, put, { key: 'section:' + sec.startIndex, slice: 'sections' });
   gSec.appendChild(fieldRow('Direction', selectField(DIRECTIONS, sec.contentDirection,
     function (v) { return put({ contentDirection: v }); })));
   gSec.appendChild(fieldRow('Col separator', selectField(
@@ -1092,10 +1111,10 @@ function sectionBody(sec) {
   gSec.appendChild(fieldRow('Page numbers from', numPlain(sec.pageNumberStart,
     function (v) { return put({ pageNumberStart: v }); },
     { min: 0, integer: true, def: DEFAULTS.pageNumberStart })));
-  var checks = el('div', 'checks');
-  checks.appendChild(checkField('Landscape', sec.flipPageOrientation,
-    function (v) { return put({ flipPageOrientation: v }); }));
-  gSec.appendChild(checks);
+  gSec.appendChild(orientationButton(sec.flipPageOrientation, function (to) {
+    return put({ flipPageOrientation: to })
+      .then(function () { return refreshSlice('sections'); });
+  }));
 
   var gSCols = group('Columns');
   box.appendChild(gSCols);
@@ -1982,7 +2001,8 @@ function renderHeaders() {
   var at = S.data.activeSectionIndex || 0;
   var manySections = total > 1;
 
-  host.appendChild(el('h2', null, 'Headers and footers'));
+  // No heading over these: the tab this panel is on already says "Headers &
+  // footers", and a heading repeating it is one more line in a narrow sidebar.
   // One section means there is no choice of sections to make, so that menu
   // is left out and hfSegments ignores which half of it is set.
   var menus = [];
