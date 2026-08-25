@@ -2540,9 +2540,13 @@ var rerendering = false;
  * change anyway -- the deferred read runs the moment focus leaves.
  */
 function pickerOpen() {
+  // Nothing can be open in a window that is not focused -- and saying
+  // otherwise would stop the poll for as long as the user works in the
+  // document, which is exactly when the panel most needs to keep up.
+  if (!document.hasFocus()) return false;
   if (markerMenu) return true;     // drawn by this page, but just as cancellable
   var a = document.activeElement;
-  if (!a || !document.hasFocus()) return false;
+  if (!a) return false;
   if (a.tagName === 'SELECT') return true;
   return a.tagName === 'INPUT' && (a.type === 'color' || a.hasAttribute('list'));
 }
@@ -2761,6 +2765,8 @@ function stopPolling() {
 }
 
 function switchTab(name) {
+  // It hangs off a row in the panel being left behind.
+  closeMarkerMenu();
   ['page', 'styles', 'lists', 'tables', 'sections', 'hf', 'notes', 'presets'].forEach(function (n) {
     document.getElementById('panel-' + n).classList.toggle('active', n === name);
     document.getElementById('tab-' + n).classList.toggle('active', n === name);
@@ -2837,6 +2843,11 @@ function boot() {
   // user most wants it to be current, and it is the closest thing to an edit
   // event this add-on can get: Docs offers no cursor or typing trigger, and a
   // server-side trigger could not reach an open sidebar anyway.
+  // Going back to the document puts an open marker menu away, the way any
+  // menu goes away when you look elsewhere. Leaving it open would also leave
+  // the poll standing aside for it.
+  window.addEventListener('blur', closeMarkerMenu);
+
   window.addEventListener('focus', function () {
     // Coming back from working in the document is when the user most wants
     // the panel current, so spend one read on it even if the cursor has not

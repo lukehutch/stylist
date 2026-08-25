@@ -1222,9 +1222,26 @@ module.exports = ({ suite, test }) => {
 
   test('a pop-up never outlives the row it hangs off', (t) => {
     t.match(clientJs, /function renderAll\(\) \{\s*\n\s*closeMarkerMenu\(\);/);
+    t.match(clientJs, /function switchTab\(name\) \{[^]*?closeMarkerMenu\(\);/,
+      'nor the panel it was opened on');
     const fn = /function pickerOpen\(\)[^]*?\n}/.exec(clientJs)[0];
     t.match(fn, /if \(markerMenu\) return true;/,
       'and a poll stands aside while it is open, as it does for a dropdown');
+  });
+
+  /* An open pop-up tells the poll to stand aside. Working in the document is
+     when the panel most needs to keep up, so a pop-up left behind there must
+     not be able to freeze it -- for lists or for any other context panel. */
+  test('a pop-up left open cannot freeze the panel while you work in the document', (t) => {
+    const held = (hasFocus) => evalFromClient(['pickerOpen', 'markerMenu'],
+      'var document = { activeElement: null,' +
+      ' hasFocus: function () { return ' + (hasFocus ? 'true' : 'false') + '; } };\n' +
+      'markerMenu = { anchor: {} };\n' +
+      'return pickerOpen();');
+    t.equal(held(true), true, 'it holds the poll off while you are choosing from it');
+    t.equal(held(false), false, 'but not once the sidebar has lost the focus');
+    t.match(clientJs, /window\.addEventListener\('blur', closeMarkerMenu\);/,
+      'and it is put away on the way out, rather than sitting there');
   });
 
   suite('Apply to all');
