@@ -1302,6 +1302,21 @@ test('a level with no paragraphs in it asks for nothing', (t) => {
   t.equal(allRequests(M).filter((r) => r.deleteParagraphBullets).length, 0);
 });
 
+test('a marker write answers with the lists as they now are', (t) => {
+  // The sidebar used to ask for that reading in a second call, and the round
+  // trip to Apps Script -- not the read inside it -- is most of the wait.
+  const M = multi();
+  const out = M.removeBullets({ tabId: 't.0', listId: 'list.2', level: 1 });
+  t.ok(out.lists, 'the write carries the slice back with it');
+  t.ok(Array.isArray(out.lists.lists), 'shaped exactly like readLists');
+  t.equal(out.lists.tabId, 't.0');
+
+  const M2 = multi();
+  const out2 = M2.applyBulletPreset(
+    { tabId: 't.0', listId: 'list.2', bulletPreset: 'BULLET_CHECKBOX' });
+  t.ok(out2.lists, 'and so does setting a marker');
+});
+
 /* ------------------------------------------------------------------ */
 suite('Metadata reads that never touch the body');
 

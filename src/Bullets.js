@@ -240,7 +240,21 @@ function applyBulletPreset(payload) {
     });
   });
   if (!requests.length) return { applied: 0, warnings: ['That list has no paragraphs in the body.'] };
-  return batchUpdate_(requests);
+  return withLists_(ctx.tabId, batchUpdate_(requests));
+}
+
+/**
+ * A marker write answers with the reading the panel would have asked for.
+ *
+ * The sidebar used to call refresh() straight after one of these, which is a
+ * second round trip to Apps Script -- and the round trip, not the document
+ * read inside it, is most of the wait. batchUpdate_ has already dropped the
+ * document cache, so the read here sees the write that just landed.
+ */
+function withLists_(tabId, result) {
+  result = result || {};
+  result.lists = readLists(tabId);
+  return result;
 }
 
 /** payload: { tabId, listId | allLists } -- strips markers, keeping the text. */
@@ -269,7 +283,7 @@ function removeBullets(payload) {
       requests.push({ deleteParagraphBullets: { range: r } });
     });
   });
-  return batchUpdate_(requests);
+  return withLists_(ctx.tabId, batchUpdate_(requests));
 }
 
 /**

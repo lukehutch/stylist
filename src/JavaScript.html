@@ -1472,7 +1472,7 @@ function renderLists() {
 }
 
 /**
- * Pick a list's marker by the character it is, not by the name of an enum.
+ * The marker choices, in a pop-up over the marker that opened them.
  *
  * These fifteen are every marker the API can produce, because the only way to
  * put one on a paragraph is createParagraphBullets and it takes one of fifteen
@@ -1480,12 +1480,34 @@ function renderLists() {
  * a dingbat, an arrow, an emoji -- can only be set in Docs itself, under
  * Format > Bullets & numbering > List options > More bullets. Whatever is set
  * that way is read back and shown here like any other marker.
+ *
+ * They hang off the marker rather than sitting in a row of their own above
+ * the levels: fifteen buttons is most of a panel, and the thing they change
+ * is already on screen at the head of each level.
  */
-function markerPicker(list) {
-  var box = el('div');
-  var presets = S.data.constants.bulletPresets || [];
-  var current = list ? glyphExample((list.levels || [])[0] || {}) : '';
+var markerMenu = null;
 
+function closeMarkerMenu() {
+  if (!markerMenu) return;
+  document.removeEventListener('mousedown', markerMenu.outside, true);
+  document.removeEventListener('keydown', markerMenu.esc, true);
+  if (markerMenu.parentNode) markerMenu.parentNode.removeChild(markerMenu);
+  markerMenu = null;
+}
+
+function openMarkerMenu(anchor, list, lv) {
+  var again = markerMenu && markerMenu.anchor === anchor;
+  closeMarkerMenu();
+  if (again) return;                 // a second click on the marker puts it away
+
+  var box = el('div', 'popup');
+  box.anchor = anchor;
+  box.appendChild(el('p', 'hint',
+    'A marker style is one choice for the whole list. Taking the marker off ' +
+    'is this level\u2019s alone.'));
+
+  var presets = S.data.constants.bulletPresets || [];
+  var current = glyphExample(lv || {});
   [['Bullets', false], ['Numbering', true]].forEach(function (g) {
     var mine = presets.filter(function (p) { return !!p.numbered === g[1]; });
     if (!mine.length) return;
@@ -1498,13 +1520,66 @@ function markerPicker(list) {
       b.addEventListener('click', function () {
         var t = listTarget(list);
         t.bulletPreset = p.id;
-        return call('applyBulletPreset', [t]).then(function () { return refreshSlice('lists'); });
+        closeMarkerMenu();
+        return listWrite('applyBulletPreset', t);
       });
       row.appendChild(b);
     });
     box.appendChild(row);
   });
-  return box;
+
+  box.appendChild(el('h2', null, 'No marker'));
+  var off = el('div', 'glyphs');
+  var none = el('button', 'glyph none', '\u2298');
+  none.title = 'Take the markers off this level';
+  if (!current) none.classList.add('on');
+  none.addEventListener('click', function () {
+    var t = listTarget(list);
+    t.level = lv.level;
+    closeMarkerMenu();
+    return listWrite('removeBullets', t);
+  });
+  off.appendChild(none);
+  box.appendChild(off);
+
+  document.body.appendChild(box);
+  // Under the marker, or over it when the sidebar has no room below -- the
+  // panel is a few hundred pixels tall and the menu is most of that.
+  var r = anchor.getBoundingClientRect();
+  var vw = document.documentElement.clientWidth;
+  var vh = document.documentElement.clientHeight;
+  box.style.left = Math.max(4, Math.min(r.left, vw - box.offsetWidth - 4)) + 'px';
+  box.style.top = (r.bottom + box.offsetHeight + 4 > vh
+    ? Math.max(4, r.top - box.offsetHeight - 2)
+    : r.bottom + 2) + 'px';
+
+  // The anchor is left out of this so its own click can close the menu it
+  // opened, rather than closing and reopening it in the same gesture.
+  box.outside = function (e) {
+    if (!box.contains(e.target) && !anchor.contains(e.target)) closeMarkerMenu();
+  };
+  box.esc = function (e) { if (e.key === 'Escape') closeMarkerMenu(); };
+  document.addEventListener('mousedown', box.outside, true);
+  document.addEventListener('keydown', box.esc, true);
+  markerMenu = box;
+}
+
+/**
+ * A marker write, and the reading that comes back with it.
+ *
+ * The panel used to ask for a fresh slice once the write returned, which is a
+ * second round trip to Apps Script -- and the round trip, not the document
+ * read inside it, is most of the wait. These two writes answer with the slice
+ * themselves, so the panel redraws off the write.
+ */
+function listWrite(fn, t) {
+  return call(fn, [t]).then(function (res) {
+    if (!res || !res.lists) return refreshSlice('lists');
+    S.data.lists = res.lists;
+    // Shaped like refresh('lists') answers, so the next poll recognises it.
+    S.fingerprint.lists = JSON.stringify({ lists: res.lists });
+    renderAll();
+  }).catch(function (e) { status(String(e.message || e), 'err'); });
 }
 
 /**
@@ -1523,23 +1598,21 @@ function markerPicker(list) {
  */
 function listBody(list) {
   var box = el('div');
-  box.appendChild(el('h2', null, 'Marker style'));
-  box.appendChild(el('p', 'hint',
-    'A style sets every level\u2019s marker at once. One level can still have ' +
-    'its markers taken off.'));
-  box.appendChild(markerPicker(list));
-
   var levels = (list || S.data.lists.lists[0]).levels;
   var key = list ? list.listId : 'all';
   levels.forEach(function (lv) {
     if (!lv.inUse && lv.level > 2) return;   // Docs always defines 9; show the useful ones
-    var glyph = list ? (glyphExample(lv) || 'no marker') : 'level ' + (lv.level + 1);
+    // A list keeps its level definitions after the last paragraph leaves the
+    // level, so the definition's glyph is not evidence that anything still
+    // wears it -- taking the markers off level 1 would otherwise leave its
+    // marker sitting in the heading as though nothing had happened.
+    var glyph = (lv.inUse || !list) ? glyphExample(lv) : '';
     var row = listItem(
       'Level ' + (lv.level + 1) + (lv.inUse ? '' : ' (unused)'),
-      glyph + (lv.indentStartPt != null ? ' \u00b7 indent ' + fromPt(lv.indentStartPt, S.unit) + S.unit.toLowerCase() : ''),
+      lv.indentStartPt != null
+        ? 'indent ' + fromPt(lv.indentStartPt, S.unit) + S.unit.toLowerCase() : '',
       function () {
         var inner = el('div');
-        inner.appendChild(levelMarker(list, lv));
         var cur = lv.style || { textStyle: {}, paragraphStyle: {}, mixed: [] };
         var model = { textStyle: copy(cur.textStyle), paragraphStyle: copy(cur.paragraphStyle) };
         inner.appendChild(buildStyleEditor(model, function (payload) {
@@ -1552,41 +1625,27 @@ function listBody(list) {
         return inner;
       },
       'lvl:' + key + ':' + lv.level);
+    // The marker reads ahead of the level it belongs to, where a list would
+    // put it, and is the way in to changing it.
+    var mark = el('button', glyph ? 'glyph mark' : 'glyph mark none', glyph || '\u2298');
+    mark.title = glyph ? 'The marker on this level \u2014 click to change it'
+                       : 'This level has no marker \u2014 click to give it one';
+    mark.addEventListener('click', function (e) {
+      e.stopPropagation();          // the heading's own click opens the level
+      openMarkerMenu(mark, list, lv);
+    });
     // A level's depth is the point of the panel, so the heading is set in by
     // its own depth: one ex per level, with level 1 flush at the margin.
     var name = row.querySelector('.name');
-    if (name) name.style.marginLeft = lv.level + 'ex';
+    if (name) {
+      name.parentNode.insertBefore(mark, name);
+      mark.style.marginLeft = lv.level + 'ex';
+    }
     box.appendChild(row);
   });
   return box;
 }
 
-/**
- * What this one level's marker is, and the one thing that can be done to it
- * on its own: taken away. \u2298 rather than a word, so it sits beside the
- * glyphs in the picker above as one more thing a marker can be.
- */
-function levelMarker(list, lv) {
-  var wrap = el('div', 'glyphs');
-  var cur = list ? glyphExample(lv) : '';
-  if (cur) {
-    var shown = el('button', 'glyph on');
-    shown.textContent = cur;
-    shown.disabled = true;
-    shown.title = 'The marker this level gets from the list\u2019s marker style';
-    wrap.appendChild(shown);
-  }
-  var none = el('button', 'glyph none', '\u2298');
-  none.title = 'No marker on this level';
-  if (!cur) none.classList.add('on');
-  none.addEventListener('click', function () {
-    var t = listTarget(list);
-    t.level = lv.level;
-    return call('removeBullets', [t]).then(function () { return refreshSlice('lists'); });
-  });
-  wrap.appendChild(none);
-  return wrap;
-}
 </script>
 <script>
 /* =================================================================
@@ -2323,6 +2382,7 @@ var panelStale = {};
  * them, which is a paint the switch was going to cost anyway.
  */
 function renderAll() {
+  closeMarkerMenu();               // whatever it was anchored to is about to go
   var scroll = window.pageYOffset || document.documentElement.scrollTop || 0;
   S.unitFields = [];
   Object.keys(PANEL_RENDER).forEach(function (n) { panelStale[n] = n !== activePanel; });
@@ -2460,6 +2520,7 @@ var rerendering = false;
  * change anyway -- the deferred read runs the moment focus leaves.
  */
 function pickerOpen() {
+  if (markerMenu) return true;     // drawn by this page, but just as cancellable
   var a = document.activeElement;
   if (!a || !document.hasFocus()) return false;
   if (a.tagName === 'SELECT') return true;

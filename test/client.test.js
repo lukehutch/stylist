@@ -1092,27 +1092,37 @@ module.exports = ({ suite, test }) => {
     t.deepEqual(picked.textStyle, { bold: true }, 'it falls back to the first style listed');
   });
 
-  suite('The list marker picker');
+  suite('The list marker pop-up');
 
-  /* markerPicker built for real against a stand-in DOM, so what is asserted
-     here is what the panel would draw. */
-  const buildPicker = (list, presets) => evalFromClient(
-    ['markerPicker', 'glyphExample', 'GLYPH_SAMPLES', 'listTarget'],
+  /* The pop-up built for real against a stand-in DOM, so what is asserted here
+     is what would be on screen. */
+  const buildMenu = (list, lv, presets) => evalFromClient(
+    ['openMarkerMenu', 'closeMarkerMenu', 'markerMenu', 'glyphExample',
+     'GLYPH_SAMPLES', 'listTarget'],
     'var made = [];\n' +
     'var el = function (tag, cls, text) {\n' +
     '  var n = { tag: tag, cls: cls || "", text: text || "", kids: [], title: "",\n' +
+    '            style: {}, offsetWidth: 100, offsetHeight: 200, parentNode: null,\n' +
     '            classList: { add: function (c) { n.cls += " " + c; },\n' +
     '                         contains: function (c) { return n.cls.split(" ").indexOf(c) >= 0; } },\n' +
+    '            contains: function () { return false; },\n' +
     '            appendChild: function (k) { n.kids.push(k); return k; },\n' +
     '            addEventListener: function (_, f) { n.click = f; } };\n' +
     '  made.push(n); return n;\n' +
     '};\n' +
     'var calls = [];\n' +
-    'var call = function (fn, args) { calls.push([fn, args[0]]); return { then: function () {} }; };\n' +
-    'var reload = function () {};\n' +
+    'var listWrite = function (fn, t) { calls.push([fn, t]); };\n' +
+    'var bound = [];\n' +
+    'var document = { body: { appendChild: function (n) { n.parentNode = this; },\n' +
+    '                           removeChild: function () {} },\n' +
+    '  documentElement: { clientWidth: 300, clientHeight: 600 },\n' +
+    '  addEventListener: function (name) { bound.push(name); },\n' +
+    '  removeEventListener: function () {} };\n' +
+    'var anchor = { contains: function () { return false; },\n' +
+    '  getBoundingClientRect: function () { return { left: 20, right: 44, top: 40, bottom: 64 }; } };\n' +
     'var S = { tabId: "t.0", data: { constants: { bulletPresets: ' + JSON.stringify(presets) + ' } } };\n' +
-    'var root = markerPicker(' + JSON.stringify(list) + ');\n' +
-    'return { made: made, calls: calls, root: root };');
+    'openMarkerMenu(anchor, ' + JSON.stringify(list) + ', ' + JSON.stringify(lv) + ');\n' +
+    'return { made: made, calls: calls, bound: bound, box: markerMenu };');
 
   const PRESETS = [
     { id: 'BULLET_DISC_CIRCLE_SQUARE', numbered: false, glyphs: ['\u25cf', '\u25cb', '\u25a0'] },
@@ -1122,50 +1132,84 @@ module.exports = ({ suite, test }) => {
   const glyphButtons = (r) => r.made.filter((n) => /\bglyph\b/.test(n.cls));
 
   test('a marker is offered as the character it is, not as the name of an enum', (t) => {
-    const r = buildPicker({ listId: 'list.1', levels: [{}] }, PRESETS);
-    t.deepEqual(glyphButtons(r).map((n) => n.text), ['\u25cf', '\u2751', '1.']);
+    const r = buildMenu({ listId: 'list.1' }, {}, PRESETS);
+    t.deepEqual(glyphButtons(r).map((n) => n.text),
+      ['\u25cf', '\u2751', '1.', '\u2298']);
     t.notOk(/BULLET_|NUMBERED_/.test(r.made.map((n) => n.text).join(' ')),
       'no API enum reaches the button faces');
   });
 
-  test('bullets and numbering are separated, each under its own heading', (t) => {
-    const r = buildPicker({ listId: 'list.1', levels: [{}] }, PRESETS);
-    t.deepEqual(r.made.filter((n) => n.tag === 'h2').map((n) => n.text), ['Bullets', 'Numbering']);
+  test('bullets, numbering and none each get their own heading', (t) => {
+    const r = buildMenu({ listId: 'list.1' }, {}, PRESETS);
+    t.deepEqual(r.made.filter((n) => n.tag === 'h2').map((n) => n.text),
+      ['Bullets', 'Numbering', 'No marker']);
   });
 
-  test("the list's current marker is the one marked", (t) => {
-    const r = buildPicker(
-      { listId: 'list.1', levels: [{ glyphSymbol: '\u2751', glyphFormat: '%0' }] }, PRESETS);
+  test("the level's current marker is the one marked", (t) => {
+    const r = buildMenu({ listId: 'list.1' },
+      { glyphSymbol: '\u2751', glyphFormat: '%0' }, PRESETS);
     const on = glyphButtons(r).filter((n) => n.classList.contains('on'));
     t.equal(on.length, 1);
     t.equal(on[0].text, '\u2751');
   });
 
+  test('a level with no marker has "none" marked instead', (t) => {
+    const r = buildMenu({ listId: 'list.1' }, {}, PRESETS);
+    const on = glyphButtons(r).filter((n) => n.classList.contains('on'));
+    t.equal(on.length, 1);
+    t.equal(on[0].text, '\u2298');
+  });
+
   test('nothing is marked when the marker is one Docs itself set', (t) => {
     // Format > Bullets & numbering > More bullets can put any character
     // there, and no preset produces it.
-    const r = buildPicker(
-      { listId: 'list.1', levels: [{ glyphSymbol: '\u2600', glyphFormat: '%0' }] }, PRESETS);
+    const r = buildMenu({ listId: 'list.1' },
+      { glyphSymbol: '\u2600', glyphFormat: '%0' }, PRESETS);
     t.equal(glyphButtons(r).filter((n) => n.classList.contains('on')).length, 0);
   });
 
   test('the deeper levels of a preset are shown on hover, not lost', (t) => {
-    const r = buildPicker({ listId: 'list.1', levels: [{}] }, PRESETS);
+    const r = buildMenu({ listId: 'list.1' }, {}, PRESETS);
     t.match(glyphButtons(r)[0].title, /\u25cf.*\u25cb.*\u25a0/);
   });
 
   test('clicking a marker applies that preset to that one list', (t) => {
-    const r = buildPicker({ listId: 'list.7', levels: [{}] }, PRESETS);
+    const r = buildMenu({ listId: 'list.7' }, { level: 1 }, PRESETS);
     glyphButtons(r)[1].click();
     t.deepEqual(r.calls, [['applyBulletPreset',
       { tabId: 't.0', listId: 'list.7', bulletPreset: 'BULLET_CHECKBOX' }]]);
   });
 
   test('with no list in hand the same click goes to every list', (t) => {
-    const r = buildPicker(null, PRESETS);
+    const r = buildMenu(null, { level: 0 }, PRESETS);
     glyphButtons(r)[2].click();
     t.deepEqual(r.calls, [['applyBulletPreset',
       { tabId: 't.0', allLists: true, bulletPreset: 'NUMBERED_DECIMAL_ALPHA_ROMAN' }]]);
+  });
+
+  test('"none" takes the markers off the one level it was opened from', (t) => {
+    const r = buildMenu({ listId: 'list.7' }, { level: 2 }, PRESETS);
+    glyphButtons(r).slice(-1)[0].click();
+    t.deepEqual(r.calls, [['removeBullets',
+      { tabId: 't.0', listId: 'list.7', level: 2 }]]);
+  });
+
+  test('the pop-up closes on a click past it and on Escape', (t) => {
+    const r = buildMenu({ listId: 'list.1' }, {}, PRESETS);
+    t.deepEqual(r.bound, ['mousedown', 'keydown']);
+    const fn = /function openMarkerMenu\(anchor, list, lv\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /!box\.contains\(e\.target\) && !anchor\.contains\(e\.target\)/,
+      'the marker itself is left out, so its own click can close what it opened');
+    t.match(fn, /e\.key === 'Escape'/);
+    t.match(fn, /var again = markerMenu && markerMenu\.anchor === anchor;[^]*?if \(again\) return;/,
+      'and a second click on the same marker puts it away');
+  });
+
+  test('a pop-up never outlives the row it hangs off', (t) => {
+    t.match(clientJs, /function renderAll\(\) \{\s*\n\s*closeMarkerMenu\(\);/);
+    const fn = /function pickerOpen\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /if \(markerMenu\) return true;/,
+      'and a poll stands aside while it is open, as it does for a dropdown');
   });
 
   suite('Apply to all');
@@ -1366,7 +1410,7 @@ module.exports = ({ suite, test }) => {
     t.notOk(/Google Docs has no footnote style/.test(clientJs),
       'the footnote note leads with what happens, not with why');
     t.match(clientJs, /Written into every footnote in the tab/);
-    t.match(clientJs, /A style sets every level.{0,8}s marker at once/,
+    t.match(clientJs, /A marker style is one choice for the whole list/,
       'the marker explanation is one sentence, not four');
   });
 
@@ -1451,7 +1495,7 @@ module.exports = ({ suite, test }) => {
   });
 
   test('a dropdown, a colour swatch and a font box all count as open', (t) => {
-    const open = (a, hasFocus) => evalFromClient(['pickerOpen'],
+    const open = (a, hasFocus) => evalFromClient(['pickerOpen', 'markerMenu'],
       'var document = { activeElement: ' + JSON.stringify(a) + ',' +
       ' hasFocus: function () { return ' + (hasFocus === false ? 'false' : 'true') + '; } };\n' +
       'if (document.activeElement) document.activeElement.hasAttribute =' +
@@ -1555,8 +1599,7 @@ module.exports = ({ suite, test }) => {
   suite('A write re-reads only what it can have changed');
 
   test('the panel-shaped writes ask for one slice', (t) => {
-    [['applyBulletPreset', 'lists'], ['removeBullets', 'lists'],
-     ['setSegmentLink', 'hf'], ['applyStylePresetToNamedStyle', 'styles']
+    [['setSegmentLink', 'hf'], ['applyStylePresetToNamedStyle', 'styles']
     ].forEach(([fn, slice]) => {
       const at = clientJs.indexOf(fn);
       t.ok(at > 0, fn + ' is called');
@@ -1681,29 +1724,48 @@ module.exports = ({ suite, test }) => {
 
   suite('Lists are a stack of levels');
 
-  test('the levels are the view, with the marker style above them', (t) => {
+  test('the levels are the whole view, with no button row above them', (t) => {
     const fn = /function listBody\(list\)[^]*?\n}/.exec(clientJs)[0];
-    t.ok(fn.indexOf("'Marker style'") < fn.indexOf('levels.forEach'),
-      'the marker style comes first, then the levels themselves');
+    t.notOk(/'Marker style'/.test(fn),
+      'the fifteen markers are behind each level\u2019s own marker now');
     t.notOk(/Remove markers from every list/.test(clientJs),
       'the blunt whole-document button is gone');
+    t.match(fn, /var levels = \(list \|\| S\.data\.lists\.lists\[0\]\)\.levels;/);
   });
 
-  test('a level can drop its own markers, and says so with a symbol not a word', (t) => {
-    const fn = /function levelMarker\(list, lv\)[^]*?\n}/.exec(clientJs)[0];
-    t.match(fn, /el\('button', 'glyph none', '\\u2298'\)/, 'a circle with a cross through it');
-    t.match(fn, /t\.level = lv\.level;/, 'the write names the level');
-    t.match(fn, /call\('removeBullets', \[t\]\)/);
+  test('the marker reads before the level it belongs to', (t) => {
+    const fn = /function listBody\(list\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /name\.parentNode\.insertBefore\(mark, name\);/,
+      'ahead of "Level 1", not buried in the summary on the right');
+    t.match(fn, /'indent ' \+ fromPt\(lv\.indentStartPt, S\.unit\)/,
+      'and the summary is the indent alone');
+    t.match(fn, /openMarkerMenu\(mark, list, lv\)/, 'clicking it opens the choices');
+    t.match(fn, /e\.stopPropagation\(\);/,
+      'without also opening the level, which is what the rest of the heading does');
   });
 
-  test('a level shows the marker it gets, but cannot be given a different one', (t) => {
-    const fn = /function levelMarker\(list, lv\)[^]*?\n}/.exec(clientJs)[0];
-    t.match(fn, /shown\.disabled = true;/,
-      'the API has no per-level glyph write, so it is shown rather than offered');
+  test('a level whose markers were taken off stops showing one', (t) => {
+    // The list keeps defining the level after its last paragraph leaves it,
+    // so the definition's glyph is not evidence that anything wears it.
+    const fn = /function listBody\(list\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /var glyph = \(lv\.inUse \|\| !list\) \? glyphExample\(lv\) : '';/);
+    t.match(fn, /glyph \? 'glyph mark' : 'glyph mark none', glyph \|\| '\\u2298'/,
+      'it shows the "no marker" symbol instead, which is also how to put one back');
   });
 
   test('each level heading is set in by its own depth', (t) => {
-    t.match(clientJs, /name\.style\.marginLeft = lv\.level \+ 'ex';/);
+    t.match(clientJs, /mark\.style\.marginLeft = lv\.level \+ 'ex';/);
+  });
+
+  test('a marker write brings the new state back with it', (t) => {
+    // Two round trips to Apps Script is most of the wait on a marker change,
+    // and the second one only re-reads what the first already had in hand.
+    const fn = /function listWrite\(fn, t\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /if \(!res \|\| !res\.lists\) return refreshSlice\('lists'\);/,
+      'with an older server answering, it still asks');
+    t.match(fn, /S\.data\.lists = res\.lists;/);
+    t.match(fn, /S\.fingerprint\.lists = JSON\.stringify\(\{ lists: res\.lists \}\);/,
+      'shaped like the poll\u2019s own answer, so the poll does not redraw over it');
   });
 
   suite('Nothing internal reaches the screen');
