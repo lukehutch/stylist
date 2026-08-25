@@ -72,7 +72,16 @@ function call(fn, args) {
   S.busy++;
   writes++;
   armBusy();
-  var p = chain.catch(function () {}).then(function () { return rawCall(fn, args); });
+  var p = chain.catch(function () {}).then(function () { return rawCall(fn, args); })
+    .then(function (res) {
+      // A write that came back with something to say says it. Several of them
+      // answer "applied: 0" with the reason -- no paragraphs at that level, a
+      // setting the document cannot render -- and without this the panel just
+      // sits there, which looks exactly like nothing having happened.
+      var w = res && res.warnings;
+      if (w && w.length) status(w.join(' '), 'warn');
+      return res;
+    });
   chain = p.catch(function () {});
   p.then(done, done);
   function done() {
@@ -1435,6 +1444,26 @@ function glyphExample(lv) {
   return (lv.glyphFormat || '%0').replace(/%\d/g, fill);
 }
 
+/**
+ * Whether a list is already wearing a preset.
+ *
+ * The first level is not enough to tell them apart: two presets open with the
+ * same diamond and differ only further down, and two more open with the same
+ * "1.". So the levels are compared in order, as far as the list defines them.
+ */
+function presetOnList(levels, preset) {
+  var compared = 0;
+  for (var i = 0; i < preset.glyphs.length; i++) {
+    var lv = (levels || [])[i];
+    if (!lv) break;
+    var g = glyphExample(lv);
+    if (!g) break;                   // no marker on this level: nothing to compare
+    if (g !== preset.glyphs[i]) return false;
+    compared++;
+  }
+  return compared > 0;
+}
+
 /** What a list is called in the panel, and the one-line summary beside it. */
 function listName(list, ordinal) {
   return (list.kind === 'numbered' ? 'Numbered list ' : 'Bulleted list ') + ordinal;
@@ -1514,7 +1543,7 @@ function closeMarkerMenu() {
   markerMenu = null;
 }
 
-function openMarkerMenu(anchor, list, lv) {
+function openMarkerMenu(anchor, list, lv, levels) {
   var again = markerMenu && markerMenu.anchor === anchor;
   closeMarkerMenu();
   if (again) return;                 // a second click on the marker puts it away
@@ -1533,9 +1562,13 @@ function openMarkerMenu(anchor, list, lv) {
     box.appendChild(el('h2', null, g[0]));
     var row = el('div', 'glyphs');
     mine.forEach(function (p) {
-      var b = el('button', p.numbered ? 'glyph num' : 'glyph', p.glyphs[0]);
+      // Two levels, not one: several presets share their first marker and are
+      // told apart only by what the level below it gets.
+      var b = el('button', p.numbered ? 'glyph num' : 'glyph');
+      b.appendChild(el('span', 'g1', p.glyphs[0]));
+      b.appendChild(el('span', 'g2', p.glyphs[1]));
       b.title = 'Levels 1-3:  ' + p.glyphs.join('   ');
-      if (current && p.glyphs[0] === current) b.classList.add('on');
+      if (presetOnList(levels, p)) b.classList.add('on');
       b.addEventListener('click', function () {
         var t = listTarget(list);
         t.bulletPreset = p.id;
@@ -1651,7 +1684,7 @@ function listBody(list) {
                        : 'This level has no marker \u2014 click to give it one';
     mark.addEventListener('click', function (e) {
       e.stopPropagation();          // the heading's own click opens the level
-      openMarkerMenu(mark, list, lv);
+      openMarkerMenu(mark, list, lv, levels);
     });
     // A level's depth is the point of the panel, so the heading is set in by
     // its own depth: one ex per level, with level 1 flush at the margin.

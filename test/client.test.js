@@ -1111,9 +1111,9 @@ module.exports = ({ suite, test }) => {
 
   /* The pop-up built for real against a stand-in DOM, so what is asserted here
      is what would be on screen. */
-  const buildMenu = (list, lv, presets) => evalFromClient(
+  const buildMenu = (list, lv, presets, levels) => evalFromClient(
     ['openMarkerMenu', 'closeMarkerMenu', 'markerMenu', 'glyphExample',
-     'GLYPH_SAMPLES', 'listTarget'],
+     'GLYPH_SAMPLES', 'presetOnList', 'listTarget'],
     'var made = [];\n' +
     'var el = function (tag, cls, text) {\n' +
     '  var n = { tag: tag, cls: cls || "", text: text || "", kids: [], title: "",\n' +
@@ -1136,7 +1136,8 @@ module.exports = ({ suite, test }) => {
     'var anchor = { contains: function () { return false; },\n' +
     '  getBoundingClientRect: function () { return { left: 20, right: 44, top: 40, bottom: 64 }; } };\n' +
     'var S = { tabId: "t.0", data: { constants: { bulletPresets: ' + JSON.stringify(presets) + ' } } };\n' +
-    'openMarkerMenu(anchor, ' + JSON.stringify(list) + ', ' + JSON.stringify(lv) + ');\n' +
+    'openMarkerMenu(anchor, ' + JSON.stringify(list) + ', ' + JSON.stringify(lv) +
+      ', ' + JSON.stringify(levels || []) + ');\n' +
     'return { made: made, calls: calls, bound: bound, box: markerMenu };');
 
   const PRESETS = [
@@ -1145,11 +1146,14 @@ module.exports = ({ suite, test }) => {
     { id: 'NUMBERED_DECIMAL_ALPHA_ROMAN', numbered: true, glyphs: ['1.', 'a.', 'i.'] }
   ];
   const glyphButtons = (r) => r.made.filter((n) => /\bglyph\b/.test(n.cls));
+  /* A preset button wears two markers, in a span each; "none" is one character. */
+  const face = (n) => (n.kids.length ? n.kids.map((k) => k.text).join('') : n.text);
 
   test('a marker is offered as the character it is, not as the name of an enum', (t) => {
     const r = buildMenu({ listId: 'list.1' }, {}, PRESETS);
-    t.deepEqual(glyphButtons(r).map((n) => n.text),
-      ['\u25cf', '\u2751', '1.', '\u2298']);
+    t.deepEqual(glyphButtons(r).map(face),
+      ['\u25cf\u25cb', '\u2751\u2751', '1.a.', '\u2298'],
+      'each preset as its first two levels, so no two buttons read alike');
     t.notOk(/BULLET_|NUMBERED_/.test(r.made.map((n) => n.text).join(' ')),
       'no API enum reaches the button faces');
   });
@@ -1160,26 +1164,28 @@ module.exports = ({ suite, test }) => {
       ['Bullets', 'Numbering', 'No marker']);
   });
 
-  test("the level's current marker is the one marked", (t) => {
+  test('the preset the list already wears is the one marked', (t) => {
     const r = buildMenu({ listId: 'list.1' },
-      { glyphSymbol: '\u2751', glyphFormat: '%0' }, PRESETS);
+      { glyphSymbol: '\u2751', glyphFormat: '%0' }, PRESETS,
+      [{ glyphSymbol: '\u2751', glyphFormat: '%0' }, { glyphSymbol: '\u2751', glyphFormat: '%0' }]);
     const on = glyphButtons(r).filter((n) => n.classList.contains('on'));
     t.equal(on.length, 1);
-    t.equal(on[0].text, '\u2751');
+    t.equal(face(on[0]), '\u2751\u2751');
   });
 
   test('a level with no marker has "none" marked instead', (t) => {
     const r = buildMenu({ listId: 'list.1' }, {}, PRESETS);
     const on = glyphButtons(r).filter((n) => n.classList.contains('on'));
     t.equal(on.length, 1);
-    t.equal(on[0].text, '\u2298');
+    t.equal(face(on[0]), '\u2298');
   });
 
   test('nothing is marked when the marker is one Docs itself set', (t) => {
     // Format > Bullets & numbering > More bullets can put any character
     // there, and no preset produces it.
     const r = buildMenu({ listId: 'list.1' },
-      { glyphSymbol: '\u2600', glyphFormat: '%0' }, PRESETS);
+      { glyphSymbol: '\u2600', glyphFormat: '%0' }, PRESETS,
+      [{ glyphSymbol: '\u2600', glyphFormat: '%0' }]);
     t.equal(glyphButtons(r).filter((n) => n.classList.contains('on')).length, 0);
   });
 
@@ -1212,12 +1218,41 @@ module.exports = ({ suite, test }) => {
   test('the pop-up closes on a click past it and on Escape', (t) => {
     const r = buildMenu({ listId: 'list.1' }, {}, PRESETS);
     t.deepEqual(r.bound, ['mousedown', 'keydown']);
-    const fn = /function openMarkerMenu\(anchor, list, lv\)[^]*?\n}/.exec(clientJs)[0];
+    const fn = /function openMarkerMenu\(anchor, list, lv, levels\)[^]*?\n}/.exec(clientJs)[0];
     t.match(fn, /!box\.contains\(e\.target\) && !anchor\.contains\(e\.target\)/,
       'the marker itself is left out, so its own click can close what it opened');
     t.match(fn, /e\.key === 'Escape'/);
     t.match(fn, /var again = markerMenu && markerMenu\.anchor === anchor;[^]*?if \(again\) return;/,
       'and a second click on the same marker puts it away');
+  });
+
+  /* Two presets open with the same diamond and two more with the same "1.",
+     so a button showing one marker showed the same thing twice. */
+  test('two presets that open the same way are told apart in the menu', (t) => {
+    const fn = /function openMarkerMenu\(anchor, list, lv, levels\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /el\('span', 'g1', p\.glyphs\[0\]\)/, 'the marker this level gets');
+    t.match(fn, /el\('span', 'g2', p\.glyphs\[1\]\)/, 'and the one below it, which is what differs');
+    t.notOk(/p\.glyphs\[0\] === current/.test(fn),
+      'and the preset already in use is not found by its first marker alone either');
+  });
+
+  test('the preset a list already wears is found by more than its first marker', (t) => {
+    const on = evalFromClient(['GLYPH_SAMPLES', 'glyphExample', 'presetOnList'],
+      'return presetOnList;');
+    const lv = (sym) => ({ glyphSymbol: sym });
+    const arrow = { glyphs: ['\u2756', '\u27a2', '\u25a0'] };
+    const hollow = { glyphs: ['\u2756', '\u25c7', '\u25a0'] };
+    t.equal(on([lv('\u2756'), lv('\u27a2')], arrow), true);
+    t.equal(on([lv('\u2756'), lv('\u27a2')], hollow), false,
+      'the level below is what tells those two apart');
+    t.equal(on([lv('\u2756')], arrow), true,
+      'a list that only defines one level can only be judged on the one it has');
+    t.equal(on([], arrow), false, 'a list with no levels wears no preset');
+    t.equal(on([{}], arrow), false, 'nor does one whose first level has no marker at all');
+    const numbered = { glyphs: ['1.', 'a.', 'i.'] };
+    t.equal(on([{ glyphType: 'DECIMAL', glyphFormat: '%0.' },
+                { glyphType: 'ALPHA', glyphFormat: '%1.' }], numbered), true,
+      'numbering is compared as the reader sees it, not as an enum');
   });
 
   test('a pop-up never outlives the row it hangs off', (t) => {
@@ -1334,7 +1369,9 @@ module.exports = ({ suite, test }) => {
     // Every remaining call is an error, a "working on it", or the clear that
     // takes one of those away again.
     const calls = clientJs.match(/status\((?!msg)[^;]*\);/g) || [];
-    const allowed = /'err'\)|status\('', ''\)|Loading|Converting|Bringing|Adding|Removing/;
+    // 'warn' is the server saying a write did nothing and why -- the opposite
+    // of announcing a success.
+    const allowed = /'err'\)|'warn'\)|status\('', ''\)|Loading|Converting|Bringing|Adding|Removing/;
     calls.forEach((c) => t.match(c, allowed, c.trim()));
     t.ok(calls.length > 4, 'the errors are still reported');
     t.notOk(/status\([^;]*✓/.test(clientJs), 'no tick-mark confirmations survive');
@@ -1514,6 +1551,19 @@ module.exports = ({ suite, test }) => {
   test('the page background offers white, because a page cannot be transparent', (t) => {
     const fn = /function renderPage\(\)[^]*?\n}/.exec(clientJs)[0];
     t.match(fn, /colorField\(pf\.backgroundColor,[^]*?blank: '#ffffff'/);
+  });
+
+  /* Several writes answer "applied: 0" with the reason. Nothing showed them,
+     so a write that did nothing looked the same as one that worked. */
+  test('a write that came back with something to say says it', (t) => {
+    const fn = /function call\(fn, args\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /var w = res && res\.warnings;/);
+    t.match(fn, /if \(w && w\.length\) status\(w\.join\(' '\), 'warn'\);/,
+      'in the same bar that reports an error');
+    t.match(fn, /return res;/, 'and the caller still gets the answer');
+    t.match(css, /#status\.warn \{/, 'which is styled as a warning');
+    t.match(css, /#status\.err, #status\.warn \{ white-space: normal; \}/,
+      'and wraps, because a truncated reason is no reason');
   });
 
   suite('Polling and open pickers');
@@ -1772,7 +1822,7 @@ module.exports = ({ suite, test }) => {
       'ahead of "Level 1", not buried in the summary on the right');
     t.match(fn, /'indent ' \+ fromPt\(lv\.indentStartPt, S\.unit\)/,
       'and the summary is the indent alone');
-    t.match(fn, /openMarkerMenu\(mark, list, lv\)/, 'clicking it opens the choices');
+    t.match(fn, /openMarkerMenu\(mark, list, lv, levels\)/, 'clicking it opens the choices');
     t.match(fn, /e\.stopPropagation\(\);/,
       'without also opening the level, which is what the rest of the heading does');
   });

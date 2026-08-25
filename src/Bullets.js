@@ -239,7 +239,12 @@ function applyBulletPreset(payload) {
       requests.push({ createParagraphBullets: { range: r, bulletPreset: payload.bulletPreset } });
     });
   });
-  if (!requests.length) return { applied: 0, warnings: ['That list has no paragraphs in the body.'] };
+  // Answered with the reading as well, so a write that turned out to have
+  // nothing to do still costs one round trip rather than two.
+  if (!requests.length) {
+    return withLists_(ctx.tabId,
+      { applied: 0, warnings: ['That list has no paragraphs in the body.'] });
+  }
   return withLists_(ctx.tabId, batchUpdate_(requests));
 }
 

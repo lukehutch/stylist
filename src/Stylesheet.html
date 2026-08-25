@@ -182,6 +182,11 @@
   .glyph.num { font-variant-numeric: tabular-nums; }
   .glyph:disabled { cursor: default; opacity: 1; }
   .glyph.none { font-size: calc(var(--fs-md) + 2px); }
+  /* A preset wears two levels on one button: the marker it gives level one,
+     and quieter beside it the one it gives level two. Two presets open with
+     the same diamond and two more with the same "1.", so the second is what
+     tells them apart. */
+  .glyph .g2 { margin-left: 3px; font-size: var(--fs-xs); color: var(--muted); }
 
   /* The marker in a level's heading is the same button as the ones in the
      pop-up it opens, sized down to sit on the one line the heading has. */
@@ -289,6 +294,10 @@
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   #status.err { color: var(--err); background: #fce8e6; }
+  #status.warn { color: #6b4c00; background: var(--warn-bg); }
+  /* These two are sentences rather than a word, and a truncated reason is no
+     reason at all, so they wrap instead of running off the end. */
+  #status.err, #status.warn { white-space: normal; }
   #status.ok { color: var(--ok); }
 
   /* ---- slow-write veil: everything greys out, one hourglass, centred ---- */

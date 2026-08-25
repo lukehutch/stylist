@@ -1712,4 +1712,19 @@ test('the headers panel gets its segments and its two margins in one read', (t) 
     'every section, because the buttons also offer to do it to all of them');
   t.equal(many.hfLinks.length, 3);
 });
+
+suite('Marker presets');
+
+/* The pop-up shows each preset as its first two markers, so any two presets
+   sharing both would be two buttons the reader cannot tell apart. */
+test('no two presets look the same for the first two levels', (t) => {
+  const sb = makeSandbox(makeDoc());
+  const seen = {};
+  sb.BULLET_PRESETS.forEach((p) => {
+    const key = p.glyphs[0] + '\u0000' + p.glyphs[1];
+    t.notOk(seen[key], p.id + ' opens like ' + seen[key]);
+    seen[key] = p.id;
+  });
+  t.equal(sb.BULLET_PRESETS.length, 15, 'every preset createParagraphBullets takes');
+});
 };
