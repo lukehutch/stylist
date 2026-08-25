@@ -59,17 +59,15 @@
 
   /* ---- top bar ---- */
   .topbar { border-bottom: 1px solid var(--line); padding-bottom: 8px; }
-  .topbar .title { display: flex; align-items: center; font-weight: 500;
-                   font-size: calc(var(--fs) * 1.3); line-height: 1.25; margin-bottom: 12px; }
-  /* Document titles are arbitrary text in a 300px pane, so the name gets two
-     lines and then an ellipsis. -webkit-line-clamp is the only way to ellipsize
-     text that has wrapped; the unprefixed line-clamp is there for whenever the
-     Chromium the sidebar runs in stops needing the prefix. A single-line title
-     is centred against the icon by align-items above. */
+  .topbar .title { display: flex; align-items: center; font-weight: normal;
+                   font-size: var(--fs); line-height: 1.3; margin-bottom: 12px; }
+  /* The extension panel puts the add-on's name directly above this, so the
+     line beside the icon says what Stylist is rather than saying "Stylist"
+     twice. It is a fixed phrase, not arbitrary text, so it wraps to as many
+     lines as it needs with nothing clamped away; align-items above keeps it
+     centred against the icon at any number of lines. */
   .topbar .title > span {
-    display: -webkit-box; -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2; line-clamp: 2;
-    overflow: hidden; min-width: 0; overflow-wrap: anywhere;
+    font-style: italic; min-width: 0; overflow-wrap: anywhere;
   }
   .row { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
   .row > label { color: var(--muted); font-size: var(--fs-sm); white-space: nowrap; }

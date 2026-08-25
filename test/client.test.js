@@ -1228,14 +1228,19 @@ module.exports = ({ suite, test }) => {
 
   test('the icon is larger than the text it sits beside', (t) => {
     t.match(css, /\.applogo \{ width: calc\(var\(--fs\) \* 3\)/);
-    t.match(css, /\.topbar \.title \{[^}]*font-size: calc\(var\(--fs\) \* 1\.3\)/);
+    t.match(css, /\.topbar \.title \{[^}]*font-size: var\(--fs\)/,
+      'the tagline is ordinary body size, so the icon carries the banner');
   });
 
-  test('a long document title wraps to two lines and then ellipsizes', (t) => {
-    t.match(css, /\.topbar \.title > span \{[^}]*-webkit-line-clamp: 2/);
-    t.match(css, /\.topbar \.title > span \{[^}]*overflow: hidden/);
+  test('the tagline wraps to as many lines as it needs, with nothing clipped', (t) => {
+    t.match(css, /\.topbar \.title > span \{[^}]*font-style: italic/);
+    t.match(css, /\.topbar \.title > span \{[^}]*overflow-wrap: anywhere/);
+    t.notOk(/\.topbar \.title > span \{[^}]*line-clamp/.test(css),
+      'a fixed phrase has no reason to be cut off after two lines');
+    t.notOk(/\.topbar \.title > span \{[^}]*overflow: hidden/.test(css),
+      'nor to be clipped at all');
     t.notOk(/\.topbar \.title \{[^}]*white-space: nowrap/.test(css),
-      'the old single-line rule would stop it wrapping');
+      'and nothing stops it wrapping');
   });
 
   test('the hints explain the document, not the implementation', (t) => {
@@ -1253,13 +1258,16 @@ module.exports = ({ suite, test }) => {
       'the marker explanation is one sentence, not four');
   });
 
-  test('the heading names the add-on, not the document', (t) => {
-    t.match(sidebar, /<span>Stylist<\/span>/, 'the add-on\u2019s own name');
+  test('the heading says what the add-on is, not what it is called', (t) => {
+    // The extension panel already prints "Stylist" immediately above this.
+    t.match(sidebar,
+      /<span>The missing style and formatting editor for Google Docs<\/span>/);
+    t.notOk(/<span>Stylist<\/span>/.test(sidebar), 'the name is not printed twice');
     t.notOk(/docTitle/.test(sidebar + clientJs), 'nothing writes the document name there');
     t.notOk(/data\.documentTitle/.test(clientJs), 'the client no longer reads it');
   });
 
-  test('a one-line title is centred against the icon', (t) => {
+  test('the tagline is centred against the icon however many lines it takes', (t) => {
     t.match(css, /\.topbar \.title \{[^}]*display: flex/);
     t.match(css, /\.topbar \.title \{[^}]*align-items: center/);
   });
