@@ -1570,6 +1570,32 @@ suite('Where the cursor is');
  * openById is the same document service on the same document, and it is the
  * body walk that is under test here, not how the document was opened.
  */
+/**
+ * The same agreement, counted rather than compared, because that count is what
+ * the sidebar checks on every cursor probe. It places the cursor from indexes
+ * it was given at load time, and this is the one accessor call that tells it
+ * whether those indexes still name the same elements. Counted differently on
+ * the two sides, it would either never trust a good map or always trust a
+ * stale one.
+ */
+test('the body child count the sidebar is given is the one it can check', function (t) {
+  var body = DocumentApp.openById(liveTestDocId_()).getBody();
+  t.equal(bodyChildCount_(fixtureBodyContent_()), body.getNumChildren(),
+    'the count sent with every map, against the count the probe takes');
+
+  var d = loadAll(null, true);
+  t.equal(d.bodyChildCount, body.getNumChildren(), 'and the one the load sends');
+  var tables = d.tables;
+  var bad = [];
+  for (var i = 0; i < tables.length; i++) {
+    var kind = String(body.getChild(tables[i].bodyIndex).getType());
+    if (kind !== 'TABLE') bad.push(i + ': child ' + tables[i].bodyIndex + ' is ' + kind);
+  }
+  t.equal(bad.join(' '), '', 'every table bodyIndex names that table');
+  t.equal(d.sections[0].bodyIndex, -1,
+    'and the first break sits before every child, which is where its section starts');
+});
+
 test('DocumentApp and the API agree, element for element, about the body', function (t) {
   var body = DocumentApp.openById(liveTestDocId_()).getBody();
   // Everything but the document's own first section break, which is the one
@@ -1683,3 +1709,4 @@ function namedStyle_(type) {
   });
   return found;
 }
+

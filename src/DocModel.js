@@ -351,6 +351,20 @@ function cursorPath_(el) {
  * index come the row, the cell, and then the index within that cell, which
  * repeats for a table nested inside a cell.
  */
+/**
+ * How many children DocumentApp's body has, counted from the API's view of it.
+ *
+ * The same join as elementAtPath_ and for the same reason: drop the leading
+ * section break and the two views line up element for element. The sidebar
+ * holds this alongside the tables and sections it was given, and compares it
+ * against getNumChildren() on every cursor probe -- one accessor call -- to
+ * know whether the indexes it is holding still name the same elements.
+ */
+function bodyChildCount_(elements) {
+  var els = elements || [];
+  return els.length - ((els[0] && els[0].sectionBreak) ? 1 : 0);
+}
+
 function elementAtPath_(elements, path) {
   if (!path || !path.length) return null;
   var els = elements || [];

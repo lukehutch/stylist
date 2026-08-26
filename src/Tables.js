@@ -68,7 +68,12 @@ function tableCells_(t) {
 
 function tableLocations_(content, tabId) {
   var tables = [];
-  (((content.body || {}).content) || []).forEach(function (el) {
+  var els = ((content.body || {}).content) || [];
+  // DocumentApp's body does not expose the leading section break, so every
+  // element after it is one child earlier than its index here. That offset is
+  // what turns a cursor path into a table, in the sidebar, with no read.
+  var drop = (els[0] && els[0].sectionBreak) ? 1 : 0;
+  els.forEach(function (el, i) {
     if (!el.table) return;
     var t = el.table;
     var firstRowText = '';
@@ -82,6 +87,7 @@ function tableLocations_(content, tabId) {
       });
     tables.push({
       index: tables.length,
+      bodyIndex: i - drop,
       startIndex: el.startIndex || 0,
       rows: t.rows || 0,
       columns: t.columns || 0,

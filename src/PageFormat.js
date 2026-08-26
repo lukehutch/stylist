@@ -180,6 +180,11 @@ function sectionsScan_(tabCtx) {
   // the document's.
   var runHeader = ds.defaultHeaderId || null;
   var runFooter = ds.defaultFooterId || null;
+  // As in tableLocations_: which of DocumentApp's body children each break is,
+  // so the sidebar can say which section a cursor path falls in without a read.
+  // The first break is the one DocumentApp does not show, and -1 puts it
+  // before every child, which is exactly where its section starts.
+  var drop = (elements[0] && elements[0].sectionBreak) ? 1 : 0;
   elements.forEach(function (el, i) {
     if (!el.sectionBreak) return;
     var ss = el.sectionBreak.sectionStyle || {};
@@ -190,6 +195,7 @@ function sectionsScan_(tabCtx) {
     });
     sections.push({
       index: sections.length,
+      bodyIndex: i - drop,
       startIndex: el.startIndex || 0,
       sectionType: ss.sectionType || 'CONTINUOUS',
       isFirst: (el.startIndex || 0) === 0,
@@ -237,6 +243,23 @@ function sectionsScan_(tabCtx) {
  * nothing matches at all: while you type in one section the panel should
  * not jump to another just because a twin paragraph exists elsewhere.
  */
+/**
+ * Whether each section keeps its own header and footer or continues the one
+ * before it, which is what the sidebar's link buttons act on. Every section,
+ * because the panel offers to do it to all of them at once.
+ */
+function hfLinks_(sections) {
+  return sections.map(function (s, i) {
+    return {
+      sectionIndex: i,
+      isFirst: s.isFirst,
+      ownHeader: s.ownHeaderIds.length > 0,
+      ownFooter: s.ownFooterIds.length > 0,
+      hasHeader: !!s.headerId,
+      hasFooter: !!s.footerId
+    };
+  });
+}
 function pickSection_(secs, elements, ctx) {
   if (!secs.length) return -1;
   var preferred = Math.min(Math.max(ctx.preferred || 0, 0), secs.length - 1);

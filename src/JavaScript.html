@@ -1352,21 +1352,24 @@ function sectionBody(sec) {
 /**
  * The section the cursor is in, and nothing else.
  *
- * Which one that is comes from the cheap cursor probe, the same gate the
- * Lists and Tables panels use; the content read that finds it only happens
- * when the probe's answer changes.
+ * There is no empty state, because a document always has at least one section
+ * -- the whole body is one until a section break splits it -- so there is
+ * never a moment when the cursor is not in one and nothing to invite the user
+ * to click into.
+ *
+ * Which section it is comes from the cheap cursor probe joined against the
+ * body child index each section break carries, both of which the sidebar
+ * already holds; following the cursor from one section to the next reads
+ * nothing.
  */
 function renderSections() {
   var host = document.getElementById('panel-sections');
   host.innerHTML = '';
-  var total = S.data.sectionCount || 0;
   var secs = S.data.sections || [];
-
-  if (!secs.length) {
-    host.appendChild(el('p', 'hint',
-      'Click inside a section in the document to edit it here.'));
-    return;
-  }
+  if (!secs.length) return;
+  var total = secs.length;
+  var at = Math.min(Math.max(S.data.activeSectionIndex || 0, 0), total - 1);
+  var sec = secs[at];
 
   // Unlike the lists and tables switches, which also stand in for a cursor
   // that is not in the thing being edited, this one only means "and the
@@ -1374,7 +1377,7 @@ function renderSections() {
   if (total > 1) {
     host.appendChild(applyAllScope('sections', {
       one: 'This section', all: 'All sections', count: total,
-      unifyFn: 'unifySections', unifyArgs: { fromStartIndex: secs[0].startIndex },
+      unifyFn: 'unifySections', unifyArgs: { fromStartIndex: sec.startIndex },
       showing: 'Showing the section your cursor is in; a change goes to every section.',
       unify: 'Make every section match this one'
     }));
@@ -1382,16 +1385,13 @@ function renderSections() {
   if (S.all.sections) {
     // Every section now carries the same formatting, so the shown one's
     // values are all of their values, and writes fan out to every section.
-    host.appendChild(sectionBody(secs[0]));
+    host.appendChild(sectionBody(sec));
     return;
   }
 
-  var at = S.data.activeSectionIndex || 0;
-  // Which of them, on the row itself. The empty state above already says the
-  // panel follows the cursor, so it is not said again on every visit.
   var row = listItem('Section ' + (at + 1) + (total > 1 ? ' of ' + total : ''),
-    sectionMeta(secs[0]),
-    function () { return sectionBody(secs[0]); }, 'sec:' + at);
+    sectionMeta(sec),
+    function () { return sectionBody(sec); }, 'sec:' + at);
   host.appendChild(row);
   if (!row.classList.contains('open')) row.querySelector('.head').click();
 }
@@ -2120,13 +2120,31 @@ function hfSectionSuffix(heading, manySections) {
 }
 
 /**
+ * The section the panel is showing, and its header/footer link state.
+ *
+ * Both are picked out of the full lists the sidebar holds rather than sent on
+ * their own, so that moving the cursor into another section is a change of
+ * index and nothing more -- no read, and no way for the two to disagree about
+ * which section is meant.
+ */
+function activeSection() {
+  var secs = S.data.sections || [];
+  return secs[Math.min(Math.max(S.data.activeSectionIndex || 0, 0), secs.length - 1)] || null;
+}
+
+function activeHfLink() {
+  var links = S.data.hfLinks || [];
+  return links[Math.min(Math.max(S.data.activeSectionIndex || 0, 0), links.length - 1)] || null;
+}
+
+/**
  * A header or footer margin, from the section the panel is showing.
  *
  * A section that sets neither is positioned by the document's, so that is
  * what the field shows until the section has one of its own.
  */
 function hfMargin(key) {
-  var sec = S.data.section;
+  var sec = activeSection();
   if (sec && sec[key] !== null && sec[key] !== undefined) return sec[key];
   return S.data.pageFormat[key];
 }
@@ -2134,7 +2152,7 @@ function hfMargin(key) {
 /** A write to the section the headers panel is showing, under its own choice
  *  of section. */
 function applyHfSection(patch) {
-  var sec = S.data.section;
+  var sec = activeSection();
   // Before the first poll answers there is no section to write to, and the
   // document's margin is the one in force anyway.
   if (!sec) return applyPage(patch);
@@ -2146,7 +2164,7 @@ function applyHfSection(patch) {
 
 function hfLinkBox() {
   var links = S.data.hfLinks || [];
-  var L = S.data.hfLink;
+  var L = activeHfLink();
   if (!L) return null;
   var all = hfScopePart(0) === 'all' && links.length > 1;
   var box = el('div', 'linkbox');
@@ -2212,7 +2230,7 @@ function setLink(kind, link, applyAll) {
   status(link === 'own' ? 'Adding…' : 'Removing…', '');
   call('setSegmentLink', [{
     tabId: S.tabId, kind: kind, link: link, applyAll: !!applyAll,
-    sectionIndex: (S.data.hfLink || {}).sectionIndex
+    sectionIndex: (activeHfLink() || {}).sectionIndex
   }]).then(function () { status('', ''); return refreshSlice('hf'); });
 }
 
@@ -2221,8 +2239,8 @@ function renderHeaders() {
   host.innerHTML = '';
   var pf = S.data.pageFormat;
 
-  var total = S.data.sectionCount || 0;
-  var at = S.data.activeSectionIndex || 0;
+  var total = (S.data.sections || []).length || S.data.sectionCount || 0;
+  var at = Math.min(Math.max(S.data.activeSectionIndex || 0, 0), Math.max(total - 1, 0));
   var manySections = total > 1;
 
   // No heading over these: the tab this panel is on already says "Headers &
@@ -2254,7 +2272,7 @@ function renderHeaders() {
   // so it follows the sections menu above like everything else here does.
   checks.appendChild(checkField('Different L/R pages', pf.useEvenPageHeaderFooter,
     function (v) { return applyPage({ useEvenPageHeaderFooter: v }); }));
-  var here = S.data.section;
+  var here = activeSection();
   checks.appendChild(checkField('Different first page',
     here ? here.useFirstPageHeaderFooter : pf.useFirstPageHeaderFooter,
     function (v) { return applyHfSection({ useFirstPageHeaderFooter: v }); }));
@@ -2699,6 +2717,7 @@ function refreshSlice(what) {
     ? Object.assign({}, S.ctx, { preferred: S.data.activeSectionIndex || 0 })
     : (CTX_SLICES[what] ? S.ctx : undefined);
   return call('refresh', [S.tabId, what, ctxArg]).then(function (slice) {
+    lastCtxRead = Date.now();
     Object.keys(slice).forEach(function (k) { S.data[k] = slice[k]; });
     // Recorded so the next poll for this slice recognises its own answer and
     // does not draw the panel a second time.
@@ -2715,6 +2734,16 @@ function reload() {
     if (!data.constants) data.constants = S.data.constants;
     S.data = data;
     S.tabId = data.activeTabId;
+    // The load already asked where the cursor was and answered every context
+    // panel from it, so the first paint has the right list, table and section
+    // on it. Priming the probe's memory with the same answer is what stops
+    // the first poll tick spending a second read to be told nothing moved.
+    if (data.cursor) {
+      S.ctx = data.cursor;
+      lastCtxObj = data.cursor;
+      lastCtx = JSON.stringify(data.cursor);
+    }
+    lastCtxRead = Date.now();
     // A whole new payload: nothing that was seen before still stands.
     S.fingerprint = {};
     renderAll();
@@ -2886,6 +2915,96 @@ var probeWaitUntil = 0;
 var probing = false;
 var ctxRedraw = false;
 
+/**
+ * Where the cursor is, answered from what the sidebar is already holding.
+ *
+ * This is what makes the context panels follow the cursor at once rather than
+ * at the speed of a document read. The probe names the list the cursor is in
+ * by its id, and names its position as the chain of child indexes down from
+ * the body; the payload already says which body child each table and each
+ * section break sits at. Joining the two is arithmetic, so on a document
+ * large enough for a read to take ten seconds it still costs nothing.
+ *
+ * Positions only mean what they meant while the body has the same children,
+ * so this refuses to answer -- returns null, and the caller reads instead --
+ * when the child count has moved, or when the map and the probe disagree
+ * about whether the cursor is in a table, or when the cursor is in a list the
+ * payload has never heard of. Every one of those means something was added or
+ * removed since the payload was built.
+ */
+function resolveCtx(ctx) {
+  var d = S.data;
+  if (!d) return null;
+  var r = { list: false, position: false };
+
+  // A list is named by its own id rather than by where it sits, so this part
+  // survives any amount of editing elsewhere in the document. It is only
+  // unanswerable when the cursor is in a list made since the payload was
+  // built, which the payload has no entry for.
+  var id = ctx.listId || null;
+  var known = !id;
+  (((d.lists || {}).lists) || []).forEach(function (l) { if (l.listId === id) known = true; });
+  if (known) { r.list = true; r.activeListId = id; }
+
+  if (!(ctx.root === 'body' && ctx.path && ctx.path.length)) {
+    // A header, a footer, a footnote, or nothing selected: no body child to
+    // place, so the section the panels show stays where it is, and the cursor
+    // is definitely not in a table of the body.
+    r.position = true;
+    r.activeTableIndex = null;
+    return r;
+  }
+  if (d.bodyChildCount === undefined || ctx.bodyChildCount !== d.bodyChildCount) return r;
+
+  var at = ctx.path[0];
+  var ti = null;
+  (d.tables || []).forEach(function (t, i) { if (t.bodyIndex === at) ti = i; });
+  // The probe climbed out of the element it found, so it knows whether it was
+  // in a table. The map disagreeing means the map is describing an older
+  // document, whatever the child count says.
+  if (!!ctx.inTable !== (ti !== null)) return r;
+  r.position = true;
+  r.activeTableIndex = ti;
+
+  var secs = d.sections || [];
+  if (secs.length) {
+    var si = 0;
+    secs.forEach(function (sec, i) { if (sec.bodyIndex <= at) si = i; });
+    r.activeSectionIndex = si;
+  }
+  return r;
+}
+
+/** Put a resolveCtx answer into the payload. True if anything on screen moves. */
+function applyResolved(r) {
+  var moved = false;
+  if (r.list && S.data.lists && S.data.lists.activeListId !== r.activeListId) {
+    S.data.lists.activeListId = r.activeListId;
+    moved = true;
+  }
+  if (!r.position) return moved;
+  if (S.data.activeTableIndex !== r.activeTableIndex) {
+    S.data.activeTableIndex = r.activeTableIndex;
+    moved = true;
+  }
+  if (r.activeSectionIndex !== undefined &&
+      S.data.activeSectionIndex !== r.activeSectionIndex) {
+    S.data.activeSectionIndex = r.activeSectionIndex;
+    moved = true;
+  }
+  return moved;
+}
+
+/** Which half of a resolveCtx answer each context panel is drawn from. */
+var CTX_ANSWER = { lists: 'list', tables: 'position', sections: 'position', hf: 'position' };
+
+/* How long a panel may go on showing content -- a list's first few items, a
+ * table's first row -- that was read before the cursor last moved. Following
+ * the cursor needs no read, but text edited in the thing being shown does,
+ * and that read is worth making in the background rather than in the way. */
+var CTX_STALE_MS = 5000;
+var lastCtxRead = 0;
+
 function poll() {
   if (!S.data || S.busy || document.hidden) return Promise.resolve();
   // Skipped whole, not just the render: fetching here would move the
@@ -2922,6 +3041,15 @@ function poll() {
       // A read would come back byte-identical and be discarded, so moving in
       // or out of one is a reason to re-draw in its own right.
       if (activePanel === 'hf' && S.ctx.segmentKind !== kindBefore) ctxRedraw = true;
+      // The cheap answer first. When it works the panels are already right,
+      // and the read that follows only refreshes the text inside them -- so
+      // it can wait, and does not have to happen on every move of the cursor.
+      var local = resolveCtx(S.ctx);
+      if (local) {
+        if (applyResolved(local)) ctxRedraw = true;
+        if (local[CTX_ANSWER[activePanel] || 'position'] &&
+            Date.now() - lastCtxRead < CTX_STALE_MS) return null;
+      }
       return activePanel;
     }, function (e) {
       probing = false;
@@ -2939,6 +3067,7 @@ function poll() {
         : (CTX_SLICES[what] ? lastCtxObj : undefined);
       return callRead('refresh', [S.tabId, what, ctxArg]).then(function (slice) {
         lastFetchMs = Date.now() - t0;
+        lastCtxRead = Date.now();
         // A write went out while this read was in the air, so what came back
         // predates it. Drawing it would put the old value back on screen.
         if (at !== writes) return null;
@@ -3126,9 +3255,11 @@ function boot() {
     // Coming back from working in the document is when the user most wants
     // the panel current, so spend one read on it even if the cursor has not
     // moved: text edited elsewhere in the same list or table would not show
-    // otherwise.
+    // otherwise, and placing the cursor from what is already held would give
+    // the right panel with the old text in it.
     lastCtx = null;
     lastCtxObj = null;
+    lastCtxRead = 0;
     setTimeout(poll, 0);
   });
 

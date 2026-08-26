@@ -205,12 +205,20 @@ test('the second load leaves the constants behind', (t) => {
   t.ok(again.pageFormat, 'everything else still comes back');
 });
 
-test('the first load says how many sections there are, not what they hold', (t) => {
+test('the first load carries every section, and which one the cursor is in', (t) => {
+  // All of them, because a section is a handful of numbers and holding them
+  // all is what lets the sidebar follow the cursor from one to the next
+  // without reading the document again.
   const one = makeSandbox(makeDoc()).loadAll('t.0');
   t.equal(one.sectionCount, 1, 'a plain document has the one implicit section');
-  t.notOk(one.sections, 'and no section bodies ride along with it');
+  t.equal(one.sections.length, 1);
+  t.equal(one.activeSectionIndex, 0, 'and there is nowhere else the cursor can be');
+  t.equal(one.hfLinks.length, 1, 'the link state comes with them');
   const many = makeSandbox(makeSectionedDoc()).loadAll(null);
   t.equal(many.sectionCount, 3, 'a sectioned one counts its breaks');
+  t.equal(many.sections.length, 3);
+  t.equal(many.sections[0].bodyIndex, -1,
+    'the first break is the child DocumentApp does not show, so it sits before them all');
 });
 
 test('scope "all" writes every tab including nested child tabs', (t) => {
@@ -817,6 +825,36 @@ test('the table the cursor sits in is reported by its position in the body', (t)
     'the fixture has exactly one table');
 });
 
+test('the map the sidebar places a cursor with agrees with DocumentApp', (t) => {
+  // The sidebar follows the cursor without reading anything: the probe says
+  // which body child the cursor is in, and this map says which body child each
+  // table and each section break is. If the two ever counted differently, the
+  // panel would follow the cursor to the wrong thing and never notice -- so
+  // the same document is counted from both sides here and the two compared.
+  const M = makeSandbox(makeDoc());
+  const d = M.loadAll(null);
+  const body = M.__docAppBody;
+  t.equal(d.bodyChildCount, body.getNumChildren(), 'the same body, the same children');
+  t.ok(d.tables.length, 'the fixture has a table to place');
+  d.tables.forEach((tb, i) => {
+    t.equal(tb.bodyIndex, childOfType(body, 'TABLE', i).at, 'table ' + i);
+  });
+  t.equal(d.sections[0].bodyIndex, -1,
+    'and the first break is the one child DocumentApp does not show');
+});
+
+test('a later section break takes a body child of its own, and the map says which', (t) => {
+  const M = makeSandbox(makeSectionedDoc());
+  const d = M.loadAll(null);
+  const body = M.__docAppBody;
+  t.equal(d.bodyChildCount, body.getNumChildren());
+  t.ok(d.sections.length > 1, 'this fixture is the sectioned one');
+  d.sections.slice(1).forEach((sec, i) => {
+    t.equal(String(body.getChild(sec.bodyIndex).getType()), 'UNSUPPORTED',
+      'break ' + (i + 1) + ' is a child, even though DocumentApp has no name for it');
+  });
+});
+
 test('a cursor outside any table selects none', (t) => {
   const M = makeSandbox(makeDoc());
   const para = childOfType(M.__docAppBody, 'PARAGRAPH');
@@ -1109,8 +1147,9 @@ test('loadAll returns every panel\'s data plus the constants in one call', (t) =
   t.equal(d.documentTitle, 'Fixture Doc');
   t.deepEqual(d.tabs.map((tab) => tab.tabId), ['t.0', 't.1']);
   t.equal(d.namedStyles.length, 9);
-  t.equal(d.sections, undefined,
-    'sections are read when their panel opens, not at boot');
+  t.equal(d.sections.length, 1,
+    'every section, so the sections panel is right on the first paint');
+  t.ok(d.cursor, 'and where the cursor was when the sidebar opened');
   t.ok(d.lists.lists.length >= 1);
   t.ok(d.tables.length >= 1);
   t.equal(d.constants.units.length, 4);
@@ -1203,11 +1242,11 @@ test('refresh("sections") serves just the current slice', (t) => {
   const out = M.refresh('t.0', 'sections',
     { paraKind: 'p', paraHead: 'Shared heading', preferred: 0 });
   t.deepEqual(Object.keys(out).sort(),
-    ['activeSectionIndex', 'sectionCount', 'sections']);
+    ['activeSectionIndex', 'bodyChildCount', 'hfLinks', 'sectionCount', 'sections']);
   t.equal(out.sectionCount, 3);
   t.equal(out.activeSectionIndex, 1);
-  t.equal(out.sections.length, 1);
-  t.equal(out.sections[0].startIndex, 17);
+  t.equal(out.sections.length, 3, 'all of them, so the sidebar can switch without reading');
+  t.equal(out.sections[out.activeSectionIndex].startIndex, 17);
 });
 
 test('a write goes to exactly the section it names', (t) => {
@@ -1808,6 +1847,20 @@ function chainOf(...types) {
     return { getType: () => type, getParent: () => child, getText: () => TEXT_OF[type] || '' };
   }, null);
 }
+/**
+ * The probe's answer to "where is the cursor", less the body child count.
+ *
+ * Every answer carries that count, whatever the cursor is doing, because it is
+ * how the sidebar tells whether the indexes it is holding still name the same
+ * elements. It has its own test; leaving it in every other expectation would
+ * only tie each of them to how many children the fixture happens to have.
+ */
+function ctxOf(M) {
+  const out = Object.assign({}, M.cursorContext());
+  delete out.bodyChildCount;
+  return out;
+}
+
 /** What DocumentApp hands back from getSelection(): null, or range elements. */
 function selectionOf(el) {
   return el ? { getRangeElements: () => [{ getElement: () => el }] } : null;
@@ -1816,14 +1869,14 @@ function selectionOf(el) {
 test('the cursor in a list names that list, and the paragraph it sits in', (t) => {
   const M = makeSandbox(makeDoc());
   M.__selection = selectionOf(chainOf('LIST_ITEM', 'BODY_SECTION'));
-  t.deepEqual(M.cursorContext(),
+  t.deepEqual(ctxOf(M),
     { listId: 'list.X', paraKind: 'li', paraHead: 'Item one' });
 });
 
 test('the cursor in a table reports presence -- tables have no id here', (t) => {
   const M = makeSandbox(makeDoc());
   M.__selection = selectionOf(chainOf('TABLE_CELL', 'TABLE_ROW', 'TABLE', 'BODY_SECTION'));
-  t.deepEqual(M.cursorContext(), { inTable: true });
+  t.deepEqual(ctxOf(M), { inTable: true });
 });
 
 test('a paragraph inside a table cell is reported along with the table', (t) => {
@@ -1832,7 +1885,7 @@ test('a paragraph inside a table cell is reported along with the table', (t) => 
   const M = makeSandbox(makeDoc());
   M.__selection = selectionOf(
     chainOf('BODY_SECTION', 'TABLE', 'TABLE_ROW', 'TABLE_CELL', 'PARAGRAPH'));
-  t.deepEqual(M.cursorContext(),
+  t.deepEqual(ctxOf(M),
     { paraKind: 'p', paraHead: 'Body text', inTable: true });
 });
 
@@ -1842,7 +1895,7 @@ test('the probe climbs through a partial selection to the thing that holds it', 
   const textEl = { getType: () => 'TEXT', getParent: () => chainOf('LIST_ITEM') };
   const M = makeSandbox(makeDoc());
   M.__selection = selectionOf(textEl);
-  t.deepEqual(M.cursorContext(),
+  t.deepEqual(ctxOf(M),
     { listId: 'list.X', paraKind: 'li', paraHead: 'Item one' });
 });
 
@@ -1850,22 +1903,35 @@ test('with no selection, the bare cursor decides', (t) => {
   const M = makeSandbox(makeDoc());
   M.__selection = null;
   M.__cursor = { getElement: () => chainOf('LIST_ITEM') };
-  t.deepEqual(M.cursorContext(),
+  t.deepEqual(ctxOf(M),
     { listId: 'list.X', paraKind: 'li', paraHead: 'Item one' });
 });
 
 test('plain paragraphs report their text; no selection at all reports nothing', (t) => {
   const M = makeSandbox(makeDoc());
   M.__selection = selectionOf(chainOf('PARAGRAPH', 'BODY_SECTION'));
-  t.deepEqual(M.cursorContext(), { paraKind: 'p', paraHead: 'Body text' });
+  t.deepEqual(ctxOf(M), { paraKind: 'p', paraHead: 'Body text' });
   M.__selection = selectionOf(null);
-  t.deepEqual(M.cursorContext(), {}, 'no selection at all');
+  t.deepEqual(ctxOf(M), {}, 'no selection at all');
 });
 
 test('whatever goes wrong up there, the answer stays an object', (t) => {
   const M = makeSandbox(makeDoc());
   M.__selection = { getRangeElements: () => { throw new Error('no ui'); } };
-  t.deepEqual(M.cursorContext(), {});
+  t.deepEqual(ctxOf(M), {});
+});
+
+test('the probe counts the body children, so a stale map can be spotted', (t) => {
+  // The sidebar places the cursor itself, from indexes it was given at load
+  // time. Those indexes only mean what they meant while the body has the same
+  // children, and this is the one accessor call that says whether it does.
+  const M = makeSandbox(makeDoc());
+  M.__selection = selectionOf(chainOf('PARAGRAPH', 'BODY_SECTION'));
+  const n = M.__docAppBody.getNumChildren();
+  t.ok(n > 0, 'the fixture body has children');
+  t.equal(M.cursorContext().bodyChildCount, n, 'reported by the probe');
+  t.equal(M.loadAll(null, true).bodyChildCount, n,
+    'and counted the same way from the API side, which is the whole point');
 });
 
 test('the climb says when the cursor is in a header, a footer or a note', (t) => {
@@ -1890,7 +1956,7 @@ test('a list inside a header is still a list, and still in the header', (t) => {
   // on to the top, or a list item would hide the header holding it.
   const M = makeSandbox(makeDoc());
   M.__selection = selectionOf(chainOf('HEADER_SECTION', 'LIST_ITEM'));
-  t.deepEqual(M.cursorContext(),
+  t.deepEqual(ctxOf(M),
     { listId: 'list.X', paraKind: 'li', paraHead: 'Item one', segmentKind: 'header' });
 });
 
@@ -2100,12 +2166,12 @@ test('the headers panel gets its segments and its two margins in one read', (t) 
   t.equal(slice.lists, undefined, 'and nothing the panel does not show');
   t.equal(slice.sectionCount, 1, 'and which section the cursor is in, for "this section"');
   t.equal(slice.activeSectionIndex, 0);
-  t.deepEqual(slice.hfLink,
+  t.deepEqual(slice.hfLinks[slice.activeSectionIndex],
     { sectionIndex: 0, isFirst: true, ownHeader: false, ownFooter: false,
       hasHeader: true, hasFooter: true },
     'plus whether that section keeps its own, which the link buttons act on');
-  t.equal(slice.section.startIndex, 0,
-    'and the section itself, whose margins the panel shows and writes');
+  t.equal(slice.sections[slice.activeSectionIndex].startIndex, 0,
+    'and the sections themselves, whose margins the panel shows and writes');
 
   const many = makeSandbox(withThreeSections()).refresh(null, 'hf', {});
   t.deepEqual(many.hfLinks.map((L) => L.ownHeader), [false, false, true],

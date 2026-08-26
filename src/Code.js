@@ -53,12 +53,11 @@ function loadAll(tabId, haveConstants) {
   // answer is two round trips across the service boundary for one fact.
   var cur = timed_('cursor', cursorContext);
   var tables = timed_('tables', function () { return readTables(active, cur); });
-  // Only how many, not what they are: the Page panel needs to know whether its
-  // margins are the ones in force or only a default, and the Sections panel
-  // reads the section it needs on the cursor probe.
-  var sectionCount = timed_('sections', function () {
-    return sectionsScan_(ctx).sections.length;
-  });
+  // Every section, not just the one the cursor is in. A section is a handful
+  // of numbers, so all of them together cost about what one of them costs to
+  // ask for separately -- and holding all of them is what lets the sidebar
+  // follow the cursor from one section to the next without reading anything.
+  var scan = timed_('sections', function () { return sectionsScan_(ctx); });
 
   var out = {
     documentTitle: doc.title,
@@ -66,7 +65,16 @@ function loadAll(tabId, haveConstants) {
       return { tabId: t.tabId, title: t.title, depth: t.depth };
     }),
     activeTabId: active,
-    sectionCount: sectionCount,
+    // What the cursor was in when the sidebar opened, and the maps that turn
+    // its answer into a list, a table and a section. Together these are what
+    // the context panels need, so they are right on the first paint rather
+    // than one poll tick later.
+    cursor: cur,
+    bodyChildCount: bodyChildCount_(scan.elements),
+    sectionCount: scan.sections.length,
+    sections: scan.sections,
+    activeSectionIndex: pickSection_(scan.sections, scan.elements, cur),
+    hfLinks: hfLinks_(scan.sections),
     pageFormat: timed_('page', function () { return readPageFormat(active); }),
     namedStyles: timed_('styles', function () { return readNamedStyles(active).styles; }),
     segments: timed_('segments', function () { return readSegments(active); }),
@@ -123,17 +131,23 @@ function refresh(tabId, what, ctx) {
     return { presets: listPresets(), stylePresets: listStylePresets() };
   }
   var out = {};
+  // Every slice below reads the document, and every one of them describes it
+  // by position. This is the measure that says whether those positions still
+  // mean what they meant -- sent with all of them, so whichever slice the
+  // sidebar asked for leaves it able to place the cursor itself.
+  out.bodyChildCount = bodyChildCount_(
+    ((resolveTab_(fetchDoc_(), tabId).content.body) || {}).content);
   if (!what || what === 'page') out.pageFormat = readPageFormat(tabId);
   if (!what || what === 'styles') out.namedStyles = readNamedStyles(tabId).styles;
   if (what === 'sections') {
-    // The one section the cursor is in. `ctx` is the cursorContext answer the
-    // sidebar probed a moment ago; without a usable one the panel falls back
-    // to the section it was last showing.
+    // Every section, and which one the cursor is in. `ctx` is the
+    // cursorContext answer the sidebar probed a moment ago; without a usable
+    // one the panel falls back to the section it was last showing.
     var scan = sectionsScan_(resolveTab_(fetchDoc_(), tabId));
-    var at = pickSection_(scan.sections, scan.elements, ctx || {});
-    out.sections = at >= 0 ? [scan.sections[at]] : [];
-    out.activeSectionIndex = at;
+    out.sections = scan.sections;
+    out.activeSectionIndex = pickSection_(scan.sections, scan.elements, ctx || {});
     out.sectionCount = scan.sections.length;
+    out.hfLinks = hfLinks_(scan.sections);
   } else if (!what) {
     out.sections = readSections(tabId).sections;
   }
@@ -147,23 +161,11 @@ function refresh(tabId, what, ctx) {
     var hf = sectionsScan_(resolveTab_(fetchDoc_(), tabId));
     out.activeSectionIndex = pickSection_(hf.sections, hf.elements, ctx || {});
     out.sectionCount = hf.sections.length;
-    // Whether each section keeps its own header and footer or continues the
-    // one before it, which is what the link buttons act on -- every section,
-    // because the panel offers to do it to all of them at once. The section
-    // itself comes back too: its header and footer margins are the ones the
-    // panel shows, and writing them needs its start index.
-    out.hfLinks = hf.sections.map(function (s, i) {
-      return {
-        sectionIndex: i,
-        isFirst: s.isFirst,
-        ownHeader: s.ownHeaderIds.length > 0,
-        ownFooter: s.ownFooterIds.length > 0,
-        hasHeader: !!s.headerId,
-        hasFooter: !!s.footerId
-      };
-    });
-    out.hfLink = out.hfLinks[out.activeSectionIndex] || null;
-    out.section = hf.sections[out.activeSectionIndex] || null;
+    // The sections themselves come back too: their header and footer margins
+    // are what the panel shows, writing them needs a start index, and holding
+    // all of them is what lets the sidebar follow the cursor with no read.
+    out.sections = hf.sections;
+    out.hfLinks = hfLinks_(hf.sections);
   }
   if (!what || what === 'lists') out.lists = readLists(tabId, ctx);
   if (!what || what === 'segments') out.segments = readSegments(tabId);
@@ -211,6 +213,11 @@ function cursorContext() {
   try {
     var doc = DocumentApp.getActiveDocument();
     if (!doc) return out;
+    // How many children the body has, which is one accessor call and is what
+    // tells the sidebar whether the indexes it is holding still name the same
+    // elements. Anything added or removed at the top level moves this.
+    var body = doc.getBody();
+    if (body && body.getNumChildren) out.bodyChildCount = body.getNumChildren();
     var el = null;
     var sel = doc.getSelection();
     if (sel && sel.getRangeElements && sel.getRangeElements().length) {

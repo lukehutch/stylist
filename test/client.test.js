@@ -400,11 +400,15 @@ module.exports = ({ suite, test }) => {
   test('a panel with nothing to show says where to put the cursor', (t) => {
     // Not "this document has no tables": whether there is one is something
     // the reader can see, and what to do about it is not.
-    ['list', 'table', 'section'].forEach((what) => {
+    ['list', 'table'].forEach((what) => {
       t.match(clientJs,
         new RegExp('Click inside a ' + what + ' in the document to edit it here'),
         what);
     });
+    // Sections get no such line, because a document is never without one: the
+    // body is a single section until a break splits it, so the cursor is
+    // always in one and there is nothing to invite.
+    t.notOk(/Click inside a section/.test(clientJs));
     t.notOk(/has no tables/.test(clientJs));
     t.notOk(/has no lists/.test(clientJs));
     t.notOk(/No section breaks/.test(clientJs));
@@ -623,7 +627,7 @@ module.exports = ({ suite, test }) => {
     t.match(fn, /Add a ' \+ kind/, 'and a document with none can get one');
     const set = /function setLink\([^]*?\n}/.exec(clientJs)[0];
     t.match(set, /'setSegmentLink'/);
-    t.match(set, /sectionIndex: \(S\.data\.hfLink \|\| \{\}\)\.sectionIndex/);
+    t.match(set, /sectionIndex: \(activeHfLink\(\) \|\| \{\}\)\.sectionIndex/);
   });
 
   test('the first section is offered nothing, rather than an explanation', (t) => {
@@ -829,6 +833,28 @@ module.exports = ({ suite, test }) => {
     t.match(fn, /lastFetchMs = Date\.now\(\) - t0/);
   });
 
+  test('the cursor is placed from what is held, and only then read for', (t) => {
+    // The probe answers in milliseconds; a content read on a long document
+    // takes seconds. So the panels are put right from the maps the payload
+    // carries first, and the read that follows only refreshes the text inside
+    // them -- which is why it can wait, and does not happen on every move.
+    const fn = /function poll\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /var local = resolveCtx\(S\.ctx\);/);
+    t.match(fn, /if \(applyResolved\(local\)\) ctxRedraw = true;/);
+    t.match(fn, /Date\.now\(\) - lastCtxRead < CTX_STALE_MS\) return null;/,
+      'a recent read means there is nothing left to ask for');
+    t.match(clientJs, /lastCtxRead = 0;/,
+      'and coming back from the document forces one anyway');
+  });
+
+  test('the first paint already knows where the cursor is', (t) => {
+    // Asking on the load and again on the first poll tick would be two reads
+    // to learn one thing, and would leave the panels a tick behind on open.
+    const fn = /function reload\(\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(fn, /if \(data\.cursor\) \{[^]*?lastCtx = JSON\.stringify\(data\.cursor\);/);
+    t.match(fn, /lastCtxRead = Date\.now\(\);/);
+  });
+
   test('the next read is scheduled only once the last one has finished', (t) => {
     t.match(clientJs, /function tick\(\) \{ poll\(\)\.then\(schedule\); \}/);
   });
@@ -844,6 +870,79 @@ module.exports = ({ suite, test }) => {
     }).join('\n');
     return eval('(function () {\n' + src + '\n' + tail + '\n})()');   // eslint-disable-line no-eval
   };
+
+  /* Where the cursor is, worked out from what the sidebar already holds. This
+     is the whole of the speed story -- on a document big enough for a read to
+     take ten seconds, following the cursor still costs nothing -- so it is run
+     rather than read. */
+  const resolver = (data) => evalFromClient(
+    ['resolveCtx'],
+    'var S = { data: ' + JSON.stringify(data) + ' };\nreturn resolveCtx;');
+
+  const MAP = {
+    bodyChildCount: 10,
+    lists: { lists: [{ listId: 'list.A' }, { listId: 'list.B' }], activeListId: null },
+    tables: [{ bodyIndex: 3 }, { bodyIndex: 7 }],
+    sections: [{ bodyIndex: -1 }, { bodyIndex: 5 }],
+    activeSectionIndex: 0
+  };
+
+  test('a list is placed by its own id, so editing elsewhere cannot move it', (t) => {
+    const r = resolver(MAP);
+    t.deepEqual(r({ listId: 'list.B', bodyChildCount: 10 }),
+      { list: true, position: true, activeListId: 'list.B', activeTableIndex: null },
+      'a known list, and no body path to place');
+    t.equal(r({ bodyChildCount: 10 }).activeListId, null,
+      'out of every list, which is also an answer');
+    t.equal(r({ listId: 'list.NEW', bodyChildCount: 10 }).list, false,
+      'a list made since the load has to be read for');
+  });
+
+  test('a table is placed by the body child it sits at', (t) => {
+    const r = resolver(MAP);
+    const at = (i, inTable) => r({
+      root: 'body', path: [i], bodyChildCount: 10, inTable: inTable || undefined
+    });
+    t.equal(at(7, true).activeTableIndex, 1, 'the second table');
+    t.equal(at(3, true).activeTableIndex, 0);
+    t.equal(at(4, false).activeTableIndex, null, 'between them is not in one');
+    t.equal(at(4, false).position, true);
+  });
+
+  test('a section is the last break at or before the cursor', (t) => {
+    const r = resolver(MAP);
+    const at = (i) => r({ root: 'body', path: [i], bodyChildCount: 10 }).activeSectionIndex;
+    t.equal(at(0), 0, 'the first break is the one DocumentApp does not show');
+    t.equal(at(4), 0);
+    t.equal(at(5), 1, 'the break itself belongs to the section it opens');
+    t.equal(at(9), 1);
+  });
+
+  test('the sidebar refuses to place a cursor against a map it has outgrown', (t) => {
+    // Every one of these means a top-level child was added or removed since
+    // the payload was built, so the indexes in it no longer name the same
+    // elements. Answering anyway would show the wrong table or the wrong
+    // section and never correct itself, because nothing else reads.
+    const r = resolver(MAP);
+    t.equal(r({ root: 'body', path: [3], bodyChildCount: 11, inTable: true }).position, false,
+      'a child added or removed');
+    t.equal(r({ root: 'body', path: [3], bodyChildCount: 10 }).position, false,
+      'the map says table, the probe says it climbed out of none');
+    t.equal(r({ root: 'body', path: [4], bodyChildCount: 10, inTable: true }).position, false,
+      'and the other way round');
+    t.equal(r({ root: 'body', path: [3], bodyChildCount: 11, inTable: true }).list, true,
+      'the list half still answers: it never depended on any of this');
+  });
+
+  test('outside the body nothing moves, and nothing is read for', (t) => {
+    const r = resolver(MAP);
+    ['header', 'footer', 'footnote'].forEach((root) => {
+      const out = r({ root: root, path: [1], bodyChildCount: 10, listId: 'list.A' });
+      t.equal(out.position, true, root + ' needs no read');
+      t.equal(out.activeTableIndex, null, 'and is in no table of the body');
+      t.equal(out.activeSectionIndex, undefined, 'the section on screen stays put');
+    });
+  });
 
   test('the wait is the read cost times twenty, clamped to one and five seconds', (t) => {
     const delay = evalFromClient(
@@ -2151,15 +2250,17 @@ module.exports = ({ suite, test }) => {
 
   test('the sections panel shows one section -- the one the cursor is in', (t) => {
     const fn = /function renderSections\(\)[^]*?\n}/.exec(clientJs)[0];
-    t.match(fn, /Click inside a section in the document to edit it here/);
     t.notOk(/secs\.forEach/.test(fn), 'no row per section');
     t.match(fn, /'Section ' \+ \(at \+ 1\) \+ \(total > 1 \? ' of ' \+ total : ''\)/,
       'the row itself says which of the sections is being edited');
     t.notOk(/Click inside a different section to switch/.test(fn),
-      'and does not repeat what the empty state already taught');
-    t.match(fn, /sectionBody\(secs\[0\]\)/,
-      'the slice already holds only the current section');
-    t.match(fn, /if \(S\.all\.sections\) \{[^]*?sectionBody\(secs\[0\]\)/,
+      'and does not lecture about how to change which one');
+    // The payload holds every section now, so which one is shown is an index
+    // into it -- that is what lets the cursor move from one to the next
+    // without reading anything.
+    t.match(fn, /var sec = secs\[at\];/);
+    t.match(fn, /sectionBody\(sec\)/);
+    t.match(fn, /if \(S\.all\.sections\) \{[^]*?sectionBody\(sec\)/,
       'apply-to-all swaps the cursor scope for every-section-at-once');
   });
 
