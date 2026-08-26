@@ -285,10 +285,69 @@ permanent execution surface on the add-on, and shipping one for the sake of a
 test suite is the wrong trade for something published to the Marketplace.
 Take it out of `src/appsscript.json` before publishing.
 
-The other error worth recognising is *"Unable to run script function. Please
-make sure you have permission to run the script function."* That is step 3: the
-token was minted by an OAuth client that does not live in the script's Cloud
-project, or does not carry the script's scopes.
+### When the live suite will not run
+
+Both of the errors below have the same cause — the `live` token does not hold
+the merged scope set — and both mean step 3 did not take, however it looked at
+the time.
+
+| Error | From |
+|---|---|
+| `Request had insufficient authentication scopes.` | the `clasp push` the runner does first: the token lacks `script.projects` |
+| `Unable to run script function. Please make sure you have permission to run the script function.` | the `run-function` that follows: clasp always passes `devMode: true`, which asks Google to confirm you can edit the script, and the token has no Drive scope to confirm it with |
+
+**Check what the token actually holds before believing it.** clasp does not
+record scopes in `~/.clasprc.json`, so a login that appeared to succeed proves
+nothing. Ask Google instead — this refreshes the stored token and prints the
+scopes the grant really carries:
+
+```bash
+python3 -c '
+import json, os, urllib.parse, urllib.request
+t = json.load(open(os.path.expanduser("~/.clasprc.json")))["tokens"]["live"]
+b = urllib.parse.urlencode({"client_id": t["client_id"],
+    "client_secret": t["client_secret"], "refresh_token": t["refresh_token"],
+    "grant_type": "refresh_token"}).encode()
+r = json.load(urllib.request.urlopen("https://oauth2.googleapis.com/token", b))
+print("\n".join(sorted(r["scope"].split())))'
+```
+
+Eleven lines is a working token. Two — just `documents` and
+`script.container.ui` — is the login having silently not taken.
+
+**Two things make that easy to miss.** `~/.clasprc.json` is written only on
+success, so a login that fails in the browser leaves the *previous* token in
+place and the command behaves much as it did before; compare the file's mtime
+against when you think you logged in. And clasp prints `Warning: You seem to
+already be logged in.` but carries on regardless, so that warning is not the
+reason it failed.
+
+**Watch the scope list it prints.** Given `--use-project-scopes` or
+`--extra-scopes`, clasp prints `Authorizing with the following scopes:` and the
+full list *before* opening the browser. If that list is two lines long, the
+flags did not take effect and there is no point continuing to the browser.
+
+**If the browser flow returns a 500**, the usual cause is that the scopes being
+requested are not registered on the consent screen. Go to **Google Auth
+Platform → Data Access → Add or remove scopes** and add the nine clasp scopes
+alongside the two of Stylist's, then retry. Failing that, in order:
+`clasp logout --user live` first; `--redirect-port 8080` if something else
+holds the default port; `--no-localhost` to paste the code by hand; and an
+incognito window, since being signed in to several Google accounts at once
+confuses the flow.
+
+**A route that avoids `--use-project-scopes` altogether.** `--extra-scopes`
+merges into clasp's defaults unconditionally, without reading the manifest, so
+this asks for exactly the same eleven scopes by a different code path:
+
+```bash
+clasp login --user live --creds client_secret.json --extra-scopes \
+  https://www.googleapis.com/auth/documents,https://www.googleapis.com/auth/script.container.ui
+```
+
+Worth trying if the two-switch form keeps failing. Keep the list in step with
+`src/appsscript.json` by hand, which is the one thing `--use-project-scopes`
+would have done for you.
 
 What `src/LiveTests.js` checks, in order: the Docs advanced service is actually
 enabled; `Docs.Documents.get` returns this document; tab resolution works on it
