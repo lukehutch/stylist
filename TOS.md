@@ -68,7 +68,48 @@ limitations above apply to the fullest extent the law there allows, and no
 further; nothing here is intended to exclude any liability that cannot lawfully
 be excluded.
 
-## 5. Google's services are not the developer's
+## 5. Release and waiver of claims
+
+**To the maximum extent permitted by applicable law, you release the developer
+from, and waive, every claim, demand, action, cause of action, and right to sue
+that you have or may have arising out of or in connection with Stylist or your
+use of it**, whether known or unknown, whether presently existing or arising in
+the future, and whether founded in contract, tort, negligence, strict
+liability, statute, or any other theory.
+
+You agree that you will not bring, join, or participate in any proceeding
+against the developer on any such claim, and that this section may be pleaded
+as a complete bar to any such proceeding.
+
+Where the law of your jurisdiction preserves rights that a release like this
+cannot lawfully extinguish — including, in some places, unknown claims,
+liability for gross negligence or willful misconduct, and rights granted to
+consumers by statute — this section does not purport to waive them, and applies
+only as far as the law there allows.
+
+## 6. Indemnification
+
+**You agree to indemnify, defend, and hold harmless the developer** from and
+against any and all claims, demands, proceedings, losses, liabilities, damages,
+judgments, settlements, costs and expenses — including reasonable legal fees —
+brought by or owed to any third party and arising out of or in connection with:
+
+- your use of Stylist;
+- any document you create, modify, distribute, or publish with Stylist's help;
+- your breach of these terms;
+- your violation of any law, or of the rights of any other person; or
+- your violation of your agreements with Google, or of any other third party's
+  terms.
+
+The developer will notify you of any claim to which this section applies, and
+may participate in its defense at the developer's own expense. You will not
+settle any such claim in a way that imposes any obligation or admission on the
+developer without the developer's prior written consent.
+
+This obligation applies to the maximum extent permitted by applicable law, and
+survives your ceasing to use Stylist and any termination of these terms.
+
+## 7. Google's services are not the developer's
 
 Stylist runs inside Google Docs, on Google's Apps Script platform, on documents
 stored by Google. Your use of those services is governed by your agreements
@@ -76,13 +117,13 @@ with Google, not by these terms, and the developer has no control over them and
 no responsibility for them. Should Google change or withdraw any of them,
 Stylist may stop working, with no obligation on the developer to repair it.
 
-## 6. Your data
+## 8. Your data
 
 Stylist collects and transmits no user data. What it does with the document you
 open it in, and with the presets you save, is described in the
 [privacy policy](PRIVACY.md).
 
-## 7. Support, and no obligation to provide it
+## 9. Support, and no obligation to provide it
 
 Stylist is a personal project. The developer is under no obligation to provide
 support, to fix any defect, to accept any change, or to continue developing or
@@ -90,13 +131,13 @@ publishing Stylist. Reports and questions are welcome at the project's
 [issue tracker](https://github.com/lukehutch/stylist/issues), with no
 undertaking that any of them will be answered or acted on.
 
-## 8. Changes to these terms
+## 10. Changes to these terms
 
 These terms may change. Any change will be committed to the project's public
 repository, where its full history is visible. Continuing to use Stylist after
 a change means you accept the terms as they then stand.
 
-## 9. The license still governs the code
+## 11. The license still governs the code
 
 Your rights to use, copy, modify, and redistribute Stylist's source code come
 from the [MIT license](LICENSE), which these terms do not narrow. Where these
