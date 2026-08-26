@@ -267,10 +267,18 @@ function applyBulletPreset(payload) {
  * second round trip to Apps Script -- and the round trip, not the document
  * read inside it, is most of the wait. batchUpdate_ has already dropped the
  * document cache, so the read here sees the write that just landed.
+ *
+ * The cursor is asked for as well, and the answer is the whole of what
+ * refresh('lists') would have said. Without it the reading names no active
+ * list, so the panel would lose the list you are editing the moment you
+ * changed a marker on it, and would only find it again on the next read --
+ * the second reading of the document this function exists to avoid.
  */
 function withLists_(tabId, result) {
   result = result || {};
-  result.lists = readLists(tabId);
+  var slice = refresh(tabId, 'lists', cursorContext());
+  result.bodyChildCount = slice.bodyChildCount;
+  result.lists = slice.lists;
   return result;
 }
 

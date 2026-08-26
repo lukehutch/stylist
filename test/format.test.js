@@ -1756,6 +1756,23 @@ test('a marker write answers with the lists as they now are', (t) => {
   t.ok(out2.lists, 'and so does setting a marker');
 });
 
+/* The panel shows the list the cursor is in. The write used to answer without
+   the cursor, so its reading named no active list: changing a marker emptied
+   the panel, and it took a second reading of the document to bring it back --
+   the very round trip answering with the reading was meant to save. */
+test('the reading a marker write answers with is the one the panel asked for', (t) => {
+  const M = multi();
+  const out = M.removeBullets({ tabId: 't.0', listId: 'list.2', level: 1 });
+  const slice = M.refresh('t.0', 'lists');
+  t.deepEqual(Object.keys(out).filter((k) => k in slice).sort(),
+    Object.keys(slice).sort(),
+    'every field refresh(\'lists\') answers with is on the write too');
+  t.equal(out.bodyChildCount, slice.bodyChildCount,
+    'including the count the sidebar checks its map against');
+  t.ok('activeListId' in out.lists,
+    'and the reading was made with the cursor, so it names an active list');
+});
+
 /* ------------------------------------------------------------------ */
 suite('Metadata reads that never touch the body');
 
