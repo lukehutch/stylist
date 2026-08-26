@@ -112,9 +112,28 @@ font it names.
 
 That request is made by your browser, contains no information about you or your
 document, and is subsetted to the letters that can appear in a font name. Like
-any web request it is visible to Google, whose servers are already hosting the
-add-on and the document. It is governed by
+any web request, it discloses your IP address and browser version to the server
+answering it — here, Google, whose servers are already hosting the add-on, the
+sidebar, and the document itself, under the Google account you are signed in to
+at the time. It is governed by
 [Google's privacy policy](https://policies.google.com/privacy).
+
+**In plain terms about the law here.** Under the GDPR an IP address counts as
+personal data, and a German court held in 2022 that loading fonts from Google's
+servers without consent was an unlawful transfer. That decision concerned an
+ordinary public website, where a visitor who has no relationship with Google is
+exposed to it unawares. Stylist's sidebar is a different situation: it runs
+inside Google Docs, in a document Google is already storing, served by Google
+from Google's own servers, to a browser already signed in to Google. Google
+learns nothing from the font request that it does not already have.
+
+The developer's view is therefore that this is disclosed rather than hidden,
+and harmless in context — but that is a judgment, not a ruling, and you are
+entitled to disagree with it. There is at present no way to switch the font
+request off while still using Stylist. If this matters to you, please
+[say so on the issue tracker](https://github.com/lukehutch/stylist/issues): the
+fonts can be bundled with the add-on instead, and the request removed
+altogether.
 
 Stylist makes no other network request of any kind. It contains no
 `UrlFetchApp` call — the only way Apps Script code can reach the internet — so
@@ -131,6 +150,71 @@ Stylist is installed. Stylist runs on Google's Apps Script platform, inside
 your account. Google's handling of your data is covered by
 [Google's privacy policy](https://policies.google.com/privacy) and is outside
 Stylist's control.
+
+## Your rights under the GDPR and similar laws
+
+This section is here because privacy law requires a notice to contain certain
+things whether or not they apply. In Stylist's case almost none of them apply,
+and it is worth saying why rather than filling the space with boilerplate.
+
+**Who is responsible for your data.** For the contents of your documents and
+for your saved presets, **you are** — or, if you are using a work account, your
+employer. Stylist runs entirely inside your own Google account, under your own
+Google login. The developer operates no server, receives no copy of anything,
+and has no technical means of access. In the GDPR's terms the developer is not
+a controller or a processor of that data, because none of it is ever
+transmitted to or processed by the developer. Google acts as your provider for
+Docs and Apps Script, under your agreement with Google.
+
+The single exception is the font stylesheet described above, which is a request
+your browser makes to Google because Stylist's code asks it to. The developer
+chose to include it, and so may be treated as a controller for that one narrow
+transfer of your IP address to Google. It is described in full in that section,
+and nothing about you or your documents travels with it.
+
+**The information a notice is required to state:**
+
+| Required | For Stylist |
+|---|---|
+| Identity and contact details of the controller | Luke Hutchison, via [the issue tracker](https://github.com/lukehutch/stylist/issues) |
+| Contact details of a data protection officer | None. One is required only of public authorities and of organizations carrying out large-scale monitoring or processing of special-category data; Stylist does none of those. |
+| Purposes of processing | To display and apply the formatting of the document you have open, and to store the presets you choose to save. Nothing else. |
+| Legal basis | Article 6(1)(b) — performing the task you asked for, which is the entire reason you installed it. For the font request, your consent, which you give by installing and opening the sidebar. |
+| Legitimate interests, where relied on | None are relied on. |
+| Recipients of the data | None. Nothing is disclosed to anyone. The developer is not a recipient. |
+| Transfers outside the EEA or UK | None by Stylist. Where Google stores your documents is a matter between you and Google. The font request goes to Google's servers, which may be outside the EEA, under Google's own safeguards. |
+| How long data is kept | Document content is not kept at all — it is read, displayed, and discarded when the execution finishes. Presets are kept until you delete them or uninstall the add-on. |
+| Right of access, rectification, erasure, restriction, objection, portability | See below. |
+| Right to withdraw consent | Uninstall the add-on, or revoke it at [your Google account's third-party access page](https://myaccount.google.com/permissions). Both take effect immediately. |
+| Right to complain to a supervisory authority | You may lodge a complaint with the data protection authority of the country you live or work in, whether or not you raise the matter with the developer first. |
+| Whether providing data is required | Nothing is required of you. Stylist asks for no information about you at any point — no name, no email, no account, no sign-up. |
+| Automated decision-making or profiling | None. Stylist makes no decisions about you and builds no profile of you. |
+
+**Exercising your rights, in practice.** Because the developer holds nothing,
+there is nobody to send a data subject request to, and every one of these
+rights is something you can already exercise yourself, immediately:
+
+- **Access and portability** — the Presets tab's **Download** button writes
+  everything Stylist has stored for you to a JSON file, which is a portable,
+  machine-readable format. Your documents are yours in Google Docs.
+- **Rectification** — edit any preset in place, or rename it.
+- **Erasure** — delete presets individually in the Presets tab, or uninstall
+  the add-on, which has Google discard the script's stored data for your
+  account.
+- **Restriction and objection** — close the sidebar, or uninstall. Stylist does
+  nothing at all when it is not open.
+
+If you believe something here is wrong or incomplete, please
+[open an issue](https://github.com/lukehutch/stylist/issues); it will be
+corrected.
+
+**Children.** Stylist is not directed at children and collects no information
+from anyone, of any age.
+
+**California and other US states.** Stylist sells no personal information,
+shares none for advertising, and collects none, so there is nothing to opt out
+of. The developer is in any case far below every threshold that makes an
+operator a "business" under the CCPA.
 
 ## Limited Use
 

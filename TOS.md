@@ -109,7 +109,23 @@ developer without the developer's prior written consent.
 This obligation applies to the maximum extent permitted by applicable law, and
 survives your ceasing to use Stylist and any termination of these terms.
 
-## 7. Google's services are not the developer's
+## 7. Your statutory rights are unaffected
+
+Nothing in these terms — and in particular nothing in sections 4, 5 and 6 —
+takes away any right you have under law that cannot lawfully be taken away.
+
+If you are a consumer, the consumer protection law of the country you live in
+applies to you in full, whatever these terms say. If you are in the European
+Economic Area or the United Kingdom, your rights under the GDPR are likewise
+untouched: **the release in section 5 and the indemnity in section 6 do not
+apply to data protection rights, and do not waive your right to lodge a
+complaint with a supervisory authority.** Where any term here would conflict
+with such a right, that term does not apply, and the rest stands.
+
+How Stylist handles data, and the fact that it holds none of yours, is set out
+in the [privacy policy](PRIVACY.md).
+
+## 8. Google's services are not the developer's
 
 Stylist runs inside Google Docs, on Google's Apps Script platform, on documents
 stored by Google. Your use of those services is governed by your agreements
@@ -117,13 +133,13 @@ with Google, not by these terms, and the developer has no control over them and
 no responsibility for them. Should Google change or withdraw any of them,
 Stylist may stop working, with no obligation on the developer to repair it.
 
-## 8. Your data
+## 9. Your data
 
 Stylist collects and transmits no user data. What it does with the document you
 open it in, and with the presets you save, is described in the
 [privacy policy](PRIVACY.md).
 
-## 9. Support, and no obligation to provide it
+## 10. Support, and no obligation to provide it
 
 Stylist is a personal project. The developer is under no obligation to provide
 support, to fix any defect, to accept any change, or to continue developing or
@@ -131,14 +147,25 @@ publishing Stylist. Reports and questions are welcome at the project's
 [issue tracker](https://github.com/lukehutch/stylist/issues), with no
 undertaking that any of them will be answered or acted on.
 
-## 10. Changes to these terms
+## 11. Changes to these terms
 
 These terms may change. Any change will be committed to the project's public
 repository, where its full history is visible. Continuing to use Stylist after
 a change means you accept the terms as they then stand.
 
-## 11. The license still governs the code
+## 12. The license still governs the code
 
 Your rights to use, copy, modify, and redistribute Stylist's source code come
 from the [MIT license](LICENSE), which these terms do not narrow. Where these
 terms and that license conflict as to the code, the license governs.
+
+## 13. Governing law
+
+These terms are governed by the laws of `<JURISDICTION>`, without regard to its
+conflict of law rules. *(To be completed before publication — this should be
+where the developer is resident.)*
+
+If you are a consumer resident in the European Economic Area, the United
+Kingdom, or anywhere else whose law gives you the right to the protection of
+your own country's mandatory rules and to bring proceedings in your own
+country's courts, that right is unaffected by this section, and you keep it.
