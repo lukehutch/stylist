@@ -21,6 +21,45 @@ const { applyRequests } = require('./apply');
 
 const ROOT = path.join(__dirname, '..');
 
+/**
+ * A response cut down to a field mask, the way the API cuts one down.
+ *
+ * The metadata poll's whole point is that it does not read the body, and
+ * without this the mock hands back the entire document however small the
+ * mask -- so a mask that had stopped working, or that named a path the API
+ * does not have, would go on looking fine offline while the poll got slower
+ * and slower on a real document.
+ *
+ * Paths are dotted and comma-separated, exactly as the API takes them. A
+ * path naming a repeated field descends into every element of it, which is
+ * what makes `tabs.tabProperties` mean "the properties of each tab". A path
+ * with nothing under it keeps the whole subtree beneath it.
+ */
+function project(doc, fields) {
+  if (!fields) return doc;
+  const tree = {};
+  String(fields).split(',').forEach((path) => {
+    const parts = path.trim().split('.').filter(Boolean);
+    let node = tree;
+    parts.forEach((part) => {
+      if (!node[part]) node[part] = {};
+      node = node[part];
+    });
+  });
+  return prune(doc, tree);
+}
+
+function prune(value, tree) {
+  if (!Object.keys(tree).length) return value;
+  if (Array.isArray(value)) return value.map((v) => prune(v, tree));
+  if (value === null || typeof value !== 'object') return value;
+  const out = {};
+  Object.keys(tree).forEach((k) => {
+    if (k in value) out[k] = prune(value[k], tree[k]);
+  });
+  return out;
+}
+
 function makeSandbox(doc, opts) {
   opts = opts || {};
   const captured = [];
@@ -66,7 +105,10 @@ function makeSandbox(doc, opts) {
   // One document that writes actually change, so a test can write a value
   // and read it back the way a user would. `doc` itself is left alone.
   const live = JSON.parse(JSON.stringify(doc));
-  const docsGet = opts.docsGet || (() => { counts.get++; return shape(live); });
+  const docsGet = opts.docsGet || ((id, args) => {
+    counts.get++;
+    return project(shape(live), (args || {}).fields);
+  });
   const Docs = {
     Documents: {
       get: docsGet,

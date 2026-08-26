@@ -243,6 +243,33 @@ test('a 2.54cm margin equals the same 72pt', (t) => {
   t.near(allRequests(S)[0].updateDocumentStyle.documentStyle.marginLeft.magnitude, 72, 1e-6);
 });
 
+/**
+ * Both of these get their own sandbox: a page size that lands really does
+ * change the document, and every other test here reads the shared one.
+ *
+ * pageSize is one message, and the mask names the whole of it -- so a caller
+ * that sets only the width is not asking to leave the height alone, it is
+ * sending a null where a Dimension belongs, and the API refuses the batch.
+ * The sidebar always sends the pair; an imported file or a caller doing the
+ * obvious thing might not.
+ */
+test('a page size given only a width keeps the height the document has', (t) => {
+  const H = makeSandbox(makeDoc());
+  H.writePageFormat({ pageWidthPt: 400 });
+  const size = allRequests(H)[0].updateDocumentStyle.documentStyle.pageSize;
+  t.deepEqual(size.width, { magnitude: 400, unit: 'PT' }, 'the width is what was asked for');
+  t.deepEqual(size.height, { magnitude: 792, unit: 'PT' },
+    'and the height comes from the document rather than being null');
+});
+
+test('a page size given only a height keeps the width the same way', (t) => {
+  const W = makeSandbox(makeDoc());
+  W.writePageFormat({ pageHeightPt: 1008 });
+  const size = allRequests(W)[0].updateDocumentStyle.documentStyle.pageSize;
+  t.deepEqual(size.width, { magnitude: 612, unit: 'PT' }, 'the width is the document\'s');
+  t.deepEqual(size.height, { magnitude: 1008, unit: 'PT' }, 'the height is what was asked for');
+});
+
 test('a page background colour is sent as an opaque OptionalColor', (t) => {
   S.__reset();
   S.writePageFormat({ backgroundColor: '#ff0000' });
@@ -1208,6 +1235,23 @@ test('page-break-before is stripped from footnote, header and footer writes', (t
   });
 });
 
+/**
+ * And when the page break was the only thing asked for, stripping it empties
+ * the request -- at which point the write returns early. It used to return
+ * early without the warning too, so the one case where the user gets no
+ * effect whatsoever was also the one case where nobody told them why.
+ */
+test('a header write that was only a page break still says it was dropped', (t) => {
+  S.__reset();
+  const res = S.writeSegmentStyle({
+    tabId: 't.0', target: 'headers', paragraphStyle: { pageBreakBefore: true }
+  });
+  t.equal(res.applied, 0, 'there is nothing left to send');
+  t.equal(allRequests(S).length, 0, 'and nothing should have gone out');
+  t.ok(res.warnings.some((w) => /page-break-before/i.test(w)),
+    'but the user must still be told the setting was ignored');
+});
+
 test('page-break-before survives a body write', (t) => {
   S.__reset();
   S.writeSegmentStyle({ tabId: 't.0', target: 'body', paragraphStyle: { pageBreakBefore: true } });
@@ -1454,15 +1498,20 @@ test('the live suite passes against the mocked services', (t) => {
   // wrote, and a live test that reads the document back would be reading
   // their leavings rather than the fixture.
   const run = makeSandbox(makeLiveLikeDoc()).gappRun();
-  // All but the first suite, which builds the scratch document. Its whole
-  // subject is a write having landed, and this sandbox's batchUpdate records
-  // requests without applying them, so there is nothing here it could pass
-  // against. What it does issue is checked below instead.
+  // Two suites are content edits from end to end -- one builds the scratch
+  // document, the other rewrites footnotes into paragraphs -- and a content
+  // edit moves every index after it, which is the one thing this sandbox
+  // records without applying (see test/apply.js). Neither has anything here
+  // it could pass against. What the fixture build issues is checked below
+  // instead; the footnote conversion is the live suite's alone.
+  const CANNOT_RUN_LOCALLY = ['The document under test', 'Footnotes rewritten for good'];
   const failed = run.results
-    .filter((r) => !r.ok && r.suite !== 'The document under test')
+    .filter((r) => !r.ok && CANNOT_RUN_LOCALLY.indexOf(r.suite) === -1)
     .map((r) => r.name + ': ' + r.error);
   t.deepEqual(failed, [], 'live tests failing locally');
-  t.equal(run.failed, 1, 'and only the fixture build, for want of a real document');
+  t.ok(run.results.length > 60,
+    'the live suite barely ran: ' + run.results.length + ' test(s)');
+  t.ok(run.failed > 0, 'the suites that need a real document should still fail here');
 });
 
 /**
@@ -1512,7 +1561,10 @@ test('the scratch document is made only when there is not one already', (t) => {
 });
 
 test('its report is TAP, so live mode can read it back', (t) => {
-  const tap = S.gappTap(S.gappRun());
+  // Its own sandbox: running the live suite runs its writes, and one of them
+  // takes the markers off a list for good. On the shared document that would
+  // leave every list test after it reading a document with no lists in it.
+  const tap = (() => { const sb = makeSandbox(makeLiveLikeDoc()); return sb.gappTap(sb.gappRun()); })();
   t.match(tap.split('\n')[0], /^TAP version 13$/);
   t.match(tap, /# pass \d+/);
 });

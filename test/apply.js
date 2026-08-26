@@ -13,13 +13,15 @@
  * a read-back test fails locally instead of the change quietly not happening
  * in someone's document.
  *
- * WHAT THIS IS NOT. It handles the six style updates and nothing else.
- * Content edits -- insertText, deleteContentRange, createFootnote,
- * insertTable, createParagraphBullets and the rest -- move every index in
- * the document after them, and reproducing that faithfully is reproducing
- * Google Docs. Those are recorded and ignored here, and stay the live
- * suite's job. Requests this does not know are not errors; they are simply
- * not applied, so a test that needs one has to be a live test.
+ * WHAT THIS IS NOT. It handles the style updates and the two structural
+ * writes that shift no indexes -- pinning header rows, and stripping bullets
+ * off paragraphs that keep their text. Content edits proper -- insertText,
+ * deleteContentRange, createFootnote, insertTable, createParagraphBullets
+ * and the rest -- move every index in the document after them, and
+ * reproducing that faithfully is reproducing Google Docs. Those are recorded
+ * and ignored here, and stay the live suite's job. Requests this does not
+ * know are not errors; they are simply not applied, so a test that needs one
+ * has to be a live test.
  */
 
 const STYLE_REQUESTS = {
@@ -28,8 +30,13 @@ const STYLE_REQUESTS = {
   updateNamedStyle: 'namedStyle',
   updateParagraphStyle: 'paragraphStyle',
   updateTextStyle: 'textStyle',
-  updateTableCellStyle: 'tableCellStyle'
+  updateTableCellStyle: 'tableCellStyle',
+  updateTableRowStyle: 'tableRowStyle',
+  updateTableColumnProperties: 'tableColumnProperties'
 };
+
+/** Structural writes that carry no style payload and no field mask. */
+const STRUCTURAL_REQUESTS = ['pinTableHeaderRows', 'deleteParagraphBullets'];
 
 function isObj(v) {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -61,6 +68,27 @@ function applyMask(target, payload, mask) {
   mask.split(',').map((s) => s.trim()).filter(Boolean).forEach((path) => {
     const parts = path.split('.');
     setPath(target, parts, getPath(payload, parts));
+  });
+}
+
+/**
+ * Google Docs keeps only what a run overrides.
+ *
+ * Writing a value that matches what the paragraph already inherits from its
+ * named style stores no override at all -- it takes away whatever override
+ * was there -- so the run reads back carrying nothing rather than carrying
+ * the value that was written. Reproducing that here is what stops a local
+ * test from passing on a read-back the real API would never give.
+ */
+function dropInherited(textStyle, paragraph, tab, mask) {
+  const type = ((paragraph.paragraphStyle || {}).namedStyleType) || 'NORMAL_TEXT';
+  const styles = ((tab.namedStyles || {}).styles) || [];
+  const from = ((styles.filter((s) => s.namedStyleType === type)[0]) || {}).textStyle || {};
+  mask.split(',').map((s) => s.trim().split('.')[0]).filter(Boolean).forEach((k) => {
+    if (k in from && k in textStyle &&
+        JSON.stringify(from[k]) === JSON.stringify(textStyle[k])) {
+      delete textStyle[k];
+    }
   });
 }
 
@@ -142,11 +170,13 @@ function sectionBreaksIn(tab, range) {
 function applyOne(doc, req) {
   const kind = Object.keys(req)[0];
   const key = STYLE_REQUESTS[kind];
-  if (!key) return false;            // a content edit; recorded, not applied
+  if (!key && STRUCTURAL_REQUESTS.indexOf(kind) === -1) {
+    return false;                    // a content edit; recorded, not applied
+  }
   const body = req[kind];
   const tab = targetTab(doc, body.tabId);
   const mask = body.fields || '';
-  const payload = body[key] || {};
+  const payload = (key && body[key]) || {};
 
   if (kind === 'updateDocumentStyle') {
     if (!tab.documentStyle) tab.documentStyle = {};
@@ -190,6 +220,7 @@ function applyOne(doc, req) {
         if (!holder) return;
         if (!holder.textStyle) holder.textStyle = {};
         applyMask(holder.textStyle, payload, mask);
+        dropInherited(holder.textStyle, el.paragraph, tab, mask);
       });
     });
     return true;
@@ -198,10 +229,17 @@ function applyOne(doc, req) {
   if (kind === 'updateTableCellStyle') {
     const r = body.tableRange || {};
     const loc = r.tableCellLocation || {};
-    const start = (loc.tableStartLocation || {}).index;
-    ((tab.body || {}).content || []).forEach((el) => {
-      if (!el.table) return;
-      if (start !== undefined && el.startIndex !== start) return;
+    // Two forms, and they name the table in different places: a tableRange
+    // carries the start location inside its cell location, while the
+    // every-cell form carries it on the request itself. Reading only the
+    // first meant the every-cell form matched no table in particular and so
+    // was applied to all of them -- which nothing noticed while the fixture
+    // had one table, and which would have made "style this table" look like
+    // it worked on a document with two.
+    const start = body.tableRange
+      ? (loc.tableStartLocation || {}).index
+      : (body.tableStartLocation || {}).index;
+    tablesAt(tab, start).forEach((el) => {
       const rows = el.table.tableRows || [];
       const r0 = loc.rowIndex || 0;
       const c0 = loc.columnIndex || 0;
@@ -216,7 +254,73 @@ function applyOne(doc, req) {
     return true;
   }
 
+  if (kind === 'updateTableRowStyle') {
+    tablesAt(tab, (body.tableStartLocation || {}).index).forEach((el) => {
+      const rows = el.table.tableRows || [];
+      const which = (body.rowIndices && body.rowIndices.length)
+        ? body.rowIndices : rows.map((_, i) => i);
+      which.forEach((i) => {
+        const row = rows[i];
+        if (!row) return;
+        if (!row.tableRowStyle) row.tableRowStyle = {};
+        applyMask(row.tableRowStyle, payload, mask);
+      });
+    });
+    return true;
+  }
+
+  if (kind === 'updateTableColumnProperties') {
+    tablesAt(tab, (body.tableStartLocation || {}).index).forEach((el) => {
+      const t = el.table;
+      if (!t.tableStyle) t.tableStyle = {};
+      if (!t.tableStyle.tableColumnProperties) {
+        t.tableStyle.tableColumnProperties = [];
+      }
+      const props = t.tableStyle.tableColumnProperties;
+      // A table whose columns have never been given properties still has
+      // them; the API just has nothing to say about them yet.
+      while (props.length < (t.columns || 0)) props.push({});
+      const which = (body.columnIndices && body.columnIndices.length)
+        ? body.columnIndices : props.map((_, i) => i);
+      which.forEach((i) => {
+        if (!props[i]) return;
+        applyMask(props[i], payload, mask);
+      });
+    });
+    return true;
+  }
+
+  // Pinning shifts nothing: it sets tableHeader on the leading run of rows
+  // and clears it on the rest, which is exactly what the read reports back.
+  if (kind === 'pinTableHeaderRows') {
+    const n = Number(body.pinnedHeaderRowsCount) || 0;
+    tablesAt(tab, (body.tableStartLocation || {}).index).forEach((el) => {
+      (el.table.tableRows || []).forEach((row, i) => {
+        if (!row.tableRowStyle) row.tableRowStyle = {};
+        row.tableRowStyle.tableHeader = i < n;
+      });
+    });
+    return true;
+  }
+
+  // Taking a marker off leaves the paragraph and its text exactly where they
+  // were -- the only thing that goes is the bullet -- so unlike its opposite
+  // number, createParagraphBullets, this one moves no index and can be done
+  // here rather than only against Google.
+  if (kind === 'deleteParagraphBullets') {
+    paragraphsIn(tab, body.range || {}).forEach((el) => {
+      delete el.paragraph.bullet;
+    });
+    return true;
+  }
+
   return false;
+}
+
+/** The tables a request names: the one starting there, or all of them. */
+function tablesAt(tab, start) {
+  return ((tab.body || {}).content || []).filter(
+    (el) => el.table && (start === undefined || el.startIndex === start));
 }
 
 /** Apply what can be applied; report the kinds that were only recorded. */

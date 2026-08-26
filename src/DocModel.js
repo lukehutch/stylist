@@ -76,9 +76,37 @@ function fetchDoc_() {
   return docCache_;
 }
 
+/**
+ * Writes per minute the pacer allows, or zero to turn it off.
+ *
+ * Zero in the add-on: nobody clicking Apply can come near Google's limit,
+ * and a sidebar that paused mid-click would be worse than useless. The live
+ * test suite is the exception -- it makes well over a hundred writes in one
+ * execution, and the Docs API allows sixty a minute per user -- so it turns
+ * the pacer on for the length of its run and the writes spread themselves
+ * out instead of failing.
+ */
+var writesPerMinute_ = 0;
+var writeTimes_ = [];
+
+/** Wait, if there is no room left under the write quota, for room. */
+function paceWrite_() {
+  if (!writesPerMinute_) return;
+  var now = Date.now();
+  writeTimes_ = writeTimes_.filter(function (t) { return now - t < 60000; });
+  if (writeTimes_.length >= writesPerMinute_) {
+    // The oldest write in the window is the one whose leaving makes room.
+    Utilities.sleep(60000 - (now - writeTimes_[0]) + 250);
+    now = Date.now();
+    writeTimes_ = writeTimes_.filter(function (t) { return now - t < 60000; });
+  }
+  writeTimes_.push(now);
+}
+
 function batchUpdate_(requests) {
   var reqs = (requests || []).filter(function (r) { return !!r; });
   if (!reqs.length) return { applied: 0 };
+  paceWrite_();
   Docs.Documents.batchUpdate({ requests: reqs }, activeDocId_());
   docCache_ = null;   // the document just changed under us
   return { applied: reqs.length };
@@ -206,8 +234,12 @@ function maskedMeta_(fields) {
  */
 function readDocMeta(tabId) {
   return timed_('metaRead', function () {
-    var doc = maskedMeta_('title,documentStyle,namedStyles,' +
-      'tabs.tabProperties,tabs.documentTab.documentStyle,tabs.documentTab.namedStyles') ||
+    // Only tabs.* paths: asking for the top-level documentStyle or
+    // namedStyles alongside includeTabsContent is rejected outright with
+    // "Field mask may not contain legacy text-level Document resource fields
+    // while requesting tabs content", which failed every poll it was in.
+    var doc = maskedMeta_('title,tabs.tabProperties,' +
+      'tabs.documentTab.documentStyle,tabs.documentTab.namedStyles') ||
       fetchDoc_();
     var flat = flattenTabs_(doc);
     var hit = null;

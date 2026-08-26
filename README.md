@@ -276,8 +276,8 @@ What the Notes tab can and cannot give you, concretely:
 ## Tests
 
 ```bash
-npm test              # 531 tests, local, no network
-npm run test:live     # push and run 35 tests inside Apps Script, on a real document
+npm test              # 534 tests, local, no network
+npm run test:live     # push and run 91 tests inside Apps Script, on a real document
 npm run test:shuffle  # the local suite again, in eight random orders
 ```
 
@@ -323,8 +323,14 @@ API accepts a given request. That is what `src/LiveTests.js` is for: pick
 `gappRunInGas` in the Apps Script editor and press Run. It executes against the
 open document, exercising the real API —
 including the named-style field mask, the likeliest thing to be wrong — and
-prints a TAP report. Every write it makes re-asserts values the document
-already has, so a passing run changes nothing. DEV.md scores this approach
+prints a TAP report. It works on a scratch document of its own, which it
+empties and rebuilds from scratch at the start of every run, so nothing it
+does touches a document of yours. Most of its writes put back what they
+found; the last two suites deliberately do not, because taking the markers
+off a list and turning footnotes into endnotes cannot be undone through the
+API, which is why they come last. A run takes a few minutes: the Docs API
+allows sixty writes a minute per user and the suite makes closer to a
+hundred and fifty, so it paces itself rather than failing on quota. DEV.md scores this approach
 against every other option in
 [How to unit test Google Apps Scripts](https://stackoverflow.com/questions/15682346/how-to-unit-test-google-apps-scripts),
 and links to Google's own

@@ -360,6 +360,27 @@ function makeLiveLikeDoc() {
       }
     });
   });
+  // A second table, because LiveFixture.js builds two: "apply to every table"
+  // and "make the tables match" say nothing at all about a document with one,
+  // and a mock that offers only one would let those tests pass by skipping.
+  // Its padding differs from the first table's on purpose, so unifyTables has
+  // a disagreement to settle.
+  t.body.content.push({
+    startIndex: 176, endIndex: 210,
+    table: {
+      rows: 2, columns: 2,
+      tableStyle: { tableColumnProperties: [
+        { widthType: 'EVENLY_DISTRIBUTED' }, { widthType: 'EVENLY_DISTRIBUTED' }
+      ] },
+      tableRows: [
+        { startIndex: 177, endIndex: 193, tableRowStyle: {}, tableCells: [
+          { content: [{ paragraph: { elements: [{ textRun: { content: 'A' } }] } }],
+            tableCellStyle: { paddingTop: { magnitude: 3, unit: 'PT' } } }
+        ] },
+        { startIndex: 193, endIndex: 209, tableRowStyle: {}, tableCells: [] }
+      ]
+    }
+  });
   t.headers['h.section'] = { headerId: 'h.section', content: [
     { startIndex: 0, endIndex: 15, paragraph: {
       paragraphStyle: realParagraphDefaults(),

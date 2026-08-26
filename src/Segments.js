@@ -28,6 +28,47 @@ function segmentRange_(content) {
   return { startIndex: start, endIndex: end };
 }
 
+/**
+ * A body range broken up so that page_break_before can be asked for over it.
+ *
+ * Two places in a body will not take that field, and the API refuses the
+ * whole batch rather than the offending paragraph:
+ *
+ *   - inside a table -- "Cannot update page-break-before when the range
+ *     contains paragraphs in a table";
+ *   - on the document's own first section break -- "Cannot operate on the
+ *     first section break in the document".
+ *
+ * So the paragraphs between them get every field asked for, the ones inside
+ * a table get all of them but the page break, and the first section break is
+ * left out altogether: it holds no text, so there is nothing to style on it.
+ *
+ * Returns null when nothing is in the way and one request will do.
+ */
+function splitForPageBreak_(content, range) {
+  var blocks = [];
+  (content || []).forEach(function (el, i) {
+    if (el.table) blocks.push({ el: el, drop: false });
+    else if (i === 0 && el.sectionBreak) blocks.push({ el: el, drop: true });
+  });
+  if (!blocks.length) return null;
+  var parts = [];
+  var at = range.startIndex;
+  blocks.forEach(function (b) {
+    var start = b.el.startIndex || 0;
+    var end = b.el.endIndex;
+    if (end === undefined) return;
+    if (start > at) parts.push({ startIndex: at, endIndex: start, noBreak: false, drop: false });
+    parts.push({ startIndex: Math.max(start, at), endIndex: Math.min(end, range.endIndex),
+                 noBreak: true, drop: b.drop });
+    at = Math.max(at, end);
+  });
+  if (at < range.endIndex) {
+    parts.push({ startIndex: at, endIndex: range.endIndex, noBreak: false, drop: false });
+  }
+  return parts.filter(function (p) { return p.endIndex > p.startIndex; });
+}
+
 /** Map every header/footer id to the role(s) it plays. */
 function headerFooterRoles_(content) {
   var roles = {};
@@ -243,11 +284,22 @@ function writeSegmentStyle(payload) {
     droppedPageBreak = true;
   }
 
+  var PAGE_BREAK_DROPPED_ = 'Page-break-before was ignored: the Docs API rejects it in ' +
+    'headers, footers and footnotes.';
+  var PAGE_BREAK_IN_TABLES_ = 'Page-break-before was skipped for the paragraphs inside ' +
+    'tables: the Docs API does not allow it there. Everything else was applied to them.';
+  var brokeAroundTables = false;
+
   // Nothing to send -- every field the editor offered was left blank, which
   // is what a segment whose paragraphs disagree looks like. Same result
   // shape as a real write, so callers do not have to special-case it.
+  //
+  // The page break is the exception: if stripping it is what emptied the
+  // request, saying nothing would leave the user watching a setting they
+  // asked for do nothing for a reason they were never told.
   if (!ts.fields.length && !ps.fields.length) {
-    return { applied: 0, segments: 0, warnings: [] };
+    return { applied: 0, segments: 0,
+             warnings: droppedPageBreak ? [PAGE_BREAK_DROPPED_] : [] };
   }
 
   var requests = [];
@@ -268,7 +320,33 @@ function writeSegmentStyle(payload) {
         requests.push({ updateTextStyle: { range: range, textStyle: ts.style, fields: ts.fields.join(',') } });
       }
       if (ps.fields.length) {
-        requests.push({ updateParagraphStyle: { range: range, paragraphStyle: ps.style, fields: ps.fields.join(',') } });
+        // A body-wide range takes in places that will not accept a page
+        // break at all; see splitForPageBreak_.
+        var parts = payload.target === 'body' &&
+                    ps.fields.indexOf('pageBreakBefore') !== -1
+          ? splitForPageBreak_(segContent, range) : null;
+        if (!parts) {
+          requests.push({ updateParagraphStyle: { range: range, paragraphStyle: ps.style, fields: ps.fields.join(',') } });
+        } else {
+          // Only the tables are worth telling the user about; the section
+          // break carries nothing they asked to change.
+          if ((segContent || []).some(function (el) { return !!el.table; })) {
+            brokeAroundTables = true;
+          }
+          parts.forEach(function (part) {
+            var style = ps.style, fields = ps.fields;
+            if (part.drop) return;
+            if (part.noBreak) {
+              style = {};
+              fields = ps.fields.filter(function (f) { return f !== 'pageBreakBefore'; });
+              fields.forEach(function (f) { style[f] = ps.style[f]; });
+              if (!fields.length) return;
+            }
+            var r = { startIndex: part.startIndex, endIndex: part.endIndex };
+            if (range.tabId) r.tabId = range.tabId;
+            requests.push({ updateParagraphStyle: { range: r, paragraphStyle: style, fields: fields.join(',') } });
+          });
+        }
       }
     }
 
@@ -318,10 +396,8 @@ function writeSegmentStyle(payload) {
   if (skippedEmpty) {
     res.warnings.push(skippedEmpty + ' empty segment(s) were skipped -- there is no text in them to style.');
   }
-  if (droppedPageBreak) {
-    res.warnings.push('Page-break-before was ignored: the Docs API rejects it in headers, ' +
-      'footers and footnotes.');
-  }
+  if (droppedPageBreak) res.warnings.push(PAGE_BREAK_DROPPED_);
+  if (brokeAroundTables) res.warnings.push(PAGE_BREAK_IN_TABLES_);
   if (payload.target === 'footnoteRefs' && ps.fields.length) {
     res.warnings.push('Footnote reference marks are inline text; paragraph settings were ignored for them.');
   }

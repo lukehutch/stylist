@@ -160,6 +160,12 @@ function fixturePageSetupRequest_() {
  * out loud what it was run against.
  */
 function resetLiveFixture_() {
+  // A live run makes over a hundred writes in one execution and the Docs API
+  // allows sixty a minute per user, so the writes have to be spread out or
+  // most of the suite fails on quota rather than on anything real. Nothing
+  // but a live run calls this, so nothing but a live run is paced.
+  writesPerMinute_ = 55;
+
   // Settle which document first: everything below reaches it through
   // activeDocId_, which reads the property this puts there.
   liveTestDocId_();
@@ -216,10 +222,16 @@ function resetLiveFixture_() {
     sectionType: 'NEXT_PAGE'
   } }]);
 
-  // Phase 7: a table on the end. Asking for the end of the segment rather
-  // than an index avoids counting past everything above.
+  // Phase 7: two tables on the end. Asking for the end of the segment rather
+  // than an index avoids counting past everything above. Two rather than one
+  // because "apply to every table" and "make the tables match" are only worth
+  // anything where there is more than one, and separate batches because the
+  // second insert has to land after the first one has moved the end.
   batchUpdate_([{ insertTable: {
     endOfSegmentLocation: { segmentId: '' }, rows: 2, columns: 3
+  } }]);
+  batchUpdate_([{ insertTable: {
+    endOfSegmentLocation: { segmentId: '' }, rows: 2, columns: 2
   } }]);
 
   // Phase 8: a default header and footer for the document, and one header
@@ -252,7 +264,8 @@ function resetLiveFixture_() {
     headers: Object.keys(built.headers || {}).length,
     footers: Object.keys(built.footers || {}).length,
     footnotes: Object.keys(built.footnotes || {}).length,
-    sections: fixtureBodyContent_().filter(function (el) { return !!el.sectionBreak; }).length
+    sections: fixtureBodyContent_().filter(function (el) { return !!el.sectionBreak; }).length,
+    tables: fixtureBodyContent_().filter(function (el) { return !!el.table; }).length
   };
 }
 

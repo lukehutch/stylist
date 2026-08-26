@@ -68,10 +68,20 @@ function writePageFormat(payload) {
     var fields = [];
 
     if (payload.pageWidthPt || payload.pageHeightPt) {
-      style.pageSize = {
-        width: ptDim_(payload.pageWidthPt),
-        height: ptDim_(payload.pageHeightPt)
-      };
+      // pageSize is one message and the mask names the whole of it, so an
+      // absent side is not "leave it alone" -- it is a null where a Dimension
+      // belongs, which the API refuses outright. The sidebar always sends
+      // both; anything sending one (a hand-built import, a caller doing the
+      // obvious thing) gets the other filled in from the document rather than
+      // a 400. Only that case pays for the read.
+      var w = payload.pageWidthPt;
+      var h = payload.pageHeightPt;
+      if (!w || !h) {
+        var size = readPageFormat(tid);
+        w = w || size.pageWidthPt;
+        h = h || size.pageHeightPt;
+      }
+      style.pageSize = { width: ptDim_(w), height: ptDim_(h) };
       fields.push('pageSize');
     }
     DOC_MARGIN_KEYS.forEach(function (k) {
