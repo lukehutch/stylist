@@ -237,10 +237,20 @@ terminal or in CI, because Google's Execution API asks for a fair amount
 
 1. Turn on the Apps Script API at
    [script.google.com/home/usersettings](https://script.google.com/home/usersettings).
+   This is the switch on **your account**, and it is not the same as step 3.
 2. Create a **standard** Cloud project and attach it to the script (Project
    Settings → Google Cloud Platform (GCP) Project). The default project Apps
    Script makes for you is explicitly not enough.
-3. In *that same* Cloud project (clasp's own OAuth client will not do), create
+3. Enable the **Apps Script API** *in that Cloud project too* — APIs & Services
+   → Enable APIs and services → Apps Script API, or
+   `console.cloud.google.com/apis/library/script.googleapis.com` with the
+   project selected. Step 1 does not do this and neither does anything else;
+   the two switches have the same name and are unrelated. Miss it and the
+   runner's first step fails with *"Apps Script API has not been used in
+   project `<number>` before or it is disabled"*, naming the project the OAuth
+   client belongs to. Allow a few minutes after enabling it: the same message
+   keeps appearing for a while afterwards, and its own last sentence says so.
+4. In *that same* Cloud project (clasp's own OAuth client will not do), create
    an OAuth client of type **Desktop App**, download it as
    `client_secret.json` — `.gitignore` already covers it — and:
 
@@ -270,17 +280,17 @@ terminal or in CI, because Google's Execution API asks for a fair amount
    just made. It is not what Stylist asks for. Users of the add-on authorise
    `src/appsscript.json`, which is two scopes and nothing else; nothing you do
    at this login changes their consent screen.
-4. Add `"executionApi": {"access": "MYSELF"}` to `src/appsscript.json` and
+5. Add `"executionApi": {"access": "MYSELF"}` to `src/appsscript.json` and
    `clasp push --force`. The manifest has to declare it before a deployment can
    be an API Executable.
-5. Deploy once as an **API Executable**: `clasp create-deployment`, or Deploy →
+6. Deploy once as an **API Executable**: `clasp create-deployment`, or Deploy →
    New deployment → API Executable. `devMode` runs the code you just pushed
    rather than the deployed version, but a deployment still has to exist.
    Without one, `run-function` fails with *"a server error occurred while
    reading from storage. Error code NOT_FOUND"* — confirmed by adding the
    deployment and watching that error change.
 
-Step 4 **is** committed, and should not stay that way. `executionApi` is a
+Step 5 **is** committed, and should not stay that way. `executionApi` is a
 permanent execution surface on the add-on, and shipping one for the sake of a
 test suite is the wrong trade for something published to the Marketplace.
 Take it out of `src/appsscript.json` before publishing.
@@ -288,7 +298,7 @@ Take it out of `src/appsscript.json` before publishing.
 ### When the live suite will not run
 
 Both of the errors below have the same cause — the `live` token does not hold
-the merged scope set — and both mean step 3 did not take, however it looked at
+the merged scope set — and both mean step 4 did not take, however it looked at
 the time.
 
 | Error | From |
