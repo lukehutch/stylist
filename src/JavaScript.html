@@ -2386,27 +2386,77 @@ function renderPresets() {
 
   // Custom styles are edited where they are used, on the Text panel.
 
-  host.appendChild(el('h2', null, 'Export / import JSON'));
-  var ta = el('textarea');
-  ta.id = 'configJson';
-  host.appendChild(ta);
+  host.appendChild(el('h2', null, 'The whole configuration, as a file'));
+  host.appendChild(el('p', 'hint',
+    'Downloads this tab\u2019s page setup and named styles together with every '
+    + 'preset above. Uploading one adds its presets to yours and applies its '
+    + 'formatting here.'));
   var ioRow = el('div', 'btnrow');
-  var exp = el('button', 'act', 'Export');
-  exp.addEventListener('click', function () {
-    call('exportConfig', [S.tabId]).then(function (cfg) {
-      ta.value = JSON.stringify(cfg, null, 2);
-    });
-  });
-  var imp = el('button', 'act primary', 'Import');
-  imp.addEventListener('click', function () {
-    if (!ta.value.trim()) { status('Paste a configuration first', 'err'); return; }
-    call('importConfig', [{ config: ta.value, tabId: S.tabId, scope: S.scope }])
-      .then(reload)
+
+  var dl = el('button', 'act', 'Download\u2026');
+  dl.addEventListener('click', function () {
+    call('exportAll', [S.tabId])
+      .then(function (cfg) { saveJson(configFileName(), cfg); })
       .catch(function (e) { status(String(e.message || e), 'err'); });
   });
-  ioRow.appendChild(exp);
-  ioRow.appendChild(imp);
+
+  // The file input is what the browser will actually open a picker for, so the
+  // button does nothing but click it. It stays out of the layout rather than
+  // being hidden with display:none, which in some browsers stops it opening.
+  var picker = el('input');
+  picker.type = 'file';
+  picker.accept = 'application/json,.json';
+  picker.className = 'filepick';
+  picker.addEventListener('change', function () {
+    var file = picker.files && picker.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onerror = function () { status('That file could not be read.', 'err'); };
+    reader.onload = function () {
+      // Cleared so choosing the same file twice in a row still fires change.
+      picker.value = '';
+      call('importAll', [{ config: String(reader.result || ''),
+                           tabId: S.tabId, scope: S.scope }])
+        .then(reload)
+        .catch(function (e) { status(String(e.message || e), 'err'); });
+    };
+    reader.readAsText(file);
+  });
+
+  var up = el('button', 'act primary', 'Upload\u2026');
+  up.addEventListener('click', function () { picker.click(); });
+
+  ioRow.appendChild(dl);
+  ioRow.appendChild(up);
+  ioRow.appendChild(picker);
   host.appendChild(ioRow);
+}
+
+/** What the downloaded file is called: the document's own name, made safe. */
+function configFileName() {
+  var title = String((S.data || {}).documentTitle || 'stylist')
+    .replace(/[^A-Za-z0-9 _-]+/g, ' ').replace(/\s+/g, ' ').trim() || 'stylist';
+  return title + ' styles.json';
+}
+
+/**
+ * Hand a generated file to the browser.
+ *
+ * The sidebar is a sandboxed iframe, and downloads work there because
+ * HtmlService sets allow-downloads on it. The object URL is revoked on a
+ * timer rather than straight after the click: revoking it immediately can
+ * cancel the download that has only just been started.
+ */
+function saveJson(name, data) {
+  var url = URL.createObjectURL(
+    new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+  var a = el('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
 }
 
 /* =================================================================

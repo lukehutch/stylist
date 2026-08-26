@@ -833,6 +833,73 @@ test('style presets save, list and bind to a named style', (t) => {
   t.equal(r.namedStyle.textStyle.bold, true);
 });
 
+/* ---- the whole configuration as one downloadable file ---- */
+
+test('the downloaded file carries the presets, not just the document', (t) => {
+  const N = makeSandbox(makeDoc());
+  N.savePreset({ name: 'House style' });
+  N.saveStylePreset({ name: 'Callout', textStyle: { bold: true } });
+  const all = N.exportAll(null);
+  t.equal(all.version, 2);
+  t.equal(all.document.namedStyles.length, 9, "this tab's formatting is still in there");
+  t.ok(all.presets['House style'], 'and the saved presets, which live in the user profile');
+  t.ok(all.stylePresets.Callout, 'and the style presets');
+});
+
+test('saving a preset stores one document, never the whole bundle', (t) => {
+  // Otherwise each save would fold in a copy of every earlier save.
+  const N = makeSandbox(makeDoc());
+  N.savePreset({ name: 'One' });
+  N.savePreset({ name: 'Two' });
+  const inner = N.exportAll(null).presets.Two;
+  t.notOk(inner.presets, 'a saved preset holds no preset store of its own');
+  t.equal(inner.version, 1);
+});
+
+test('a file from one profile lands in another', (t) => {
+  const from = makeSandbox(makeDoc());
+  from.savePreset({ name: 'House style' });
+  from.saveStylePreset({ name: 'Callout', textStyle: { bold: true } });
+  const file = JSON.stringify(from.exportAll(null));
+
+  const to = makeSandbox(makeDoc());
+  const res = to.importAll({ config: file });
+  t.ok(to.listPresets().some((p) => p.name === 'House style'), 'the preset came across');
+  t.ok(to.listStylePresets().some((p) => p.name === 'Callout'));
+  t.ok(res.applied > 0, 'and the formatting was applied to the open document');
+  t.ok(to.listStylePresets().some((p) => p.name === 'Source code'),
+    'the built-in styles are still there beside it');
+});
+
+test('an uploaded name that clashes is taken from the file, and said so', (t) => {
+  const to = makeSandbox(makeDoc());
+  to.saveStylePreset({ name: 'Callout', textStyle: { bold: false } });
+  const res = to.importAll({ config: {
+    stylePresets: { Callout: { textStyle: { bold: true } },
+                    Fresh: { textStyle: { italic: true } } }
+  } });
+  t.deepEqual(res.replaced, ['Callout']);
+  t.equal(res.added, 1);
+  t.ok(res.warnings.some((w) => /Replaced what you had under Callout/.test(w)));
+  const c = to.listStylePresets().filter((p) => p.name === 'Callout')[0];
+  t.equal(c.textStyle.bold, true, "the file's version won");
+});
+
+test('a file written before there were bundles still uploads', (t) => {
+  // Version 1 is a bare configuration: pageFormat and namedStyles at the top.
+  const N = makeSandbox(makeDoc());
+  const v1 = N.exportConfig(null);
+  t.equal(v1.version, 1);
+  N.__reset();
+  const res = N.importAll({ config: JSON.stringify(v1) });
+  t.ok(res.applied > 0);
+});
+
+test('a file that is not JSON says so rather than failing silently', (t) => {
+  t.throws(() => S.importAll({ config: '{ nope' }), /not valid JSON/);
+  t.throws(() => S.importAll({ config: '' }), /Empty configuration/);
+});
+
 test('a new user gets default custom styles', (t) => {
   const N = makeSandbox(makeDoc());
   const names = N.listStylePresets().map(p => p.name);

@@ -40,10 +40,8 @@ module.exports = ({ suite, test }) => {
       test('the template includes ' + name, (t) => t.match(sidebar, re));
     });
 
-  const dynamic = new Set(['configJson']);   // created by the code itself
   const ids = new Set([...clientJs.matchAll(/getElementById\('([^']+)'\)/g)].map((m) => m[1]));
   for (const id of ids) {
-    if (dynamic.has(id)) continue;
     test('#' + id + ' exists in the template', (t) => {
       t.match(sidebar, new RegExp('id="' + id + '"'));
     });
@@ -1700,8 +1698,46 @@ module.exports = ({ suite, test }) => {
     t.match(clientJs, /refreshSlice\('presets'\)/, 'they ask for the preset lists alone');
   });
 
+  test('the configuration travels as a file, not through a text box', (t) => {
+    t.notOk(/configJson|el\('textarea'\)/.test(clientJs),
+      'the box nobody could fit a configuration into is gone');
+    t.notOk(/textarea \{/.test(css), 'and its styling with it');
+    t.match(clientJs, /a\.download = name;/, 'a download is what the button does');
+    t.match(clientJs, /new Blob\(\[JSON\.stringify\(data, null, 2\)\]/,
+      'the file is the JSON itself');
+    t.match(clientJs, /picker\.type = 'file';/, 'and an upload reads one back');
+    t.match(clientJs, /reader\.readAsText\(file\);/);
+    t.match(clientJs, /call\('exportAll', \[S\.tabId\]\)/,
+      'the download asks for the whole bundle, not one document');
+  });
+
+  test('the object URL outlives the click that started the download', (t) => {
+    // Revoking it on the next line cancels the download in some browsers.
+    const at = clientJs.indexOf('function saveJson');
+    t.match(clientJs.slice(at, at + 700), /setTimeout\(function \(\) \{ URL\.revokeObjectURL/);
+  });
+
+  test('picking the same file twice in a row still works', (t) => {
+    // A file input whose value is left alone fires no change event the second
+    // time, so the upload would silently do nothing.
+    const at = clientJs.indexOf("picker.type = 'file'");
+    t.match(clientJs.slice(at, at + 900), /picker\.value = '';/);
+  });
+
+  test('the download is named after the document, safely', (t) => {
+    // S is a multi-line object literal, which the extractor cannot lift; only
+    // its data slot matters here, so the tail stands one up.
+    const name = evalFromClient(['configFileName'],
+      'var S = {}; return function (title) { S.data = { documentTitle: title };' +
+      ' return configFileName(); };');
+    t.equal(name('Annual Report'), 'Annual Report styles.json');
+    t.equal(name('a/b\\c:d*?"<>|'), 'a b c d styles.json',
+      'nothing a filesystem would refuse');
+    t.equal(name(''), 'stylist styles.json', 'an untitled document still gets a name');
+  });
+
   test('the writes that really do change everything still reload', (t) => {
-    ['convertFootnotesToEndnotes', 'applyPreset', 'importConfig'].forEach((fn) => {
+    ['convertFootnotesToEndnotes', 'applyPreset', 'importAll'].forEach((fn) => {
       const at = clientJs.indexOf(fn + "', [");
       t.match(clientJs.slice(at, at + 300), /\.then\(reload\)|return reload\(\)/,
         fn + ' reloads');

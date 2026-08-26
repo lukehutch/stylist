@@ -15,6 +15,13 @@
  *     level you are not otherwise using.
  *   - Export and import the whole configuration as JSON, so a house style
  *     can live in version control and be shared.
+ *
+ * Two shapes of JSON travel through here, and keeping them apart matters.
+ * exportConfig is one document's formatting -- page setup and the nine named
+ * styles -- and that is what a saved preset stores. exportAll is the file the
+ * Presets panel downloads: that same formatting plus every saved preset and
+ * style preset the user has. A saved preset must never hold the second shape,
+ * or each save would store a copy of every earlier save.
  */
 
 var PRESET_STORE_KEY = 'stylist.presets';
@@ -83,6 +90,114 @@ function importConfig(payload) {
   }
 
   return { applied: applied, warnings: warnings };
+}
+
+/* ---------------- The whole configuration, as one file ---------------- */
+
+/**
+ * Everything the Presets panel can hand you: this tab's formatting, plus the
+ * saved presets and style presets, which live in the user's properties rather
+ * than in the document and so are lost with the browser profile otherwise.
+ *
+ * List and table formatting is deliberately not in here. Both are addressed by
+ * things that only mean something inside one document -- a list by its listId,
+ * a table by where it starts -- so there is nothing to carry to another
+ * document, and writing them into the file would promise a portability that
+ * cannot be delivered.
+ */
+function exportAll(tabId) {
+  return {
+    version: 2,
+    exportedAt: new Date().toISOString(),
+    document: exportConfig(tabId),
+    presets: readStore_(PRESET_STORE_KEY),
+    stylePresets: readStore_(STYLE_PRESET_STORE_KEY)
+  };
+}
+
+/**
+ * Take such a file back in.
+ *
+ * A version 1 file -- everything written before there was a bundle, and every
+ * preset already saved in the store -- is a bare configuration with pageFormat
+ * at the top level. Those still work: they are recognised by shape and handed
+ * straight to importConfig.
+ *
+ * Presets merge by name rather than replacing the store wholesale, so
+ * uploading a colleague's file adds their house style to yours instead of
+ * throwing yours away. A name that exists in both is taken from the file, and
+ * said so in the warnings, because that is the one case where something the
+ * user had is gone.
+ *
+ * payload: { config, tabId, scope, includePage, includeStyles }
+ */
+function importAll(payload) {
+  payload = payload || {};
+  var bundle = payload.config;
+  if (typeof bundle === 'string') {
+    // An empty file is its own mistake, and "Unexpected end of JSON input" is
+    // not how to describe having picked one.
+    if (!bundle.trim()) throw new Error('Empty configuration.');
+    try { bundle = JSON.parse(bundle); }
+    catch (e) { throw new Error('That is not valid JSON: ' + e.message); }
+  }
+  if (!bundle || typeof bundle !== 'object') throw new Error('Empty configuration.');
+
+  // Version 1, or anything else shaped like a bare configuration.
+  if (!bundle.document && (bundle.pageFormat || bundle.namedStyles)) {
+    return importConfig({
+      config: bundle,
+      tabId: payload.tabId,
+      scope: payload.scope,
+      includePage: payload.includePage,
+      includeStyles: payload.includeStyles
+    });
+  }
+
+  var warnings = [];
+  var applied = 0;
+
+  if (bundle.document) {
+    var r = importConfig({
+      config: bundle.document,
+      tabId: payload.tabId,
+      scope: payload.scope,
+      includePage: payload.includePage,
+      includeStyles: payload.includeStyles
+    });
+    applied += r.applied || 0;
+    (r.warnings || []).forEach(function (w) { warnings.push(w); });
+  }
+
+  var counts = mergeStore_(PRESET_STORE_KEY, bundle.presets);
+  // So a user who has never opened the panel keeps the four built-in styles
+  // alongside the uploaded ones, rather than the merge standing in for the
+  // seeding that would otherwise have happened on the first read.
+  seedStylePresets_();
+  var styleCounts = mergeStore_(STYLE_PRESET_STORE_KEY, bundle.stylePresets);
+  var added = counts.added + styleCounts.added;
+  var replaced = counts.replaced.concat(styleCounts.replaced);
+  if (added) warnings.push('Added ' + added + ' preset' + (added === 1 ? '' : 's') + '.');
+  if (replaced.length) {
+    warnings.push('Replaced what you had under ' + replaced.join(', ') + '.');
+  }
+
+  return { applied: applied, added: added, replaced: replaced, warnings: warnings };
+}
+
+/** Merge incoming named entries into a store, reporting what got overwritten. */
+function mergeStore_(key, incoming) {
+  var out = { added: 0, replaced: [] };
+  if (!incoming || typeof incoming !== 'object') return out;
+  var store = readStore_(key);
+  Object.keys(incoming).forEach(function (name) {
+    if (!name) return;
+    if (Object.prototype.hasOwnProperty.call(store, name)) out.replaced.push(name);
+    else out.added++;
+    store[name] = incoming[name];
+  });
+  writeStore_(key, store);
+  return out;
 }
 
 /* ---------------- Whole-document presets ---------------- */

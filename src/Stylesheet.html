@@ -354,6 +354,8 @@
   /* Each font name in the picker is drawn in the font it names. */
   option.fontface { font-size: calc(var(--fs) + 1px); }
 
-  textarea { width: 100%; height: 110px; font-family: Roboto Mono, Consolas, monospace;
-             font-size: var(--fs-xs); border: 1px solid var(--line); border-radius: 3px; padding: 4px; }
+  /* The file input the Upload button clicks. Out of the layout rather than
+     display:none, because a hidden input is not guaranteed to open a picker. */
+  .filepick { position: absolute; width: 1px; height: 1px; opacity: 0;
+              pointer-events: none; }
 </style>
