@@ -15,6 +15,8 @@
 const path = require('path');
 const { sandbox } = require('gapp-tester');
 const config = require('../gapp.config.json');
+const { checkRequests } = require('./apicheck');
+const { protoize } = require('./proto3');
 
 const ROOT = path.join(__dirname, '..');
 
@@ -54,13 +56,29 @@ function makeSandbox(doc, opts) {
   // `opts.docsGet(id, optionalArgs)` replaces get() wholesale when a test has
   // to see the exact call -- the masked-read tests do, since their whole
   // subject is what got asked for.
-  const docsGet = opts.docsGet ||
-    (() => { counts.get++; return JSON.parse(JSON.stringify(doc)); });
+  // Served the way the API serves it: proto3 leaves out every default, so a
+  // zero margin arrives with no magnitude and the first element of a body
+  // has no startIndex. opts.verbatim hands the fixture over as written, for
+  // the few tests whose subject is the fixture rather than the reading of it.
+  const shape = (d) => (opts.verbatim ? JSON.parse(JSON.stringify(d)) : protoize(d));
+  const docsGet = opts.docsGet || (() => { counts.get++; return shape(doc); });
   const Docs = {
     Documents: {
       get: docsGet,
       batchUpdate: (resource, id) => {
         captured.push({ documentId: id, requests: resource.requests });
+        // The real API refuses a malformed request; so does this, or the
+        // local suite would go on passing while the add-on cannot write.
+        // opts.lax turns it off for the tests whose subject IS a bad request.
+        if (!opts.lax) {
+          const errs = checkRequests(resource.requests);
+          if (errs.length) {
+            const e = new Error('Docs API would reject this batch:\n  - ' +
+              errs.join('\n  - '));
+            e.requests = resource.requests;
+            throw e;
+          }
+        }
         return { replies: [] };
       },
       // The live suite's fixture builder makes its scratch document if it

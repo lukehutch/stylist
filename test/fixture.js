@@ -1,3 +1,50 @@
+/**
+ * A zero-width border, spelled out the way Google spells it.
+ *
+ * Every named style in a real document carries all five of these whether or
+ * not anything is drawn, with a zero width and a zero padding. The harness
+ * serves fixtures through proto3.protoize, which strips the zeros back out
+ * again -- so what the reading code actually meets here is
+ * { color: {}, width: {}, padding: {}, dashStyle: 'SOLID' }, exactly as it
+ * would from the API, and a zero it mistakes for "unset" shows up locally
+ * instead of in production.
+ */
+function noBorder() {
+  return {
+    color: {},
+    width: { magnitude: 0, unit: 'PT' },
+    padding: { magnitude: 0, unit: 'PT' },
+    dashStyle: 'SOLID'
+  };
+}
+
+/** The parts of a real paragraph style that are there even when unused. */
+function realParagraphDefaults() {
+  return {
+    spacingMode: 'NEVER_COLLAPSE',
+    keepLinesTogether: false,
+    keepWithNext: false,
+    avoidWidowAndOrphan: true,
+    pageBreakBefore: false,
+    spaceAbove: { magnitude: 0, unit: 'PT' },
+    spaceBelow: { magnitude: 0, unit: 'PT' },
+    indentStart: { magnitude: 0, unit: 'PT' },
+    indentEnd: { magnitude: 0, unit: 'PT' },
+    indentFirstLine: { magnitude: 0, unit: 'PT' },
+    shading: { backgroundColor: {} },
+    borderTop: noBorder(), borderBottom: noBorder(), borderLeft: noBorder(),
+    borderRight: noBorder(), borderBetween: noBorder()
+  };
+}
+
+/** The parts of a real text style that are there even when unused. */
+function realTextDefaults() {
+  return {
+    bold: false, italic: false, underline: false, strikethrough: false,
+    smallCaps: false, baselineOffset: 'NONE', backgroundColor: {}
+  };
+}
+
 /** A document exercising tabs, named styles, headers, footers, footnotes,
  *  a list and a table. Indices are internally consistent. */
 function makeDoc() {
@@ -43,26 +90,28 @@ function mainTab() {
       styles: [
         {
           namedStyleType: 'NORMAL_TEXT',
-          textStyle: {
+          textStyle: Object.assign(realTextDefaults(), {
             weightedFontFamily: { fontFamily: 'Arial', weight: 400 },
             fontSize: { magnitude: 11, unit: 'PT' },
             foregroundColor: { color: { rgbColor: { red: 0, green: 0, blue: 0 } } }
-          },
-          paragraphStyle: { alignment: 'START', lineSpacing: 115, direction: 'LEFT_TO_RIGHT' }
+          }),
+          paragraphStyle: Object.assign(realParagraphDefaults(), {
+            alignment: 'START', lineSpacing: 115, direction: 'LEFT_TO_RIGHT'
+          })
         },
         {
           namedStyleType: 'HEADING_1',
-          textStyle: {
+          textStyle: Object.assign(realTextDefaults(), {
             weightedFontFamily: { fontFamily: 'Georgia', weight: 700 },
             fontSize: { magnitude: 20, unit: 'PT' },
             bold: true
-          },
-          paragraphStyle: {
+          }),
+          paragraphStyle: Object.assign(realParagraphDefaults(), {
             alignment: 'START',
             spaceAbove: { magnitude: 18, unit: 'PT' },
             spaceBelow: { magnitude: 6, unit: 'PT' },
             keepWithNext: true
-          }
+          })
         }
       ]
     },
@@ -293,4 +342,5 @@ function makeSectionedDoc() {
   };
 }
 
-module.exports = { makeDoc, makeLegacyDoc, makeMultiDoc, makeSectionedDoc };
+module.exports = { makeDoc, makeLegacyDoc, makeMultiDoc, makeSectionedDoc,
+                   noBorder, realTextDefaults, realParagraphDefaults };
