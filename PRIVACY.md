@@ -124,8 +124,11 @@ sidebar, and the document itself, under the Google account you are signed in to
 at the time. It is governed by
 [Google's privacy policy](https://policies.google.com/privacy).
 
-The request goes from Google, to Google, about a Google document, under the
-Google account you are already signed in to. It conveys to Google nothing that
+This request, what it does and does not disclose, and the German case law on
+embedding Google Fonts are covered in full in
+[section 5 of the terms of service](TOS.md), which you accept by using Stylist.
+In short: the request goes from Google, to Google, about a Google document,
+under the Google account you are already signed in to. It conveys to Google nothing that
 Google does not already hold, and it conveys nothing whatsoever to anyone else.
 What Google does with it is Google's own affair, governed by its policy and by
 your agreement with it.

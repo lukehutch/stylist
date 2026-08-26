@@ -20,7 +20,36 @@ any given time, or that it will continue to exist at all.
 These terms restate, and do not replace, the warranty disclaimer in the
 [MIT license](LICENSE) under which Stylist is distributed.
 
-## 2. Stylist changes your documents, and you accept that risk
+## 2. Donations are gifts, and buy nothing
+
+Stylist's sidebar carries a **Tip the author** control, which opens a payment
+page belonging to a third party. Using it is entirely optional and is in no way
+a condition of using Stylist, which is and remains free.
+
+**If you send money to Luke Hutchison through that control, you agree that it
+is a voluntary, unconditional, non-refundable gift.** In particular you agree
+that it:
+
+- is **not a purchase**, not a payment for goods or services, not a
+  subscription, not a license fee, and not consideration for anything;
+- **entitles you to nothing** — no software, no feature, no fix, no support, no
+  priority, no response, no access, and no continued availability of Stylist;
+- **carries no guarantee, warranty, or undertaking of any kind**, and creates
+  no obligation on the developer to do anything at all, then or ever;
+- **is not refundable**, in whole or in part, for any reason, including if
+  Stylist stops working, stops being developed, or ceases to exist, and
+  including if you later change your mind.
+
+Nothing you give changes any other part of these terms. In particular it does
+not narrow the disclaimers in section 1, the limitation of liability in section
+6, or the release in section 7.
+
+The payment itself is handled entirely by the third-party payment service, on
+its own terms and its own privacy policy. The developer neither operates it nor
+receives any information about you from it beyond what that service chooses to
+show, and Stylist itself sends it nothing.
+
+## 3. Stylist changes your documents, and you accept that risk
 
 Stylist exists to modify the formatting of the Google Docs document you have it
 open in. That is its entire purpose. Formatting changes it makes are real
@@ -35,7 +64,7 @@ Before using Stylist on a document that matters to you, make a copy of it.
 Google Docs also keeps version history under **File → Version history**, which
 will let you return a document to how it was.
 
-## 3. You are responsible for satisfying yourself that it is safe to use
+## 4. You are responsible for satisfying yourself that it is safe to use
 
 Stylist's complete source code is public at
 [github.com/lukehutch/stylist](https://github.com/lukehutch/stylist), and its
@@ -52,7 +81,44 @@ source code shows. Where these terms, the
 Stylist disagrees with what the source code does, the source code is what
 Stylist actually does.
 
-## 4. Limitation of liability
+## 5. Fonts, and your IP address
+
+Stylist's font picker draws each font's name in the font it names, which
+requires having the font. To that end **the sidebar requests a stylesheet from
+Google's font servers, `fonts.googleapis.com` and `fonts.gstatic.com`, when the
+sidebar opens.** Like every request any browser makes to any server, it
+discloses the IP address it comes from, along with your browser version.
+
+**By installing and using Stylist you consent to this request being made and to
+your IP address being sent to Google as part of it**, for the sole purpose of
+fetching the fonts the picker needs in order to render. You further agree to
+waive, to the maximum extent permitted by applicable law, any claim arising
+from that disclosure.
+
+What is and is not disclosed:
+
+- **Sent:** your IP address and browser version, as any web request discloses,
+  and the list of font families being requested — which is fixed, identical for
+  every user, and says nothing about you or your document.
+- **Not sent:** your identity, your name, your email address, your Google
+  account, your document, its title, its contents, or anything you have done in
+  it. No cookie is set by Stylist, and Stylist stores nothing in your browser.
+
+You should know the following in deciding whether to agree. Under the GDPR an
+IP address is treated as personal data, and in **LG München I, judgment of
+20 January 2022, case 3 O 17493/20**, the Regional Court of Munich I held that
+a website operator embedding Google Fonts in this way without consent breached
+the GDPR, rejecting legitimate interests under Article 6(1)(f) and awarding the
+claimant €100. That case concerned an ordinary public website, whose visitors
+had no relationship with Google. Stylist's sidebar is served by Google, runs
+inside a Google Docs document Google is already storing, in a browser already
+signed in to a Google account — so the request discloses to Google nothing that
+Google does not already have, and discloses nothing to anyone else. Your
+consent under this section is given with that difference in mind.
+
+If you do not agree to this, do not install or use Stylist.
+
+## 6. Limitation of liability
 
 **To the maximum extent permitted by applicable law, the developer shall not be
 liable to you for any damages whatsoever** arising out of or in connection with
@@ -68,7 +134,7 @@ limitations above apply to the fullest extent the law there allows, and no
 further; nothing here is intended to exclude any liability that cannot lawfully
 be excluded.
 
-## 5. Release and waiver of claims
+## 7. Release and waiver of claims
 
 **To the maximum extent permitted by applicable law, you release the developer
 from, and waive, every claim, demand, action, cause of action, and right to sue
@@ -87,7 +153,7 @@ liability for gross negligence or willful misconduct, and rights granted to
 consumers by statute — this section does not purport to waive them, and applies
 only as far as the law there allows.
 
-## 6. Indemnification
+## 8. Indemnification
 
 **You agree to indemnify, defend, and hold harmless the developer** from and
 against any and all claims, demands, proceedings, losses, liabilities, damages,
@@ -109,15 +175,15 @@ developer without the developer's prior written consent.
 This obligation applies to the maximum extent permitted by applicable law, and
 survives your ceasing to use Stylist and any termination of these terms.
 
-## 7. Your statutory rights are unaffected
+## 9. Your statutory rights are unaffected
 
-Nothing in these terms — and in particular nothing in sections 4, 5 and 6 —
+Nothing in these terms — and in particular nothing in sections 6, 7 and 8 —
 takes away any right you have under law that cannot lawfully be taken away.
 
 If you are a consumer, the consumer protection law of the country you live in
 applies to you in full, whatever these terms say. If you are in the European
 Economic Area or the United Kingdom, your rights under the GDPR are likewise
-untouched: **the release in section 5 and the indemnity in section 6 do not
+untouched: **the release in section 7 and the indemnity in section 8 do not
 apply to data protection rights, and do not waive your right to lodge a
 complaint with a supervisory authority.** Where any term here would conflict
 with such a right, that term does not apply, and the rest stands.
@@ -125,7 +191,7 @@ with such a right, that term does not apply, and the rest stands.
 How Stylist handles data, and the fact that it holds none of yours, is set out
 in the [privacy policy](PRIVACY.md).
 
-## 8. Google's services are not the developer's
+## 10. Google's services are not the developer's
 
 Stylist runs inside Google Docs, on Google's Apps Script platform, on documents
 stored by Google. Your use of those services is governed by your agreements
@@ -133,13 +199,13 @@ with Google, not by these terms, and the developer has no control over them and
 no responsibility for them. Should Google change or withdraw any of them,
 Stylist may stop working, with no obligation on the developer to repair it.
 
-## 9. Your data
+## 11. Your data
 
 Stylist collects and transmits no user data. What it does with the document you
 open it in, and with the presets you save, is described in the
 [privacy policy](PRIVACY.md).
 
-## 10. Support, and no obligation to provide it
+## 12. Support, and no obligation to provide it
 
 Stylist is a personal project. The developer is under no obligation to provide
 support, to fix any defect, to accept any change, or to continue developing or
@@ -148,19 +214,19 @@ publishing Stylist. Reports and questions are welcome at the project's
 undertaking that any of them will be answered or acted on. The developer can
 also be reached at luke.hutch@gmail.com.
 
-## 11. Changes to these terms
+## 13. Changes to these terms
 
 These terms may change. Any change will be committed to the project's public
 repository, where its full history is visible. Continuing to use Stylist after
 a change means you accept the terms as they then stand.
 
-## 12. The license still governs the code
+## 14. The license still governs the code
 
 Your rights to use, copy, modify, and redistribute Stylist's source code come
 from the [MIT license](LICENSE), which these terms do not narrow. Where these
 terms and that license conflict as to the code, the license governs.
 
-## 13. Governing law
+## 15. Governing law
 
 These terms are governed by the laws of the State of `<STATE>`, United States,
 without regard to its conflict of law rules.
