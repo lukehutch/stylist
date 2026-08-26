@@ -245,14 +245,6 @@ function pickSection_(secs, elements, ctx) {
     for (var i = 0; i < starts.length; i++) if (starts[i] <= at) hit = i;
     return hit;
   }
-  /** Paragraph text as the API stores it: its runs, concatenated. */
-  function paraText(p) {
-    return ((p || {}).elements || []).map(function (e) {
-      if (e.textRun) return e.textRun.content || '';
-      if (e.autoText) return ' ';
-      return '';
-    }).join('');
-  }
 
   var wantLi = ctx.paraKind === 'li';
   var hits = [];
@@ -260,7 +252,7 @@ function pickSection_(secs, elements, ctx) {
     (els || []).forEach(function (e) {
       if (e.paragraph) {
         if (!!e.paragraph.bullet === wantLi) {
-          var t = paraText(e.paragraph);
+          var t = paraText_(e.paragraph);
           // An empty head can only stand for an empty paragraph; anything
           // else matches by its prefix.
           if (want === '' ? t === '' : t.slice(0, want.length) === want) {

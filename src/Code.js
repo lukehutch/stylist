@@ -161,7 +161,7 @@ function refresh(tabId, what, ctx) {
     out.hfLink = out.hfLinks[out.activeSectionIndex] || null;
     out.section = hf.sections[out.activeSectionIndex] || null;
   }
-  if (!what || what === 'lists') out.lists = readLists(tabId);
+  if (!what || what === 'lists') out.lists = readLists(tabId, ctx);
   if (!what || what === 'segments') out.segments = readSegments(tabId);
   if (!what || what === 'tables') {
     var t = readTables(tabId);

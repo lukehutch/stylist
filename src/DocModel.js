@@ -285,6 +285,23 @@ function targetTabIds_(doc, tabId, scope) {
   return [resolveTab_(doc, tabId).tabId];
 }
 
+/**
+ * A paragraph's text as the API stores it: its runs, concatenated.
+ *
+ * This is what the cursor probe's paragraph text is matched against, which is
+ * how the sections and lists panels work out what the cursor is in. A field
+ * stands for the single space it occupies, because the probe reads the
+ * paragraph through DocumentApp, which renders a field's value rather than
+ * reporting it.
+ */
+function paraText_(p) {
+  return ((p || {}).elements || []).map(function (e) {
+    if (e.textRun) return e.textRun.content || '';
+    if (e.autoText) return ' ';
+    return '';
+  }).join('');
+}
+
 /* ------------------------------------------------------------------ *
  * TextStyle <-> UI
  * ------------------------------------------------------------------ */

@@ -686,6 +686,49 @@ test('the cursor in a cell list finds that list, not the one above it', (t) => {
   t.equal(M.readLists(null).activeListId, 'list.1', 'and the body one from the body');
 });
 
+/* The order join above is the fallback. What the panel actually runs on is the
+   cursor probe's paragraph text, which needs the two views to agree about
+   nothing -- the bug it fixes was a real document where they did not, and the
+   panel sat on "Click inside a list" however many lists the cursor was in. */
+test('the probe text finds the list without DocumentApp agreeing about anything', (t) => {
+  const M = makeSandbox(docWithListInACell());
+  // No cursor and no body walk to fall back on: the text is the whole answer.
+  t.equal(M.readLists(null, { paraKind: 'li', paraHead: 'in a cell' }).activeListId,
+    'kx.cell');
+  t.equal(M.readLists(null, { paraKind: 'li', paraHead: 'Item one' }).activeListId,
+    'list.1', 'and a body list the same way');
+});
+
+test('a probe pointing at no list at all leaves the panel with nothing', (t) => {
+  const M = makeSandbox(docWithListInACell());
+  t.equal(M.readLists(null, { paraKind: 'p', paraHead: 'Item one' }).activeListId, null,
+    'the cursor is in an ordinary paragraph, whatever it says');
+  t.equal(M.readLists(null, { paraKind: 'li', paraHead: 'nowhere' }).activeListId, null,
+    'and text no list has is not a reason to guess');
+});
+
+test('the order join still answers when the probe cannot', (t) => {
+  const M = makeSandbox(docWithListInACell());
+  const cellItem = { getType: () => 'LIST_ITEM', getListId: () => 'kx.cell',
+                     getParent: () => tcell };
+  const tcell = { getType: () => 'TABLE_CELL', getParent: () => trow,
+                  getNumChildren: () => 1, getChild: () => cellItem };
+  const trow = { getType: () => 'TABLE_ROW', getParent: () => table,
+                 getNumChildren: () => 1, getChild: () => tcell };
+  const table = { getType: () => 'TABLE', getParent: () => body,
+                  getNumChildren: () => 1, getChild: () => trow };
+  const bodyItem = { getType: () => 'LIST_ITEM', getListId: () => 'list.1',
+                     getParent: () => body };
+  const kids = [bodyItem, table];
+  const body = { getType: () => 'BODY_SECTION', getParent: () => null,
+                 getNumChildren: () => kids.length, getChild: (i) => kids[i] };
+  M.__body = body;
+  M.__cursor = { getElement: () => cellItem };
+  // An empty probe is what a full load hands over, before the sidebar has
+  // polled the cursor even once.
+  t.equal(M.readLists(null, {}).activeListId, 'kx.cell');
+});
+
 suite('Tables');
 
 test('tables are found with their geometry and header row', (t) => {

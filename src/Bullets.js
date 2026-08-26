@@ -97,14 +97,48 @@ function listParagraphs_(content) {
 /**
  * Which list the cursor is in, as a listId, or null.
  *
- * Same join as activeTableIndex_, and for the same reason: DocumentApp knows
- * where the cursor is but not the Docs API's listIds, and the two id spaces do
- * not meet anywhere. What both agree on is order down the body, so the nth
- * distinct list by either route is the same list. `ordered` is the Docs API's
- * lists sorted by where their first paragraph starts; a differing count means
- * the two views have diverged -- most often because DocumentApp is reading the
- * document's own active tab rather than the one the sidebar is showing -- and
- * then no answer is better than a wrong one.
+ * The cursor probe reports the leading text of the paragraph it is in, and
+ * that text is direct evidence: the list holding a paragraph that begins with
+ * it is the list the cursor is in. That is the same match the sections panel
+ * makes, and it needs the two views to agree about nothing at all.
+ *
+ * Without a probe -- the first full read, before the sidebar has polled -- or
+ * when the text is ambiguous, it falls back to activeListId_, which joins the
+ * two views on body order alone and gives up if they disagree about how many
+ * lists there are. That guard is why the fallback cannot be the whole answer:
+ * DocumentApp reads the document's own active tab, sees only what the body
+ * holds, and any divergence at all silently produced "no list is selected".
+ */
+function pickList_(ordered, paras, ctx) {
+  var byText = listIdByParaHead_(ordered, paras, ctx || {});
+  if (byText.length === 1) return byText[0];
+  return activeListId_(ordered) || byText[0] || null;
+}
+
+/** Every list holding a paragraph that starts with the probe's text. */
+function listIdByParaHead_(ordered, paras, ctx) {
+  var want = ctx.paraHead;
+  if (ctx.paraKind !== 'li' || want === undefined || want === null) return [];
+  var hits = [];
+  (ordered || []).forEach(function (l) {
+    var items = paras[l.listId] || [];
+    for (var i = 0; i < items.length; i++) {
+      var t = paraText_(items[i].paragraph);
+      // An empty head can only stand for an empty item; anything else
+      // matches by its prefix, the probe having truncated it at 80.
+      if (want === '' ? t === '' : t.slice(0, want.length) === want) {
+        hits.push(l.listId);
+        return;
+      }
+    }
+  });
+  return hits;
+}
+
+/**
+ * The fallback join: the nth distinct list down the body by either route is
+ * the same list, so DocumentApp's ordinal for the cursor's list indexes the
+ * Docs API's lists sorted by where their first paragraph starts.
  */
 /** Timed, because on a long document this body walk costs more than the
  *  Docs API read it accompanies. */
@@ -170,10 +204,10 @@ function activeListId_inner_(ordered) {
   }
 }
 
-function readLists(tabId) {
+function readLists(tabId, ctx) {
   var doc = fetchDoc_();
-  var ctx = resolveTab_(doc, tabId);
-  var content = ctx.content;
+  var tab = resolveTab_(doc, tabId);
+  var content = tab.content;
   var paras = listParagraphs_(content);
   var lists = [];
 
@@ -223,9 +257,9 @@ function readLists(tabId) {
   // DocumentApp, which is what activeListId_ joins the two views on.
   lists.sort(function (a, b) { return a.firstIndex - b.firstIndex; });
   return {
-    tabId: ctx.tabId,
+    tabId: tab.tabId,
     lists: lists,
-    activeListId: activeListId_(lists),
+    activeListId: pickList_(lists, paras, ctx),
     presets: BULLET_PRESETS
   };
 }

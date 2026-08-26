@@ -2694,10 +2694,11 @@ function renderAll() {
 function refreshSlice(what) {
   // The section-shaped slices need the cursor's paragraph to find the right
   // section, and prefer the one already on screen -- the same arguments the
-  // poll passes.
+  // poll passes. The lists slice matches on that paragraph too, but has no
+  // section to prefer.
   var ctxArg = (what === 'sections' || what === 'hf')
     ? Object.assign({}, S.ctx, { preferred: S.data.activeSectionIndex || 0 })
-    : undefined;
+    : (what === 'lists' ? S.ctx : undefined);
   return call('refresh', [S.tabId, what, ctxArg]).then(function (slice) {
     Object.keys(slice).forEach(function (k) { S.data[k] = slice[k]; });
     // Recorded so the next poll for this slice recognises its own answer and
@@ -2931,10 +2932,11 @@ function poll() {
       if (!what) return null;
       // The sections and headers slices both need the probe's paragraph handle
       // to find the right section, and prefer whichever one the panel already
-      // shows.
+      // shows. The lists slice matches on the same handle to find the list the
+      // cursor is in.
       var ctxArg = what === 'sections' || what === 'hf'
         ? Object.assign({}, lastCtxObj, { preferred: S.data.activeSectionIndex || 0 })
-        : undefined;
+        : (what === 'lists' ? lastCtxObj : undefined);
       return callRead('refresh', [S.tabId, what, ctxArg]).then(function (slice) {
         lastFetchMs = Date.now() - t0;
         // A write went out while this read was in the air, so what came back
