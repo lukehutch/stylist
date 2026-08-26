@@ -480,9 +480,12 @@ Required fields, with Google's limits:
 | Support URL | must resolve |
 
 `assets/` already holds the two icon sizes and the banner at the exact required
-dimensions (`icon-32.png`, `icon-128.png`, `banner-220x140.png`). Screenshots
-and the three URLs are the work left; the URLs are mandatory, so a public
-listing needs somewhere to host those three pages.
+dimensions (`icon-32.png`, `icon-128.png`, `banner-220x140.png`), and
+[PRIVACY.md](PRIVACY.md) is the privacy policy's text. Screenshots and the
+three URLs are the work left. The URLs are mandatory and must resolve to
+hosted pages, so `PRIVACY.md` needs somewhere to live that is not a GitHub blob
+URL if Google objects to one — GitHub Pages off this repository is the cheapest
+answer, and it covers the support and terms URLs too.
 
 ### 5. Submit
 
