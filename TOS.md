@@ -251,7 +251,7 @@ terms and that license conflict as to the code, the license governs.
 
 ## 15. Governing law
 
-These terms are governed by the laws of the State of `<STATE>`, United States,
+These terms are governed by the laws of the State of Utah, United States,
 without regard to its conflict of law rules.
 
 If you are a consumer resident in the European Economic Area, the United
