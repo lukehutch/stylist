@@ -285,8 +285,35 @@ function makeMultiDoc() {
  * to exercise and pass on a comment. This is that document, near enough:
  * named styles AND two sections, which no other fixture here has both of.
  */
+/**
+ * The seven style types every real document carries and the fixture did not.
+ *
+ * Google hands back all nine whether or not a document has ever used one, so
+ * a mock with two made every test that touched a third read undefined and
+ * every write to a third land nowhere. Sizes descend the way the Docs
+ * defaults do, which is enough to tell one from another.
+ */
+function remainingNamedStyles() {
+  const sizes = { TITLE: 26, SUBTITLE: 15, HEADING_2: 16, HEADING_3: 14,
+                  HEADING_4: 12, HEADING_5: 11, HEADING_6: 11 };
+  return Object.keys(sizes).map((type) => ({
+    namedStyleType: type,
+    textStyle: Object.assign(realTextDefaults(), {
+      weightedFontFamily: { fontFamily: 'Georgia', weight: 400 },
+      fontSize: { magnitude: sizes[type], unit: 'PT' }
+    }),
+    paragraphStyle: Object.assign(realParagraphDefaults(), {
+      alignment: 'START',
+      spaceAbove: { magnitude: 12, unit: 'PT' },
+      spaceBelow: { magnitude: 4, unit: 'PT' }
+    })
+  }));
+}
+
 function makeLiveLikeDoc() {
   const t = mainTab();
+  // A real document always has all nine.
+  t.namedStyles.styles = t.namedStyles.styles.concat(remainingNamedStyles());
   t.body.content.push({
     startIndex: 120, endIndex: 121,
     sectionBreak: {
@@ -310,6 +337,28 @@ function makeLiveLikeDoc() {
       elements: [{ startIndex: 121, endIndex: 150,
                    textRun: { content: 'A paragraph in the second section' } }]
     }
+  });
+  // A second, numbered list. LiveFixture.js builds one of each, and a suite
+  // that reads "the bulleted and the numbered list" has to find two here too.
+  t.lists['list.2'] = { listProperties: { nestingLevels: [
+    { glyphType: 'DECIMAL', glyphFormat: '%0.',
+      indentStart: { magnitude: 36, unit: 'PT' },
+      indentFirstLine: { magnitude: 18, unit: 'PT' },
+      bulletAlignment: 'START', startNumber: 1 },
+    { glyphType: 'ALPHA', glyphFormat: '%1.',
+      indentStart: { magnitude: 72, unit: 'PT' }, bulletAlignment: 'START' }
+  ] } };
+  [[150, 162, 'First step'], [162, 175, 'Second step']].forEach((it) => {
+    t.body.content.push({
+      startIndex: it[0], endIndex: it[1],
+      paragraph: {
+        paragraphStyle: Object.assign(realParagraphDefaults(),
+          { namedStyleType: 'NORMAL_TEXT' }),
+        bullet: { listId: 'list.2', nestingLevel: 0 },
+        elements: [{ startIndex: it[0], endIndex: it[1],
+                     textRun: { content: it[2] } }]
+      }
+    });
   });
   t.headers['h.section'] = { headerId: 'h.section', content: [
     { startIndex: 0, endIndex: 15, paragraph: {
