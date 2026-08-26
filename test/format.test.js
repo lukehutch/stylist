@@ -474,21 +474,23 @@ test('the load reports where its own time went', (t) => {
     .forEach((k) => t.equal(typeof d.timings[k], 'number', k + ' is timed'));
 });
 
-test('the cursor lookups are timed apart from the read they accompany', (t) => {
+test('the cursor lookup is timed apart from the read it accompanies', (t) => {
+  // One lookup, not one per panel: the lists and tables panels are answered
+  // from the same probe.
   const d = makeSandbox(makeDoc()).loadAll('t.0');
-  t.equal(typeof d.timings.cursorList, 'number');
-  t.equal(typeof d.timings.cursorTable, 'number');
+  t.equal(typeof d.timings.cursor, 'number');
 });
 
-test('the body walk asks for the child count once, not once per child', (t) => {
-  // Every DocumentApp accessor is a call across the service boundary, so a
-  // getNumChildren() in the loop condition is one extra round trip per child.
-  const src = require('fs').readFileSync(
-    require('path').join(__dirname, '..', 'src', 'Bullets.js'), 'utf8') +
-    require('fs').readFileSync(
-      require('path').join(__dirname, '..', 'src', 'Tables.js'), 'utf8');
-  t.notOk(/for \([^)]*getNumChildren\(\)/.test(src),
-    'the child count must be hoisted out of the loop');
+test('the panels never walk the body: they follow the cursor path down', (t) => {
+  // Every DocumentApp accessor is a call across the service boundary, and
+  // walking the body was one per child. The path the probe already carries
+  // costs one call per level of nesting instead, and the panels reach
+  // DocumentApp not at all.
+  const read = (f) => require('fs').readFileSync(
+    require('path').join(__dirname, '..', 'src', f), 'utf8');
+  ['Bullets.js', 'Tables.js', 'PageFormat.js'].forEach((f) => {
+    t.notOk(/DocumentApp\s*\./.test(read(f)), f + ' must answer from the path alone');
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -660,30 +662,46 @@ test('its paragraphs are written like any other list', (t) => {
     'the cell paragraphs carry ordinary document indexes');
 });
 
+/** The nth child of DocumentApp's body whose type is the given one. */
+function childOfType(body, type, nth) {
+  let seen = 0;
+  for (let i = 0; i < body.getNumChildren(); i++) {
+    if (String(body.getChild(i).getType()) === type && seen++ === (nth || 0)) {
+      return { at: i, el: body.getChild(i) };
+    }
+  }
+  return { at: -1, el: null };
+}
+
 test('the cursor in a cell list finds that list, not the one above it', (t) => {
   const M = makeSandbox(docWithListInACell());
-  // The body as DocumentApp sees it: one body list, then the table whose one
-  // cell holds the second. The join is this order and nothing else.
-  const cellItem = { getType: () => 'LIST_ITEM', getListId: () => 'kx.cell',
-                     getParent: () => tcell };
-  const tcell = { getType: () => 'TABLE_CELL', getParent: () => trow,
-                  getNumChildren: () => 1, getChild: () => cellItem };
-  const trow = { getType: () => 'TABLE_ROW', getParent: () => table,
-                 getNumChildren: () => 1, getChild: () => tcell };
-  const table = { getType: () => 'TABLE', getParent: () => body,
-                  getNumChildren: () => 1, getChild: () => trow };
-  const bodyItem = { getType: () => 'LIST_ITEM', getListId: () => 'list.1',
-                     getParent: () => body };
-  const kids = [bodyItem, table];
-  const body = { getType: () => 'BODY_SECTION', getParent: () => null,
-                 getNumChildren: () => kids.length, getChild: (i) => kids[i] };
+  // Driven through DocumentApp's own view of this very document, because
+  // what is under test is that the two views agree: the panel reads a chain
+  // of child indices off the cursor and follows it down the API's content.
+  const body = M.__docAppBody;
+  const table = childOfType(body, 'TABLE', 1);   // the second one holds the list
+  const cellItem = table.el.getChild(0).getChild(0).getChild(0);
+  t.equal(cellItem.getListId(), 'kx.cell', 'the cell item, reached by child index');
 
-  M.__body = body;
   M.__cursor = { getElement: () => cellItem };
-  t.equal(M.readLists(null).activeListId, 'kx.cell');
+  t.equal(M.readLists(null, M.cursorContext()).activeListId, 'kx.cell');
 
-  M.__cursor = { getElement: () => bodyItem };
-  t.equal(M.readLists(null).activeListId, 'list.1', 'and the body one from the body');
+  const bodyItem = childOfType(body, 'LIST_ITEM');
+  M.__cursor = { getElement: () => bodyItem.el };
+  t.equal(M.readLists(null, M.cursorContext()).activeListId, 'list.1',
+    'and the body one from the body');
+});
+
+test('the cursor path is a chain of child indices, one call per level', (t) => {
+  const M = makeSandbox(docWithListInACell());
+  const body = M.__docAppBody;
+  const table = childOfType(body, 'TABLE', 1);
+  M.__cursor = {
+    getElement: () => table.el.getChild(0).getChild(0).getChild(0)
+  };
+  t.deepEqual(M.cursorContext().path, [table.at, 0, 0, 0],
+    'table, row, cell, paragraph');
+  t.equal(M.cursorContext().root, 'body');
 });
 
 /* The order join above is the fallback. What the panel actually runs on is the
@@ -707,28 +725,28 @@ test('a probe pointing at no list at all leaves the panel with nothing', (t) => 
     'and text no list has is not a reason to guess');
 });
 
-test('the order join still answers when the probe cannot', (t) => {
+test('the path is believed over the text, when they disagree', (t) => {
+  // Two paragraphs can read the same; the path cannot be ambiguous. The text
+  // match stays as the fallback for a cursor whose path could not be built.
   const M = makeSandbox(docWithListInACell());
-  const cellItem = { getType: () => 'LIST_ITEM', getListId: () => 'kx.cell',
-                     getParent: () => tcell };
-  const tcell = { getType: () => 'TABLE_CELL', getParent: () => trow,
-                  getNumChildren: () => 1, getChild: () => cellItem };
-  const trow = { getType: () => 'TABLE_ROW', getParent: () => table,
-                 getNumChildren: () => 1, getChild: () => tcell };
-  const table = { getType: () => 'TABLE', getParent: () => body,
-                  getNumChildren: () => 1, getChild: () => trow };
-  const bodyItem = { getType: () => 'LIST_ITEM', getListId: () => 'list.1',
-                     getParent: () => body };
-  const kids = [bodyItem, table];
-  const body = { getType: () => 'BODY_SECTION', getParent: () => null,
-                 getNumChildren: () => kids.length, getChild: (i) => kids[i] };
-  M.__body = body;
-  M.__cursor = { getElement: () => cellItem };
-  // An empty probe is what a full load hands over, before the sidebar has
-  // polled the cursor even once.
-  t.equal(M.readLists(null, {}).activeListId, 'kx.cell');
+  const body = M.__docAppBody;
+  const table = childOfType(body, 'TABLE', 1);
+  M.__cursor = { getElement: () => table.el.getChild(0).getChild(0).getChild(0) };
+  const ctx = M.cursorContext();
+  ctx.paraHead = 'Item one';           // the body list's text, not this one's
+  t.equal(M.readLists(null, ctx).activeListId, 'kx.cell');
 });
 
+test('a path the document has outgrown falls back rather than guessing', (t) => {
+  const M = makeSandbox(docWithListInACell());
+  t.equal(M.readLists(null, { root: 'body', path: [99] }).activeListId, null);
+  t.equal(
+    M.readLists(null, { root: 'body', path: [99], paraKind: 'li', paraHead: 'in a cell' })
+      .activeListId,
+    'kx.cell', 'the text match still answers');
+});
+
+/* ------------------------------------------------------------------ */
 suite('Tables');
 
 test('tables are found with their geometry and header row', (t) => {
@@ -773,27 +791,6 @@ test('unifying tables is a no-op with only one table', (t) => {
   t.equal(allRequests(S).length, 0);
 });
 
-/* A body whose children are the given types, with a working getChildIndex. */
-function fakeBody(types) {
-  const children = types.map((type, i) => {
-    const node = {
-      getType: () => type,
-      getParent: () => body,
-      __i: i
-    };
-    return node;
-  });
-  const body = {
-    getType: () => 'BODY_SECTION',
-    getParent: () => null,
-    getNumChildren: () => children.length,
-    getChild: (i) => children[i],
-    getChildIndex: (c) => c.__i
-  };
-  body.__children = children;
-  return body;
-}
-
 // Own sandbox: loadAll seeds the default custom styles, which the shared one's
 // preset tests count.
 test('one sidebar refresh downloads the document once, not once per section', (t) => {
@@ -813,38 +810,34 @@ test('a write invalidates the cached document', (t) => {
 });
 
 test('the table the cursor sits in is reported by its position in the body', (t) => {
-  S.__reset();
-  const body = fakeBody(['PARAGRAPH', 'TABLE', 'PARAGRAPH']);
-  S.__body = body;
-  const cell = { getType: () => 'TABLE_CELL', getParent: () => body.__children[1] };
-  S.__cursor = { getElement: () => cell };
-
-  t.equal(S.readTables(null).activeIndex, 0, 'the fixture has exactly one table');
+  const M = makeSandbox(makeDoc());
+  const table = childOfType(M.__docAppBody, 'TABLE');
+  M.__cursor = { getElement: () => table.el.getChild(0).getChild(0) };
+  t.equal(M.readTables(null, M.cursorContext()).activeIndex, 0,
+    'the fixture has exactly one table');
 });
 
 test('a cursor outside any table selects none', (t) => {
-  S.__reset();
-  const body = fakeBody(['PARAGRAPH', 'TABLE', 'PARAGRAPH']);
-  S.__body = body;
-  S.__cursor = { getElement: () => body.__children[0] };
-  t.equal(S.readTables(null).activeIndex, null);
+  const M = makeSandbox(makeDoc());
+  const para = childOfType(M.__docAppBody, 'PARAGRAPH');
+  M.__cursor = { getElement: () => para.el };
+  t.equal(M.readTables(null, M.cursorContext()).activeIndex, null);
 });
 
-test('a body that disagrees about how many tables there are is not trusted', (t) => {
-  // DocumentApp reads the document's own active tab, which need not be the tab
-  // the sidebar is showing. A differing count means they have diverged.
-  S.__reset();
-  const body = fakeBody(['TABLE', 'TABLE']);
-  S.__body = body;
-  S.__cursor = { getElement: () => body.__children[0] };
-  t.equal(S.readTables(null).activeIndex, null);
+test('a path the document has outgrown is not trusted', (t) => {
+  // The path is read off DocumentApp, which reads the document's own active
+  // tab -- not necessarily the tab the sidebar is showing, and not
+  // necessarily the document as it stood when the panel last read it.
+  const M = makeSandbox(makeDoc());
+  t.equal(M.readTables(null, { root: 'body', path: [99] }).activeIndex, null);
+  t.equal(M.readTables(null, { root: 'header', path: [0] }).activeIndex, null,
+    'and a cursor outside the body has no body position at all');
 });
 
 test('no cursor at all is not an error', (t) => {
   S.__reset();
-  S.__body = null;
   S.__cursor = null;
-  t.equal(S.readTables(null).activeIndex, null);
+  t.equal(S.readTables(null, S.cursorContext()).activeIndex, null);
 });
 
 test('cell styling without a range targets every cell in the table', (t) => {
@@ -1152,6 +1145,34 @@ test('a paragraph picks the section it sits inside', (t) => {
   // A paragraph inside a table belongs to the section holding the table.
   t.equal(M.pickSection_(scan.sections, scan.elements,
     { paraKind: 'p', paraHead: 'Cell words' }), 2);
+});
+
+test('the cursor path names the section outright, with no text to match', (t) => {
+  const M = makeSandbox(SEC);
+  const scan = M.sectionsScan_(M.resolveTab_(M.fetchDoc_(), 't.0'));
+  const body = M.__docAppBody;
+  const at = (i) => {
+    M.__cursor = { getElement: () => body.getChild(i) };
+    const ctx = M.cursorContext();
+    // The path on its own: no head to fall back to, and a preferred section
+    // that is wrong, so only the path can produce the right answer.
+    return M.pickSection_(scan.sections, scan.elements,
+      { root: ctx.root, path: ctx.path, preferred: 0 });
+  };
+  t.equal(at(0), 0, 'First page text');
+  t.equal(at(3), 1, 'Shared heading');
+  // The two empty paragraphs are indistinguishable by text; by path they are
+  // not, and each is found in the section it actually sits in.
+  t.equal(at(2), 1, 'the empty paragraph in the second section');
+  t.equal(at(5), 2, 'and the one in the third');
+
+  // Into the cell, four levels down: table, row, cell, paragraph.
+  const cell = body.getChild(7).getChild(0).getChild(0);
+  M.__cursor = { getElement: () => cell.getChild(0) };
+  const ctx = M.cursorContext();
+  t.deepEqual(ctx.path, [7, 0, 0, 0]);
+  t.equal(M.pickSection_(scan.sections, scan.elements,
+    { root: 'body', path: ctx.path, preferred: 0 }), 2, 'Cell words');
 });
 
 test('twin paragraphs across sections stay with the one already showing', (t) => {

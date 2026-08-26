@@ -66,8 +66,7 @@ function listParagraphs_(content) {
   function walk(elements) {
     (elements || []).forEach(function (el) {
       if (el.table) {
-        // Row-major, which is the order the Docs API lists them in and the
-        // order DocumentApp walks them in -- the two views are joined on it.
+        // Row-major, which is the order the Docs API lists them in.
         (el.table.tableRows || []).forEach(function (row) {
           (row.tableCells || []).forEach(function (cell) { walk(cell.content); });
         });
@@ -97,22 +96,38 @@ function listParagraphs_(content) {
 /**
  * Which list the cursor is in, as a listId, or null.
  *
- * The cursor probe reports the leading text of the paragraph it is in, and
- * that text is direct evidence: the list holding a paragraph that begins with
- * it is the list the cursor is in. That is the same match the sections panel
- * makes, and it needs the two views to agree about nothing at all.
+ * The cursor probe reports where it sits as a chain of child indices (see
+ * cursorPath_), and that chain picks the paragraph straight out of the API's
+ * own content. A list paragraph carries the listId the panel is asking for,
+ * so there is no join to make and nothing to count: the answer is read off
+ * the element.
  *
- * Without a probe -- the first full read, before the sidebar has polled -- or
- * when the text is ambiguous, it falls back to activeListId_, which joins the
- * two views on body order alone and gives up if they disagree about how many
- * lists there are. That guard is why the fallback cannot be the whole answer:
- * DocumentApp reads the document's own active tab, sees only what the body
- * holds, and any divergence at all silently produced "no list is selected".
+ * The text match below it is a fallback, not a second mechanism. The probe's
+ * paragraph text finds the list when the path cannot -- a document shape the
+ * climb gives up on, or a sidebar showing a tab other than the one
+ * DocumentApp has open. This panel has failed to find the cursor's list in
+ * the field three times over, so the cheap second answer stays until the
+ * path has proved itself there.
  */
-function pickList_(ordered, paras, ctx) {
-  var byText = listIdByParaHead_(ordered, paras, ctx || {});
-  if (byText.length === 1) return byText[0];
-  return activeListId_(ordered) || byText[0] || null;
+function pickList_(ordered, elements, paras, ctx) {
+  ctx = ctx || {};
+  var byPath = listIdAtPath_(ordered, elements, ctx);
+  if (byPath) return byPath;
+  return listIdByParaHead_(ordered, paras, ctx)[0] || null;
+}
+
+/** The listId of the paragraph the cursor path points at, if it is in one. */
+function listIdAtPath_(ordered, elements, ctx) {
+  if (ctx.root !== 'body') return null;
+  var el = elementAtPath_(elements, ctx.path);
+  var id = el && el.paragraph && el.paragraph.bullet && el.paragraph.bullet.listId;
+  if (!id) return null;
+  // Only a list the panel is offering: readLists drops the ones whose
+  // paragraphs are all gone, and naming one of those would show nothing.
+  for (var i = 0; i < ordered.length; i++) {
+    if (ordered[i].listId === id) return id;
+  }
+  return null;
 }
 
 /** Every list holding a paragraph that starts with the probe's text. */
@@ -133,75 +148,6 @@ function listIdByParaHead_(ordered, paras, ctx) {
     }
   });
   return hits;
-}
-
-/**
- * The fallback join: the nth distinct list down the body by either route is
- * the same list, so DocumentApp's ordinal for the cursor's list indexes the
- * Docs API's lists sorted by where their first paragraph starts.
- */
-/** Timed, because on a long document this body walk costs more than the
- *  Docs API read it accompanies. */
-function activeListId_(ordered) {
-  return timed_('cursorList', function () { return activeListId_inner_(ordered); });
-}
-
-function activeListId_inner_(ordered) {
-  try {
-    var doc = DocumentApp.getActiveDocument();
-    var sel = doc.getSelection();
-    var start = null;
-    if (sel) {
-      var res = sel.getRangeElements();
-      if (res && res.length) start = res[0].getElement();
-    } else {
-      var cursor = doc.getCursor();
-      if (cursor) start = cursor.getElement();
-    }
-    if (!start) return null;
-
-    var item = null;
-    for (var node = start; node; node = node.getParent()) {
-      if (node.getType() === DocumentApp.ElementType.LIST_ITEM) { item = node; break; }
-      if (node.getType() === DocumentApp.ElementType.BODY_SECTION ||
-          node.getType() === DocumentApp.ElementType.BODY) break;
-    }
-    if (!item) return null;
-    var wanted = item.getListId();
-
-    var body = doc.getBody();
-    if (body.getNumChildren === undefined) return null;
-    var seen = [], found = null;
-    // Into table cells as well, in the same row-major order listParagraphs_
-    // uses, because the two views are joined on nothing but this order.
-    (function visit(container) {
-      // Hoisted: every DocumentApp accessor is a call across the service
-      // boundary, so re-asking the child count once per child triples the
-      // cost of this walk on a long document.
-      var n = container.getNumChildren();
-      for (var i = 0; i < n; i++) {
-        var child = container.getChild(i);
-        var type = child.getType();
-        if (type === DocumentApp.ElementType.TABLE ||
-            type === DocumentApp.ElementType.TABLE_ROW ||
-            type === DocumentApp.ElementType.TABLE_CELL) {
-          visit(child);
-          continue;
-        }
-        if (type !== DocumentApp.ElementType.LIST_ITEM) continue;
-        var id = child.getListId();
-        if (seen.indexOf(id) >= 0) continue;
-        if (id === wanted) found = seen.length;
-        seen.push(id);
-      }
-    })(body);
-    if (found === null || seen.length !== (ordered || []).length) return null;
-    return ordered[found].listId;
-  } catch (e) {
-    // No cursor, a mocked DocumentApp, a document shape this cannot walk:
-    // none of those are errors, they just mean "no list is selected".
-    return null;
-  }
 }
 
 function readLists(tabId, ctx) {
@@ -253,13 +199,13 @@ function readLists(tabId, ctx) {
     });
   });
 
-  // Body order, so "the nth list" means the same thing here as it does to
-  // DocumentApp, which is what activeListId_ joins the two views on.
+  // Body order, so the first list is the first one down the page -- which is
+  // what "Bulleted list 1" in the panel means.
   lists.sort(function (a, b) { return a.firstIndex - b.firstIndex; });
   return {
     tabId: tab.tabId,
     lists: lists,
-    activeListId: pickList_(lists, paras, ctx),
+    activeListId: pickList_(lists, (content.body || {}).content, paras, ctx),
     presets: BULLET_PRESETS
   };
 }

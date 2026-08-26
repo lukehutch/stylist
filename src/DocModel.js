@@ -285,6 +285,93 @@ function targetTabIds_(doc, tabId, scope) {
   return [resolveTab_(doc, tabId).tabId];
 }
 
+/* ------------------------------------------------------------------ *
+ * Where the cursor is
+ *
+ * DocumentApp knows where the cursor is and nothing about the Docs API's
+ * ids or indexes; the Docs API knows the document and nothing about the
+ * cursor. What joins them is that they agree, element for element, about
+ * what the body contains -- so the chain of child indices from the cursor's
+ * paragraph up to the body picks the same element out of either view.
+ *
+ * The one element they do not agree about is the document's own first
+ * section break, which has no child slot in DocumentApp. Every later section
+ * break does have one, reported as an UNSUPPORTED child. Against the live
+ * fixture, seventeen DocumentApp children line up with eighteen content
+ * elements exactly that way, and a live test holds it to that.
+ * ------------------------------------------------------------------ */
+
+/** The DocumentApp element types a cursor path can be rooted in. */
+var CURSOR_ROOTS_ = {
+  BODY_SECTION: 'body', HEADER_SECTION: 'header',
+  FOOTER_SECTION: 'footer', FOOTNOTE_SECTION: 'footnote'
+};
+
+/** The element types a path stops at on the way up: the ones the API has. */
+var CURSOR_ANCHORS_ = {
+  PARAGRAPH: true, LIST_ITEM: true, TABLE: true, TABLE_OF_CONTENTS: true
+};
+
+/**
+ * Where a cursor sits, as { root, path }: which segment it is in, and the
+ * chain of child indices from that segment down to the paragraph or table
+ * holding it. Null if the climb runs out of parents first.
+ *
+ * It costs one accessor call per level of nesting -- one, for a paragraph
+ * sitting directly in the body -- because every container can be asked
+ * outright where a child of it sits. Nothing is counted and nothing is
+ * walked, which is what the panels used to have to do.
+ */
+function cursorPath_(el) {
+  var node = el;
+  // Down at the cursor is a text run, or an inline image, or nothing at all.
+  // The first thing above it that the Docs API also has is where a path can
+  // start.
+  while (node && !CURSOR_ANCHORS_[String(node.getType())] &&
+         !CURSOR_ROOTS_[String(node.getType())]) {
+    node = node.getParent();
+  }
+  var path = [];
+  while (node) {
+    var kind = CURSOR_ROOTS_[String(node.getType())];
+    if (kind) return { root: kind, path: path };
+    var parent = node.getParent();
+    if (!parent || parent.getChildIndex === undefined) return null;
+    path.unshift(parent.getChildIndex(node));
+    node = parent;
+  }
+  return null;
+}
+
+/**
+ * The structural element a cursor path points at, or null.
+ *
+ * `elements` is the segment's content array, straight from the API. A path
+ * longer than one index descends through a table: after the table's own
+ * index come the row, the cell, and then the index within that cell, which
+ * repeats for a table nested inside a cell.
+ */
+function elementAtPath_(elements, path) {
+  if (!path || !path.length) return null;
+  var els = elements || [];
+  // The one element with no child slot on the DocumentApp side.
+  if (els.length && els[0].sectionBreak) els = els.slice(1);
+  var el = null;
+  var i = 0;
+  while (i < path.length) {
+    el = els[path[i++]];
+    if (!el) return null;
+    if (i >= path.length) return el;
+    if (!el.table) return null;
+    var row = ((el.table.tableRows || [])[path[i++]]) || null;
+    if (!row) return null;
+    var cell = ((row.tableCells || [])[path[i++]]) || null;
+    if (!cell) return null;
+    els = cell.content || [];
+  }
+  return el;
+}
+
 /**
  * A paragraph's text as the API stores it: its runs, concatenated.
  *

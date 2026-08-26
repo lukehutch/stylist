@@ -64,14 +64,82 @@ function makeSandbox(doc, opts) {
   opts = opts || {};
   const captured = [];
   // DocumentApp reads these; the tests set them through sb.__selection.
-  const state = { selection: null, cursor: null, body: null };
+  const state = { selection: null, cursor: null };
+
+  // DocumentApp's view of a document, built from the API's view of the same
+  // one. The add-on joins the two by child index, so the mock has to be a
+  // faithful second view rather than a hand-written chain: it is the
+  // agreement between them that the live alignment tests are checking, and a
+  // mock invented independently of the fixture would check nothing.
+  const docAppBody = () => {
+    const tab = (((live.tabs || [])[0] || {}).documentTab) || live;
+    const content = (((tab.body || {}).content) || []);
+    // Everything but the document's own first section break, which is the one
+    // element with no child slot on the DocumentApp side.
+    const top = content.length && content[0].sectionBreak ? content.slice(1) : content;
+    const node = (el, parent) => {
+      if (el.table) {
+        const table = {
+          getType: () => 'TABLE',
+          getParent: () => parent,
+          getNumChildren: () => (el.table.tableRows || []).length,
+          getChild: (i) => rows[i],
+          getChildIndex: (c) => rows.indexOf(c)
+        };
+        const rows = (el.table.tableRows || []).map((r) => {
+          const row = {
+            getType: () => 'TABLE_ROW',
+            getParent: () => table,
+            getNumChildren: () => (r.tableCells || []).length,
+            getChild: (i) => cells[i],
+            getChildIndex: (c) => cells.indexOf(c)
+          };
+          const cells = (r.tableCells || []).map((c) => {
+            const cell = {
+              getType: () => 'TABLE_CELL',
+              getParent: () => row,
+              getNumChildren: () => kids.length,
+              getChild: (i) => kids[i],
+              getChildIndex: (k) => kids.indexOf(k)
+            };
+            const kids = (c.content || []).map((k) => node(k, cell));
+            return cell;
+          });
+          return row;
+        });
+        return table;
+      }
+      const text = ((el.paragraph || {}).elements || [])
+        .map((e) => (e.textRun && e.textRun.content) || (e.autoText ? ' ' : '')).join('');
+      return {
+        getType: () => (el.paragraph
+          ? (el.paragraph.bullet ? 'LIST_ITEM' : 'PARAGRAPH')
+          : el.tableOfContents ? 'TABLE_OF_CONTENTS' : 'UNSUPPORTED'),
+        getParent: () => parent,
+        getText: () => text,
+        getListId: () => ((el.paragraph || {}).bullet || {}).listId
+      };
+    };
+    const body = {
+      getType: () => 'BODY_SECTION',
+      getParent: () => null,
+      getNumChildren: () => kids.length,
+      getChild: (i) => kids[i],
+      getChildIndex: (c) => kids.indexOf(c)
+    };
+    const kids = top.map((el) => node(el, body));
+    return body;
+  };
 
   const DocumentApp = {
+    // The live suite reaches the scratch document this way, because the
+    // standalone script it runs in has no active document to be in.
+    openById: () => ({ getBody: docAppBody }),
     getActiveDocument: () => ({
       getId: () => 'DOC_ID',
       getSelection: () => state.selection,
       getCursor: () => state.cursor,
-      getBody: () => state.body
+      getBody: docAppBody
     }),
     getUi: () => ({ createAddonMenu: () => ({ addItem: () => ({ addToUi() {} }) }) }),
     Attribute: {
@@ -154,9 +222,8 @@ function makeSandbox(doc, opts) {
     get: () => state.selection, set: (v) => { state.selection = v; }
   });
   Object.defineProperty(sb, '__fetches', { get: () => counts.get });
-  Object.defineProperty(sb, '__body', {
-    get: () => state.body, set: (v) => { state.body = v; }
-  });
+  /** DocumentApp's view of the document, for tests that drive the cursor. */
+  Object.defineProperty(sb, '__docAppBody', { get: docAppBody });
   Object.defineProperty(sb, '__cursor', {
     get: () => state.cursor, set: (v) => { state.cursor = v; }
   });

@@ -119,72 +119,36 @@ function tableLocations_(content, tabId) {
  * Which top-level table the cursor or selection is inside, as an ordinal into
  * the list tableLocations_ builds, or null if it is not inside one.
  *
- * The two halves of this add-on see the document through different APIs: the
- * Docs API knows character indexes, DocumentApp knows the cursor. Nothing maps
- * one to the other, so the join is position in the body -- the nth top-level
- * table by either route is the same table. The count check below is what keeps
- * that honest: DocumentApp's legacy Body methods read the document's own
- * active tab, which is not necessarily the tab the sidebar is showing, and a
- * differing table count is the cheap signal that they have diverged.
- *
- * The outermost table ancestor is the one that counts, because a table nested
- * inside a cell is not in the list at all.
+ * The cursor probe reports where it sits as a chain of child indices (see
+ * cursorPath_). The first index in that chain is the body child the cursor is
+ * under, so a cursor anywhere inside a table -- however deeply nested in its
+ * cells -- names that table with its first number and no walk at all. The
+ * outermost table is the one that counts, because a table nested inside a
+ * cell is not in the list to begin with, and the first index is outermost by
+ * construction.
  */
-/** Timed, because on a long document this body walk costs more than the
- *  Docs API read it accompanies. */
-function activeTableIndex_(tables) {
-  return timed_('cursorTable', function () { return activeTableIndex_inner_(tables); });
-}
-
-function activeTableIndex_inner_(tables) {
-  try {
-    var doc = DocumentApp.getActiveDocument();
-    var sel = doc.getSelection();
-    var start = null;
-    if (sel) {
-      var res = sel.getRangeElements();
-      if (res && res.length) start = res[0].getElement();
-    } else {
-      var cursor = doc.getCursor();
-      if (cursor) start = cursor.getElement();
-    }
-    if (!start) return null;
-
-    var body = doc.getBody();
-    if (body.getNumChildren === undefined) return null;
-
-    var outermost = null;
-    for (var node = start; node; node = node.getParent()) {
-      if (node.getType() === DocumentApp.ElementType.TABLE) outermost = node;
-      if (node.getType() === DocumentApp.ElementType.BODY_SECTION ||
-          node.getType() === DocumentApp.ElementType.BODY) break;
-    }
-    if (!outermost) return null;
-
-    var target = body.getChildIndex(outermost);
-    var found = null, total = 0;
-    // Hoisted for the same reason as in activeListId_: each accessor is a
-    // call across the service boundary.
-    var n = body.getNumChildren();
-    for (var i = 0; i < n; i++) {
-      if (body.getChild(i).getType() !== DocumentApp.ElementType.TABLE) continue;
-      if (i === target) found = total;
-      total++;
-    }
-    if (total !== (tables || []).length) return null;
-    return found;
-  } catch (e) {
-    // No cursor, a mocked DocumentApp, a document shape this cannot walk:
-    // none of those are errors, they just mean "no table is selected".
-    return null;
+function activeTableIndex_(tables, elements, ctx) {
+  ctx = ctx || {};
+  if (ctx.root !== 'body' || !ctx.path || !ctx.path.length) return null;
+  var el = elementAtPath_(elements, [ctx.path[0]]);
+  if (!el || !el.table) return null;
+  var at = el.startIndex || 0;
+  for (var i = 0; i < (tables || []).length; i++) {
+    if (tables[i].startIndex === at) return i;
   }
+  return null;
 }
 
-function readTables(tabId) {
+function readTables(tabId, ctx) {
   var doc = fetchDoc_();
-  var ctx = resolveTab_(doc, tabId);
-  var tables = tableLocations_(ctx.content, ctx.tabId);
-  return { tabId: ctx.tabId, tables: tables, activeIndex: activeTableIndex_(tables) };
+  var tab = resolveTab_(doc, tabId);
+  var tables = tableLocations_(tab.content, tab.tabId);
+  var elements = ((tab.content.body || {}).content) || [];
+  return {
+    tabId: tab.tabId,
+    tables: tables,
+    activeIndex: activeTableIndex_(tables, elements, ctx)
+  };
 }
 
 /**

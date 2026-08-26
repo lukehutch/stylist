@@ -2692,13 +2692,12 @@ function renderAll() {
  * the write it is reporting on.
  */
 function refreshSlice(what) {
-  // The section-shaped slices need the cursor's paragraph to find the right
-  // section, and prefer the one already on screen -- the same arguments the
-  // poll passes. The lists slice matches on that paragraph too, but has no
-  // section to prefer.
+  // Every panel that shows what the cursor is in needs the probe's answer to
+  // find it. The section-shaped slices also prefer the section already on
+  // screen, which is the tie-break their fallback needs.
   var ctxArg = (what === 'sections' || what === 'hf')
     ? Object.assign({}, S.ctx, { preferred: S.data.activeSectionIndex || 0 })
-    : (what === 'lists' ? S.ctx : undefined);
+    : (CTX_SLICES[what] ? S.ctx : undefined);
   return call('refresh', [S.tabId, what, ctxArg]).then(function (slice) {
     Object.keys(slice).forEach(function (k) { S.data[k] = slice[k]; });
     // Recorded so the next poll for this slice recognises its own answer and
@@ -2869,6 +2868,9 @@ function renderKeepingEdits() {
  * static  -- never read on the clock. Switching to the panel refreshes it,
  *            as does any write.
  * ------------------------------------------------------------------ */
+/** The slices that are read relative to the cursor, and so want the probe. */
+var CTX_SLICES = { lists: true, tables: true, sections: true, hf: true };
+
 var PANEL_SYNC = {
   page: 'meta', styles: 'meta',
   lists: 'context', tables: 'context', sections: 'context', hf: 'context',
@@ -2930,13 +2932,11 @@ function poll() {
   return prep
     .then(function (what) {
       if (!what) return null;
-      // The sections and headers slices both need the probe's paragraph handle
-      // to find the right section, and prefer whichever one the panel already
-      // shows. The lists slice matches on the same handle to find the list the
-      // cursor is in.
+      // As in refreshSlice: the probe's answer is how each of these panels
+      // finds what the cursor is in.
       var ctxArg = what === 'sections' || what === 'hf'
         ? Object.assign({}, lastCtxObj, { preferred: S.data.activeSectionIndex || 0 })
-        : (what === 'lists' ? lastCtxObj : undefined);
+        : (CTX_SLICES[what] ? lastCtxObj : undefined);
       return callRead('refresh', [S.tabId, what, ctxArg]).then(function (slice) {
         lastFetchMs = Date.now() - t0;
         // A write went out while this read was in the air, so what came back

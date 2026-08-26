@@ -1555,6 +1555,63 @@ test('a style preset renames, and will not rename onto another one', function (t
  * suite is skipped locally by name. See test/apply.js.
  * ------------------------------------------------------------------ */
 
+suite('Where the cursor is');
+
+/**
+ * The one thing the lists, tables and sections panels all rest on: that
+ * DocumentApp and the Docs API agree, element for element, about what the
+ * body holds. Every panel that shows what the cursor is in reads a chain of
+ * child indices from one view and follows it down the other, so if this ever
+ * stops holding, all three quietly stop finding the cursor -- which is
+ * exactly how the lists panel failed for months.
+ *
+ * DocumentApp cannot be asked about the scratch document through
+ * getActiveDocument(), since the script is standalone and has no container.
+ * openById is the same document service on the same document, and it is the
+ * body walk that is under test here, not how the document was opened.
+ */
+test('DocumentApp and the API agree, element for element, about the body', function (t) {
+  var body = DocumentApp.openById(liveTestDocId_()).getBody();
+  // Everything but the document's own first section break, which is the one
+  // element with no child slot on the DocumentApp side.
+  var api = fixtureBodyContent_().slice(1);
+  var n = body.getNumChildren();
+  t.equal(n, api.length, 'the two views disagree about how many children the body has');
+
+  var wrong = [];
+  for (var i = 0; i < n && i < api.length; i++) {
+    var app = String(body.getChild(i).getType());
+    var el = api[i];
+    var want = el.paragraph ? (el.paragraph.bullet ? 'LIST_ITEM' : 'PARAGRAPH')
+      : el.table ? 'TABLE'
+      : el.tableOfContents ? 'TABLE_OF_CONTENTS'
+      // A section break is a child DocumentApp has no type for, and says so.
+      : el.sectionBreak ? 'UNSUPPORTED'
+      : '?';
+    if (app !== want) wrong.push(i + ': app=' + app + ' api=' + want);
+  }
+  t.equal(wrong.join(' '), '', 'children that do not line up');
+});
+
+test('a cell path picks the same paragraph out of either view', function (t) {
+  var body = DocumentApp.openById(liveTestDocId_()).getBody();
+  var api = fixtureBodyContent_().slice(1);
+  var at = -1;
+  for (var i = 0; i < api.length; i++) { if (api[i].table) { at = i; break; } }
+  t.ok(at >= 0, 'the fixture has a table to walk into');
+  if (at < 0) return;
+
+  // Down to the first paragraph of the first cell, by child index on both
+  // sides, and then check they are the same paragraph by its text.
+  var cell = body.getChild(at).getChild(0).getChild(0);
+  t.equal(String(cell.getType()), 'TABLE_CELL', 'table > row > cell');
+  var el = elementAtPath_(fixtureBodyContent_(), [at, 0, 0, 0]);
+  t.ok(el && el.paragraph, 'the path reaches a paragraph in the API view');
+  t.equal(paraText_(el.paragraph).replace(/\s+$/, ''),
+    String(cell.getChild(0).getText() || '').replace(/\s+$/, ''),
+    'the same cell paragraph, reached by the same path through both views');
+});
+
 suite('Markers taken off for good');
 
 test('taking the markers off a list leaves the text and loses the list', function (t) {

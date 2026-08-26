@@ -137,15 +137,21 @@
   input[type=color] { width: 30px; min-height: 31px; align-self: stretch; padding: 0;
     border: 1px solid var(--line); border-radius: 3px; background: #fff; }
   /* A colour field holding no colour still shows a swatch, because the native
-     control always draws one. The diagonal says the document has nothing set
-     here rather than a deliberate white. It is painted over the swatch and
-     takes no clicks, so the picker still opens through it. */
+     control always draws one. The crossed circle says the document has nothing
+     set here rather than a deliberate white. It is painted over the swatch and
+     takes no clicks, so the picker still opens through it.
+
+     It is a character rather than a drawn diagonal because a hairline drawn
+     corner to corner is what the browser makes of it: a CSS gradient has no
+     antialiasing to give, so the line came out as the staircase of whole
+     pixels a Bresenham plot would produce. A glyph is rendered by the text
+     engine, which does antialias, and is centred and scaled like any other. */
   .colorbox { position: relative; display: flex; flex: 0 0 auto; align-self: stretch; }
   .colorbox.none::after {
-    content: ''; position: absolute; inset: 1px; pointer-events: none;
-    background: linear-gradient(to top right,
-      transparent calc(50% - 0.5px), #000 calc(50% - 0.5px),
-      #000 calc(50% + 0.5px), transparent calc(50% + 0.5px)) #fff;
+    content: '\2297'; position: absolute; inset: 1px; pointer-events: none;
+    background: #fff; color: var(--fg);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; line-height: 1;
   }
   input.invalid { border-color: var(--err); background: #fce8e6; }
   input.saving { border-color: var(--accent); }

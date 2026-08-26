@@ -276,8 +276,8 @@ What the Notes tab can and cannot give you, concretely:
 ## Tests
 
 ```bash
-npm test              # 537 tests, local, no network
-npm run test:live     # push and run 91 tests inside Apps Script, on a real document
+npm test              # 540 tests, local, no network
+npm run test:live     # push and run 93 tests inside Apps Script, on a real document
 npm run test:shuffle  # the local suite again, in eight random orders
 ```
 

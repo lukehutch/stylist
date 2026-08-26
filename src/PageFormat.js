@@ -225,19 +225,21 @@ function sectionsScan_(tabCtx) {
  * reported against the body's paragraphs.
  *
  * DocumentApp cannot see section breaks, so there is no direct way to ask
- * which one holds the cursor. The probe hands over the first 80 characters of
- * the paragraph it is in (and whether it is a list item); the body is scanned
- * for paragraphs with that same leading text and the section of the match is
- * the answer. Two paragraphs can share a prefix -- two empties always do --
- * so ties go to the section the panel was already showing, which is also the
- * fallback when nothing matches: while you type in one section the panel
- * should not jump to another just because a twin paragraph exists elsewhere.
+ * which one holds the cursor. The probe's chain of child indices (see
+ * cursorPath_) picks the cursor's paragraph out of the API's own content,
+ * and the section holding that paragraph's start index is the answer.
+ *
+ * Two fallbacks sit behind it. Where the path cannot be resolved -- the
+ * cursor is in a header, or the climb gave up -- the probe's paragraph text
+ * is matched against the body instead, which is worth doing because two
+ * paragraphs can share a prefix but most do not. Ties there go to the
+ * section the panel was already showing, which is also the answer when
+ * nothing matches at all: while you type in one section the panel should
+ * not jump to another just because a twin paragraph exists elsewhere.
  */
 function pickSection_(secs, elements, ctx) {
   if (!secs.length) return -1;
   var preferred = Math.min(Math.max(ctx.preferred || 0, 0), secs.length - 1);
-  var want = ctx.paraHead;
-  if (want === undefined || want === null) return preferred;
 
   var starts = secs.map(function (s) { return s.startIndex; });
   function sectionOf(at) {
@@ -245,6 +247,14 @@ function pickSection_(secs, elements, ctx) {
     for (var i = 0; i < starts.length; i++) if (starts[i] <= at) hit = i;
     return hit;
   }
+
+  if (ctx.root === 'body') {
+    var el = elementAtPath_(elements, ctx.path);
+    if (el && el.startIndex !== undefined) return sectionOf(el.startIndex);
+  }
+
+  var want = ctx.paraHead;
+  if (want === undefined || want === null) return preferred;
 
   var wantLi = ctx.paraKind === 'li';
   var hits = [];

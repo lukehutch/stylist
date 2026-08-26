@@ -48,7 +48,11 @@ function loadAll(tabId, haveConstants) {
   var flat = flattenTabs_(doc);
   var ctx = resolveTab_(doc, tabId);
   var active = ctx.tabId;
-  var tables = timed_('tables', function () { return readTables(active); });
+  // One cursor lookup for the whole load: the lists and tables panels both
+  // show what the cursor is in, and asking DocumentApp twice for the same
+  // answer is two round trips across the service boundary for one fact.
+  var cur = timed_('cursor', cursorContext);
+  var tables = timed_('tables', function () { return readTables(active, cur); });
   // Only how many, not what they are: the Page panel needs to know whether its
   // margins are the ones in force or only a default, and the Sections panel
   // reads the section it needs on the cursor probe.
@@ -66,7 +70,7 @@ function loadAll(tabId, haveConstants) {
     pageFormat: timed_('page', function () { return readPageFormat(active); }),
     namedStyles: timed_('styles', function () { return readNamedStyles(active).styles; }),
     segments: timed_('segments', function () { return readSegments(active); }),
-    lists: timed_('lists', function () { return readLists(active); }),
+    lists: timed_('lists', function () { return readLists(active, cur); }),
     tables: tables.tables,
     activeTableIndex: tables.activeIndex,
     presets: timed_('presets', function () { return listPresets(); }),
@@ -164,7 +168,7 @@ function refresh(tabId, what, ctx) {
   if (!what || what === 'lists') out.lists = readLists(tabId, ctx);
   if (!what || what === 'segments') out.segments = readSegments(tabId);
   if (!what || what === 'tables') {
-    var t = readTables(tabId);
+    var t = readTables(tabId, ctx);
     out.tables = t.tables;
     out.activeTableIndex = t.activeIndex;
   }
@@ -177,16 +181,20 @@ function refresh(tabId, what, ctx) {
  * This is the gate that keeps the lists, tables and sections panels from
  * re-reading the document every second: the panels only show what the cursor
  * sits in, so if this answer has not changed there is nothing for them to
- * learn from a read. Identity comes straight off the element the selection or
- * cursor is in -- no walk over the body, no indices.
+ * learn from a read.
  *
- * A table has no id in DocumentApp, so it reports presence only; moving
+ * `root` and `path` are the answer those panels actually run on: the segment
+ * the cursor is in, and the chain of child indices down to the paragraph or
+ * table holding it, which picks the same element out of the Docs API's
+ * content (see cursorPath_). It is a handful of accessor calls -- one per
+ * level of nesting -- and no walk over the body.
+ *
+ * The rest is what the path cannot give, plus what stands in when it fails.
+ * A table has no id in DocumentApp, so inTable reports presence only; moving
  * between two tables necessarily passes through not-being-in-one, which is
- * change enough.
- *
- * The paragraph's leading text is the handle the sections panel matches
- * against the body, because DocumentApp cannot see section breaks at all.
- * It is recorded on the way up even inside a table cell, and the climb
+ * change enough. The paragraph's leading text is the fallback handle the
+ * sections and lists panels match against the body when no path could be
+ * built. It is recorded on the way up even inside a table cell, and the climb
  * carries on so a table holding that paragraph is still reported.
  *
  * The climb runs all the way to the root rather than stopping at the first
@@ -211,6 +219,13 @@ function cursorContext() {
       var cur = doc.getCursor();
       if (cur) el = cur.getElement();
     }
+    // Where it is, which is all the lists, tables and sections panels need:
+    // one accessor call per level of nesting, and no walk.
+    // An empty path means the climb reached a root without passing through
+    // anything the API has, so there is nothing to report; absent is what
+    // every reader of this already treats as "no answer".
+    var where = cursorPath_(el);
+    if (where && where.path.length) { out.root = where.root; out.path = where.path; }
     while (el && el.getType) {
       var type = el.getType();
       if ((type === DocumentApp.ElementType.PARAGRAPH ||
