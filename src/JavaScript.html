@@ -82,6 +82,10 @@ function call(fn, args) {
       if (w && w.length) status(w.join(' '), 'warn');
       return res;
     });
+  // Nothing gets to fail quietly: this is attached before any caller's own
+  // handler, and marks the error so a caller that catches for cleanup does
+  // not report it a second time.
+  p.catch(reportError);
   chain = p.catch(function () {});
   p.then(done, done);
   function done() {
@@ -97,9 +101,17 @@ function call(fn, args) {
   return p;
 }
 
-/** A read, which waits for nothing and holds nothing else up. */
+/**
+ * A read, which waits for nothing and holds nothing else up.
+ *
+ * Only the poll reads, and a poll that fails tries again a tick later, so an
+ * ordinary failure here is not worth a line. Quota, billing and authorization
+ * failures still are: the next tick does not mend any of those.
+ */
 function callRead(fn, args) {
-  return rawCall(fn, args);
+  var p = rawCall(fn, args);
+  p.catch(function (e) { reportError(e, { quiet: true }); });
+  return p;
 }
 
 /**
@@ -146,6 +158,161 @@ function status(msg, kind) {
   el.textContent = msg || '';
   el.className = kind || '';
   el.style.display = msg ? 'block' : 'none';
+}
+
+/* =================================================================
+ * When a call fails
+ *
+ * Every server call ends up here when it rejects, so no failure spends its
+ * life as a stack trace in a console nobody has open. Most of them are one
+ * red line in the status bar, which is the right size for them: a value the
+ * document would not take, a preset name already in use.
+ *
+ * Three kinds are not. Running out of Docs API quota, a billing problem on
+ * the Cloud project behind that API, and authorization having been withdrawn
+ * are none of them the user's doing, none of them fixed by clicking the same
+ * thing again, and none of them explicable in the width of the status bar.
+ * Those get a dialog. The quota one also puts the poll to sleep: while over
+ * the limit, every tick is one more request against a ceiling that has to
+ * come back down before anything works again.
+ * ================================================================= */
+
+/** Docs API quotas are counted per minute, so a minute is what clears one. */
+var RATE_LIMIT_BACKOFF_MS = 60000;
+/** Set when a quota error comes back; read by tickDelay to stand the poll down. */
+var throttledUntil = 0;
+
+/**
+ * What kind of failure this is, worked out from the only thing that crosses
+ * back from the server: the message text.
+ *
+ * Order matters. Google answers an over-quota call with a 403 as readily as
+ * with a 429, and 403 is also what a withdrawn permission looks like, so the
+ * quota wording is tested before the permission wording.
+ */
+function classifyError(e) {
+  var msg = String((e && (e.message || e.details)) || e || '');
+  var low = msg.toLowerCase();
+  function has() {
+    for (var i = 0; i < arguments.length; i++) {
+      if (low.indexOf(arguments[i]) >= 0) return true;
+    }
+    return false;
+  }
+
+  if (has('429', 'too many requests', 'rate limit', 'ratelimitexceeded',
+          'quota exceeded', 'resource_exhausted', 'resource has been exhausted',
+          'service invoked too many times', 'too many simultaneous invocations')) {
+    return {
+      kind: 'rate',
+      title: 'Google is rate-limiting this document',
+      body: 'Stylist has asked the Google Docs API for more than Google allows '
+          + 'in one minute, and Google is turning down the rest until the minute '
+          + 'is over.\n\n'
+          + 'Nothing is broken and nothing has been lost. Stylist has stopped '
+          + 'polling the document and will start again by itself in about a '
+          + 'minute. If a change was half-made when this happened, make it again '
+          + 'then.\n\n'
+          + 'The usual cause is more than one thing driving the same document at '
+          + 'once: another add-on or script, or Stylist open in a second tab.',
+      detail: msg
+    };
+  }
+
+  if (has('billing', 'payment required', 'account_disabled')) {
+    return {
+      kind: 'billing',
+      title: 'Google refused the request for a billing reason',
+      body: 'This is not about your document. Google attaches every Docs API '
+          + 'call to a Google Cloud project, and it is that project’s '
+          + 'billing that Google is objecting to.\n\n'
+          + 'Stylist is free and charges nothing, ever. It has no billing of its '
+          + 'own and takes no payment.\n\n'
+          + 'If Stylist was installed for you by your workplace, this is one for '
+          + 'whoever administers it. Otherwise please report it, with the text '
+          + 'below, at github.com/lukehutch/stylist/issues.',
+      detail: msg
+    };
+  }
+
+  if (has('authorization is required', 'permission_denied', 'not have permission',
+          'insufficient authentication scopes', 'insufficient permission',
+          'unauthenticated', 'access_denied', 'invalid credentials',
+          'login required', 'authorization has been revoked')) {
+    return {
+      kind: 'auth',
+      title: 'Stylist is not allowed to edit this document',
+      body: 'Google turned the request down for want of authorization.\n\n'
+          + 'That happens when Stylist’s permission has been withdrawn at '
+          + 'myaccount.google.com/permissions, when the sign-in behind this tab '
+          + 'has expired, or when the document has been shared with you without '
+          + 'the right to edit it.\n\n'
+          + 'Reloading the document and opening Stylist again will ask for '
+          + 'whatever it needs. If the document is read-only for you, no add-on '
+          + 'can change its formatting.',
+      detail: msg
+    };
+  }
+
+  return { kind: 'other', title: 'Stylist could not do that', body: msg, detail: msg };
+}
+
+/**
+ * The single place a failed call is reported.
+ *
+ * `opts.quiet` is the poll saying it will try again on the next tick, so an
+ * ordinary failure needs no line -- but a quota, billing or authorization
+ * failure is shown whoever it happened to, because the next tick will not
+ * fix any of those. `opts.intro` forces the dialog and puts a sentence of
+ * context above it, which boot uses: a failure there leaves nothing on
+ * screen for a status line to be read against.
+ */
+function reportError(e, opts) {
+  opts = opts || {};
+  if (e && e.__reported && !opts.intro) return;
+  if (e && typeof e === 'object') { try { e.__reported = true; } catch (ignored) {} }
+
+  var c = classifyError(e);
+  // Still logged: a copyable stack is what a bug report needs. It is just no
+  // longer the only place the failure appears, which was the problem.
+  if (typeof console !== 'undefined' && console.error) console.error('Stylist:', e);
+
+  if (c.kind === 'rate') throttledUntil = Date.now() + RATE_LIMIT_BACKOFF_MS;
+
+  if (c.kind !== 'other' || opts.intro) {
+    showDialog(c.title, opts.intro ? opts.intro + '\n\n' + c.body : c.body, c.detail);
+  } else if (!opts.quiet) {
+    status(c.body, 'err');
+  }
+}
+
+/**
+ * The sidebar's one modal, and it is only ever for the failures above --
+ * anything the status bar can carry belongs in the status bar.
+ */
+function showDialog(title, body, detail) {
+  var box = document.getElementById('alert');
+  var head = document.getElementById('alertTitle');
+  if (!box || !head) { status(title + ' ' + body, 'err'); return; }
+  // The same failure arriving again while it is still on screen must not
+  // rewrite the dialog and steal the focus back from the button.
+  if (box.classList.contains('on') && head.textContent === title) return;
+  head.textContent = title;
+  document.getElementById('alertBody').textContent = body;
+  var d = document.getElementById('alertDetail');
+  d.textContent = detail || '';
+  d.style.display = detail ? 'block' : 'none';
+  box.classList.add('on');
+  box.setAttribute('aria-hidden', 'false');
+  var ok = document.getElementById('alertOk');
+  if (ok) ok.focus();
+}
+
+function hideDialog() {
+  var box = document.getElementById('alert');
+  if (!box) return;
+  box.classList.remove('on');
+  box.setAttribute('aria-hidden', 'true');
 }
 
 /* =================================================================
@@ -224,8 +391,7 @@ function bindCommit(input, validate, commit) {
       })
       .catch(function (e) {
         input.classList.remove('saving');
-        lastSent = undefined;
-        status(String((e && e.message) || e), 'err');
+        lastSent = undefined;   // reported centrally; this is just the cleanup
       });
   }
   input.addEventListener('change', attempt);
@@ -850,8 +1016,7 @@ function applyAllScope(kind, opts) {
     var args = copy(opts.unifyArgs || {});
     args.tabId = S.tabId;
     return call(opts.unifyFn, [args])
-      .then(function () { status('', ''); return refreshSlice(kind); })
-      .catch(function (e) { status(String(e.message || e), 'err'); });
+      .then(function () { status('', ''); return refreshSlice(kind); });
   });
   row.appendChild(btn);
   box.appendChild(row);
@@ -1007,7 +1172,7 @@ function orientationButton(flipped, write) {
   var row = el('div', 'btnrow');
   var flip = el('button', 'act', flipped ? 'Switch to portrait' : 'Switch to landscape');
   flip.addEventListener('click', function () {
-    return write(!flipped).catch(function (e) { status(String(e.message || e), 'err'); });
+    return write(!flipped);
   });
   row.appendChild(flip);
   return row;
@@ -1311,8 +1476,7 @@ function renderCustomStyles(host) {
     var base = normalTextStyle();
     call('saveStylePreset', [{ name: name, textStyle: base.textStyle,
                               paragraphStyle: base.paragraphStyle }])
-      .then(function () { return refreshSlice('presets'); })
-      .catch(function (e) { status(String(e.message || e), 'err'); });
+      .then(function () { return refreshSlice('presets'); });
   });
   addRow.appendChild(add);
   host.appendChild(addRow);
@@ -1353,13 +1517,11 @@ function customStyleRow(p) {
   });
 
   apply.addEventListener('click', function () {
-    call('applyStylePresetToSelection', [{ name: currentName() }])
-      .catch(function (e) { status(String(e.message || e), 'err'); });
+    call('applyStylePresetToSelection', [{ name: currentName() }]);
   });
   del.addEventListener('click', function () {
     call('deleteStylePreset', [{ name: currentName() }])
-      .then(function () { return refreshSlice('presets'); })
-      .catch(function (e) { status(String(e.message || e), 'err'); });
+      .then(function () { return refreshSlice('presets'); });
   });
 
   head.appendChild(nameIn);
@@ -1631,7 +1793,7 @@ function listWrite(fn, t) {
     // Shaped like refresh('lists') answers, so the next poll recognises it.
     S.fingerprint.lists = JSON.stringify({ lists: res.lists });
     renderAll();
-  }).catch(function (e) { status(String(e.message || e), 'err'); });
+  });
 }
 
 /**
@@ -1739,8 +1901,7 @@ function renderNotes() {
 function runConvert(mode, heading) {
   status('Converting…', '');
   call('convertFootnotesToEndnotes', [{ tabId: S.tabId, mode: mode, heading: heading }])
-    .then(function () { status('', ''); return reload(); })
-    .catch(function (e) { status(String(e.message || e), 'err'); });
+    .then(function () { status('', ''); return reload(); });
 }
 
 function segmentEditor(target, label, opts) {
@@ -2021,8 +2182,7 @@ function setLink(kind, link, applyAll) {
   call('setSegmentLink', [{
     tabId: S.tabId, kind: kind, link: link, applyAll: !!applyAll,
     sectionIndex: (S.data.hfLink || {}).sectionIndex
-  }]).then(function () { status('', ''); return refreshSlice('hf'); })
-    .catch(function (e) { status(String(e.message || e), 'err'); });
+  }]).then(function () { status('', ''); return refreshSlice('hf'); });
 }
 
 function renderHeaders() {
@@ -2334,8 +2494,7 @@ function renderPresets() {
     // Named here, renamed in place below -- nothing pops up.
     var name = uniqueName('Preset', (S.data.presets || []).map(function (x) { return x.name; }));
     call('savePreset', [{ name: name, tabId: S.tabId }])
-      .then(function () { return refreshSlice('presets'); })
-      .catch(function (e) { status(String(e.message || e), 'err'); });
+      .then(function () { return refreshSlice('presets'); });
   });
   saveRow.appendChild(saveBtn);
   host.appendChild(saveRow);
@@ -2367,15 +2526,13 @@ function renderPresets() {
     var apply = el('button', 'act', 'Apply');
     apply.addEventListener('click', function () {
       call('applyPreset', [{ name: nameIn.value.trim() || p.name, tabId: S.tabId, scope: S.scope }])
-        .then(reload)
-        .catch(function (e) { status(String(e.message || e), 'err'); });
+        .then(reload);
     });
     var del = el('button', 'act danger iconbtn trash', '\uD83D\uDDD1\uFE0E');
     del.title = 'Delete this preset';
     del.addEventListener('click', function () {
       call('deletePreset', [{ name: nameIn.value.trim() || p.name }])
-        .then(function () { return refreshSlice('presets'); })
-        .catch(function (e) { status(String(e.message || e), 'err'); });
+        .then(function () { return refreshSlice('presets'); });
     });
     btns.appendChild(apply);
     btns.appendChild(del);
@@ -2396,8 +2553,7 @@ function renderPresets() {
   var dl = el('button', 'act', 'Download\u2026');
   dl.addEventListener('click', function () {
     call('exportAll', [S.tabId])
-      .then(function (cfg) { saveJson(configFileName(), cfg); })
-      .catch(function (e) { status(String(e.message || e), 'err'); });
+      .then(function (cfg) { saveJson(configFileName(), cfg); });
   });
 
   // The file input is what the browser will actually open a picker for, so the
@@ -2417,8 +2573,7 @@ function renderPresets() {
       picker.value = '';
       call('importAll', [{ config: String(reader.result || ''),
                            tabId: S.tabId, scope: S.scope }])
-        .then(reload)
-        .catch(function (e) { status(String(e.message || e), 'err'); });
+        .then(reload);
     };
     reader.readAsText(file);
   });
@@ -2575,6 +2730,9 @@ function nextPollDelay() {
 }
 
 function tickDelay() {
+  // Over quota: sleep out the rest of the window rather than spending the
+  // next minute's worth of requests finding out it is still over.
+  if (Date.now() < throttledUntil) return Math.max(POLL_MIN_MS, throttledUntil - Date.now());
   if ((PANEL_SYNC[activePanel] || 'static') === 'context') {
     return Date.now() < probeWaitUntil ? POLL_MIN_MS : CONTEXT_TICK_MS;
   }
@@ -2954,6 +3112,15 @@ function boot() {
   document.addEventListener('visibilitychange', function () {
     if (document.hidden) pausePolling(); else resumePolling();
   });
+  // The error dialog: the button, the veil behind it, and Escape.
+  var alertOk = document.getElementById('alertOk');
+  if (alertOk) alertOk.addEventListener('click', hideDialog);
+  var alertVeil = document.getElementById('alertVeil');
+  if (alertVeil) alertVeil.addEventListener('click', hideDialog);
+  document.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Escape') hideDialog();
+  });
+
   window.addEventListener('pagehide', stopPolling);
   window.addEventListener('unload', stopPolling);
 
@@ -2984,7 +3151,10 @@ function boot() {
     status('', '');
     startPolling();
   }).catch(function (e) {
-    status('Could not load: ' + String((e && e.message) || e), 'err');
+    // A failure here leaves an empty sidebar, with no panel for a status line
+    // to be read against, so this one is a dialog whatever kind it turned
+    // out to be.
+    reportError(e, { intro: 'Stylist could not read the document.' });
   });
 }
 

@@ -859,7 +859,7 @@ module.exports = ({ suite, test }) => {
   test('the context panels run on their own fast clock', (t) => {
     const delay = evalFromClient(
       ['POLL_MIN_MS', 'POLL_MAX_MS', 'POLL_DUTY', 'CONTEXT_TICK_MS',
-       'lastFetchMs', 'probeWaitUntil', 'activePanel', 'PANEL_SYNC',
+       'lastFetchMs', 'probeWaitUntil', 'throttledUntil', 'activePanel', 'PANEL_SYNC',
        'nextPollDelay', 'tickDelay'],
       'return function (panel, backedOff) { activePanel = panel;' +
       ' probeWaitUntil = backedOff ? Date.now() + 60000 : 0;' +
@@ -1389,6 +1389,122 @@ module.exports = ({ suite, test }) => {
     t.equal(r.kind, 'err');
   });
 
+  suite('Nothing fails silently');
+
+  const kindOf = (msg) => client.classifyError(new Error(msg)).kind;
+
+  test('running out of quota is recognised however Google words it', (t) => {
+    [
+      'Exception: Request failed with 429: Too many requests',
+      'API call to docs.documents.batchUpdate failed with error: Quota exceeded for quota metric',
+      'GoogleJsonResponseException: rateLimitExceeded',
+      'userRateLimitExceeded: User Rate Limit Exceeded',
+      'RESOURCE_EXHAUSTED',
+      'Service invoked too many times for one day: docs',
+      'Too many simultaneous invocations: Docs'
+    ].forEach((m) => t.equal(kindOf(m), 'rate', m));
+  });
+
+  test('a 403 that is really a quota error is not mistaken for a permission one', (t) => {
+    // Google answers over-quota with either code, and the 403 form carries the
+    // word "permission" in its boilerplate, so the order of the tests matters.
+    t.equal(kindOf('403: Rate Limit Exceeded. The user does not have permission'), 'rate');
+  });
+
+  test('a billing failure is its own kind', (t) => {
+    t.equal(kindOf('Billing has not been enabled for this project'), 'billing');
+    t.equal(kindOf('PERMISSION_DENIED: BILLING_DISABLED'), 'billing');
+  });
+
+  test('lost authorization is its own kind', (t) => {
+    ['Authorization is required to perform that action',
+     'PERMISSION_DENIED: the caller does not have permission',
+     'Request had insufficient authentication scopes.',
+     'Invalid Credentials'].forEach((m) => t.equal(kindOf(m), 'auth', m));
+  });
+
+  test('anything else is an ordinary error, reported as itself', (t) => {
+    const c = client.classifyError(new Error('Margins must be smaller than the page'));
+    t.equal(c.kind, 'other');
+    t.equal(c.body, 'Margins must be smaller than the page',
+      'the status bar shows what the server said, not a paraphrase of it');
+  });
+
+  test('a failure with no message at all still classifies', (t) => {
+    t.equal(client.classifyError(null).kind, 'other');
+    t.equal(client.classifyError({}).kind, 'other');
+  });
+
+  test('the three explained kinds carry the raw text for a bug report', (t) => {
+    ['429 Too many requests', 'billing account', 'Authorization is required'].forEach((m) => {
+      t.equal(client.classifyError(new Error(m)).detail, m, m);
+    });
+  });
+
+  test('every write reports its own failure, without being asked to', (t) => {
+    const call = /function call\(fn, args\)[^]*?\n\}/.exec(clientJs)[0];
+    t.match(call, /p\.catch\(reportError\);/, 'attached in call, so no site can forget');
+  });
+
+  test('a read stays quiet about the ordinary, and loud about the rest', (t) => {
+    const read = /function callRead\(fn, args\)[^]*?\n\}/.exec(clientJs)[0];
+    t.match(read, /reportError\(e, \{ quiet: true \}\)/,
+      'the poll retries by itself, so its own hiccups are not worth a line');
+  });
+
+  test('no call site reports an error by hand any more', (t) => {
+    t.notOk(/status\(String\(e\.message \|\| e\), 'err'\)/.test(clientJs),
+      'the thirteen copies of the same catch are gone');
+    t.notOk(/status\(String\(\(e && e\.message\) \|\| e\), 'err'\)/.test(clientJs));
+  });
+
+  test('a caller that catches for cleanup does not report it twice', (t) => {
+    const fn = /function reportError\(e, opts\)[^]*?\n\}/.exec(clientJs)[0];
+    t.match(fn, /if \(e && e\.__reported && !opts\.intro\) return;/);
+    t.match(fn, /e\.__reported = true/);
+  });
+
+  test('the failure still reaches the console, it is just no longer only there', (t) => {
+    t.match(clientJs, /console\.error\('Stylist:', e\)/);
+  });
+
+  test('a boot that found nothing to draw explains itself in the dialog', (t) => {
+    t.match(clientJs, /reportError\(e, \{ intro: 'Stylist could not read the document\.' \}\)/);
+  });
+
+  test('the dialog is dismissable three ways', (t) => {
+    ['alertOk', 'alertVeil'].forEach((id) => {
+      t.match(clientJs, new RegExp("getElementById\\('" + id + "'\\)"), id);
+    });
+    t.match(clientJs, /ev\.key === 'Escape'\) hideDialog\(\)/);
+  });
+
+  test('the same failure arriving again does not steal the focus back', (t) => {
+    const fn = /function showDialog\(title, body, detail\)[^]*?\n\}/.exec(clientJs)[0];
+    t.match(fn, /box\.classList\.contains\('on'\) && head\.textContent === title\) return;/);
+  });
+
+  test('being over quota stands the poll down for the rest of the minute', (t) => {
+    const delay = evalFromClient(
+      ['POLL_MIN_MS', 'POLL_MAX_MS', 'POLL_DUTY', 'CONTEXT_TICK_MS',
+       'lastFetchMs', 'probeWaitUntil', 'throttledUntil', 'activePanel', 'PANEL_SYNC',
+       'nextPollDelay', 'tickDelay'],
+      'return function (leftMs) { activePanel = "lists"; probeWaitUntil = 0;' +
+      ' lastFetchMs = 0; throttledUntil = leftMs ? Date.now() + leftMs : 0;' +
+      ' return tickDelay(); };');
+
+    t.ok(delay(0) <= 150, 'no throttle, and the fast clock is untouched');
+    t.ok(delay(30000) >= 29000,
+      'throttled, and it sleeps out what is left rather than asking nine times a second');
+    t.equal(delay(10), 1000, 'never below the slow floor, even at the very end of it');
+  });
+
+  test('a quota failure is what sets that timer, and nothing else does', (t) => {
+    t.match(clientJs, /if \(c\.kind === 'rate'\) throttledUntil = Date\.now\(\) \+ RATE_LIMIT_BACKOFF_MS;/);
+    t.match(clientJs, /var RATE_LIMIT_BACKOFF_MS = 60000;/,
+      'Docs API quotas are counted per minute');
+  });
+
   test('an empty message hides the bar', (t) => {
     const r = runStatus("status('working…', '');\nvar was = el.style.display;\n" +
       "status('', '');\nreturn { was: was, now: el.style.display, text: el.textContent };");
@@ -1644,8 +1760,9 @@ module.exports = ({ suite, test }) => {
   suite('A click does not wait for a poll');
 
   test('reads are not in the write queue', (t) => {
-    t.match(clientJs, /function callRead\(fn, args\) \{\s*return rawCall\(fn, args\);\s*\}/,
-      'a read goes straight out');
+    const read = /function callRead\(fn, args\)[^]*?\n\}/.exec(clientJs)[0];
+    t.match(read, /var p = rawCall\(fn, args\);/, 'a read goes straight out');
+    t.notOk(/chain/.test(read), 'and joins no queue on the way');
     const call = /function call\(fn, args\)[^]*?\n}/.exec(clientJs)[0];
     t.match(call, /chain = p/, 'writes are still serialised against each other');
     t.match(call, /writes\+\+;/, 'and each one is counted');

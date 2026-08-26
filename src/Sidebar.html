@@ -115,5 +115,21 @@
       <div class="veil"></div>
       <div class="glass">&#x231B;</div>
     </div>
+
+    <!-- The one modal. It is for the three failures a red line at the bottom
+         of the panel cannot explain -- out of quota, a billing problem on the
+         project behind the Docs API, and lost authorization -- and for a boot
+         that found nothing to draw. Everything else stays in the status bar.
+         The raw message is kept underneath, so a bug report can quote it. -->
+    <div id="alert" role="alertdialog" aria-modal="true" aria-hidden="true"
+         aria-labelledby="alertTitle" aria-describedby="alertBody">
+      <div class="veil" id="alertVeil"></div>
+      <div class="box">
+        <div class="title" id="alertTitle"></div>
+        <div class="body" id="alertBody"></div>
+        <pre id="alertDetail" style="display:none"></pre>
+        <div class="btnrow"><button type="button" class="act" id="alertOk">OK</button></div>
+      </div>
+    </div>
   </body>
 </html>

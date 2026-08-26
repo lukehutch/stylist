@@ -320,6 +320,41 @@
     #busy .glass { animation: none; }
   }
 
+  /* ---- error dialog: the only modal, and only for what the status bar
+          cannot explain in one line ---- */
+  #alert { position: fixed; top: 0; right: 0; bottom: 0; left: 0; display: none; z-index: 40; }
+  #alert.on { display: block; }
+  #alert .veil { position: absolute; top: 0; right: 0; bottom: 0; left: 0;
+    background: rgba(32, 33, 36, 0.45); }
+  /* Centred, and never taller than the frame: the sidebar is short, and a
+     dialog that runs off the bottom takes its own OK button with it. */
+  #alert .box {
+    position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: calc(100% - 24px); max-height: calc(100% - 24px);
+    overflow-y: auto;
+    box-sizing: border-box;
+    padding: 14px;
+    background: var(--bg); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 8px;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.28);
+  }
+  #alert .title {
+    font-size: var(--fs); font-weight: 600; color: var(--err);
+    margin-bottom: 8px;
+  }
+  /* The bodies are written as paragraphs separated by blank lines, and are
+     set as text rather than markup, so the line breaks have to be honoured. */
+  #alert .body { font-size: var(--fs-sm); line-height: 1.45; white-space: pre-wrap; }
+  #alert pre {
+    margin: 10px 0 0; padding: 6px 8px;
+    font-size: var(--fs-xs); white-space: pre-wrap; word-break: break-word;
+    max-height: 8em; overflow-y: auto;
+    color: var(--muted); background: var(--band);
+    border: 1px solid var(--line); border-radius: 4px;
+  }
+  #alert .btnrow { margin-top: 12px; justify-content: flex-end; }
+
   /* ---- footer: the status line and the tip row, pinned to the bottom ---- */
   /* Fixed, so it is on screen on every tab and at every scroll position. The
      max-height and the scrolling body below are what stop an opened tip row
