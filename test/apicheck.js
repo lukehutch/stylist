@@ -34,6 +34,18 @@ const NOT_THE_PAYLOAD = new Set([
 ]);
 
 /**
+ * Fields the API will not let you reset.
+ *
+ * Naming a field in the mask with no value behind it is how every other
+ * property is put back to its default. For these, the API refuses the whole
+ * batch instead. There is no way to tell which from the reference, so this
+ * list grows only when Google says so; the message quotes what it said.
+ */
+const NO_RESET = {
+  background: 'A value for background color must be specified in order to update it.'
+};
+
+/**
  * Masks name these as one unit. Descending into them would demand
  * "weightedFontFamily.weight" in a mask, which the API does not want.
  */
@@ -158,6 +170,16 @@ function checkOne(req, errs) {
       // updateParagraphStyle names "alignment", and updateNamedStyle names
       // "textStyle.bold" because textStyle sits inside namedStyle.
       const paths = setPaths(body[k], '', []);
+      // A mask entry with nothing behind it asks for a reset. Most fields
+      // take one; the few in NO_RESET fail the batch instead.
+      mask.forEach((m) => {
+        const leaf = m.split('.').pop();
+        if (!NO_RESET[leaf]) return;
+        if (paths.some((p) => p === m || p.indexOf(m + '.') === 0)) return;
+        errs.push(at('fields') + ' names ' + m + ' but ' + at(k) +
+          ' sets no value for it, which asks for a reset. The API refuses: "' +
+          NO_RESET[leaf] + '"');
+      });
       paths.forEach((p) => {
         if (!maskCovers(mask, p)) {
           errs.push(at(k) + ' sets ' + p + ' but ' + at('fields') +

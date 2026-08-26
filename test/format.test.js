@@ -254,13 +254,46 @@ test('a page background colour is sent as an opaque OptionalColor', (t) => {
    discovery document says exactly that, so sending an empty OptionalColor is
    a write Google accepts and then ignores, which is what made the "none"
    button look broken. Naming the field with no value resets it instead. */
-test('clearing the page background resets the field rather than going transparent', (t) => {
+/**
+ * This used to expect a reset -- the field named in the mask with no value
+ * behind it -- because that is how every other property is put back. Google
+ * refuses it for this one field, in as many words: "A value for background
+ * color must be specified in order to update it." So clearing has to write
+ * the white a document without a background already renders.
+ */
+test('clearing the page background writes white, because it cannot be reset', (t) => {
   S.__reset();
   S.writePageFormat({ backgroundColor: '' });
   const r = allRequests(S)[0].updateDocumentStyle;
-  t.equal(r.fields, 'background', 'the field is named, so it is reset');
-  t.equal(r.documentStyle.background, undefined,
-    'and carries no value -- an empty OptionalColor would be the ignored one');
+  t.equal(r.fields, 'background', 'the field is still named');
+  t.deepEqual(r.documentStyle.background,
+    { color: { color: { rgbColor: { red: 1, green: 1, blue: 1 } } } },
+    'and now carries an explicit white');
+});
+
+/**
+ * The bug this pair was written for: reading a document that has no
+ * background gives null, exportConfig carries the null, and importConfig
+ * handed it straight back to writePageFormat -- which named the field with
+ * nothing behind it and took the whole batch down with a 400. Applying any
+ * whole-document preset did this, on any document nobody had ever set a
+ * background on, which is most of them.
+ */
+test('a background nobody ever set is left alone, not reset', (t) => {
+  // Its own sandbox: writes land on the document now, and the margin below
+  // is read back by later tests sharing S.
+  const B = makeSandbox(makeDoc());
+  B.writePageFormat({ backgroundColor: null, marginTopPt: 50 });
+  const r = allRequests(B)[0].updateDocumentStyle;
+  t.equal(r.fields.indexOf('background'), -1,
+    'background must not be named: ' + r.fields);
+  t.ok(r.fields.indexOf('marginTop') !== -1, 'and the rest of the write still happens');
+});
+
+test('a background that is only a null asks for nothing at all', (t) => {
+  S.__reset();
+  S.writePageFormat({ backgroundColor: null });
+  t.deepEqual(allRequests(S), [], 'there was nothing to send');
 });
 
 test('header margin write warns while useCustomHeaderFooterMargins is off', (t) => {

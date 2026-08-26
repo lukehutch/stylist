@@ -93,15 +93,24 @@ function writePageFormat(payload) {
       fields.push('documentFormat.documentMode');
     }
     if (payload.backgroundColor !== undefined) {
-      // A document background cannot be transparent -- the API says so in as
-      // many words -- so "no colour" here has to mean the default, which is
-      // white. Naming the field in the mask while sending no value for it is
-      // how the Docs API is asked to reset a property, and it is the only way
-      // to get white back without writing an explicit white the user would
-      // then have to clear again.
-      if (payload.backgroundColor === '' || payload.backgroundColor === null) {
+      // background is the one property that cannot be reset. Naming a field
+      // in the mask and sending no value for it is how every other property
+      // is put back to its default, and for this one the API refuses the
+      // whole batch: "A value for background color must be specified in
+      // order to update it." A document background cannot be transparent
+      // either, so there is no way to express "no colour" except by writing
+      // the white that a document without a background already renders.
+      //
+      // Which leaves two cases that used to be one. The empty string is the
+      // Clear button, and the user means white. null is what reading a
+      // document that has no background gives back, and it means there was
+      // nothing here to carry -- so exporting such a document and importing
+      // it again must leave the background alone rather than 400 on it,
+      // which is what applying any whole-document preset used to do.
+      if (payload.backgroundColor === '') {
+        style.background = { color: hexToColor_('#ffffff') };
         fields.push('background');
-      } else {
+      } else if (payload.backgroundColor !== null) {
         style.background = { color: hexToColor_(payload.backgroundColor) };
         fields.push('background');
       }
