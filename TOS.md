@@ -104,17 +104,40 @@ What is and is not disclosed:
   account, your document, its title, its contents, or anything you have done in
   it. No cookie is set by Stylist, and Stylist stores nothing in your browser.
 
-You should know the following in deciding whether to agree. Under the GDPR an
-IP address is treated as personal data, and in **LG München I, judgment of
+So that your agreement is an informed one: in **LG München I, judgment of
 20 January 2022, case 3 O 17493/20**, the Regional Court of Munich I held that
-a website operator embedding Google Fonts in this way without consent breached
-the GDPR, rejecting legitimate interests under Article 6(1)(f) and awarding the
-claimant €100. That case concerned an ordinary public website, whose visitors
-had no relationship with Google. Stylist's sidebar is served by Google, runs
-inside a Google Docs document Google is already storing, in a browser already
-signed in to a Google account — so the request discloses to Google nothing that
-Google does not already have, and discloses nothing to anyone else. Your
-consent under this section is given with that difference in mind.
+a public website which loaded Google Fonts from Google's servers **without
+obtaining the visitor's consent** infringed the GDPR.
+
+**That decision does not apply here, for three independent reasons, each of
+which is sufficient on its own.**
+
+**First, and decisively: the defect the court identified was the absence of
+consent, and consent is present here.** The court's objection was not to
+loading fonts from Google. It was that the operator had done so silently, and
+had tried to justify it after the fact as a legitimate interest under Article
+6(1)(f) rather than asking. This section is that asking. You are told what is
+sent, to whom, and why, before you agree, and you agree explicitly. The ruling
+is being followed, not avoided.
+
+**Second, there is no third party to disclose anything to.** The transfer that
+troubled the court was disclosure of a visitor's address to an outside company
+the visitor had no dealings with. There is no equivalent here. Stylist's
+sidebar is itself served to you by Google, from Google's servers, inside a
+Google Docs document that Google is already storing, through a browser already
+signed in to your Google account, in the same session, from the same address.
+Google is not a third party in this transaction; Google is the party you are
+already using. The font request tells Google nothing that Google does not
+already have and could not already see, and it tells nobody else anything at
+all.
+
+**Third, no data protection interest of yours is engaged by it.** An IP address
+is personal data because it can help identify someone who is otherwise unknown.
+You are not unknown to Google here — you are signed in. The request adds no
+recipient, no new category of data, no new jurisdiction, and no new
+inference that was not already available to Google from your use of the
+document itself. There is nothing that this request discloses which withholding
+it would conceal.
 
 If you do not agree to this, do not install or use Stylist.
 
