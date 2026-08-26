@@ -7,6 +7,7 @@
     "test": "gapp-test",
     "test:live": "gapp-test live",
     "test:all": "gapp-test all",
+    "test:shuffle": "node test/shuffle.js",
     "push": "clasp push",
     "open": "clasp open"
   },

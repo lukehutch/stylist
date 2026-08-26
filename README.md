@@ -276,8 +276,9 @@ What the Notes tab can and cannot give you, concretely:
 ## Tests
 
 ```bash
-npm test              # 120 tests, local, no network
-npm run test:live     # push and run the suite inside Apps Script
+npm test              # 531 tests, local, no network
+npm run test:live     # push and run 35 tests inside Apps Script, on a real document
+npm run test:shuffle  # the local suite again, in eight random orders
 ```
 
 The runner is [gapp-tester](https://github.com/lukehutch/gapp-tester), a
@@ -294,6 +295,24 @@ of the endnote conversion, custom-style application to a selection, the read-bac
 that fills the fields (including how disagreeing values are reported as mixed),
 preset export/import round-tripping, and the sidebar's browser JavaScript —
 every element id it reaches for must exist in the template.
+
+The mocked document is the shape the Docs API really returns, which is proto3
+JSON: every field holding its type's default is missing from the wire, so
+`startIndex: 0` is absent on the first element, black is `{rgbColor: {}}`, and a
+zero measurement arrives as `{unit: 'PT'}` with no magnitude. Reads that assume
+a field is present because it has a value fail here for the same reason they
+fail live. Every captured request is checked against what the API would refuse
+before it is asserted on -- a null anywhere, a `Dimension` without a unit, a
+field set but not named in the mask, a mask asking to reset the one property
+Google will not reset -- so a request that would 400 in production fails
+offline instead of passing.
+
+Writes land: the mocked document is updated by exactly what the field mask
+names, so a later read sees what an earlier write did, and a field the mask
+forgets does not take effect. That makes the tests order-sensitive by
+construction, which `npm run test:shuffle` guards -- it reruns everything in
+eight deterministic random orders and fails if any test only passes because of
+what ran before it.
 
 The suite is mutation-checked: breaking the named-style field mask, reversing
 the endnote rewrite order, corrupting the cm conversion factor, or removing the

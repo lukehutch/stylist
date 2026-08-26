@@ -143,8 +143,10 @@ test('paragraph dimensions are converted to PT Dimensions', (t) => {
   t.deepEqual(r.fields.sort(), ['indentStart', 'spaceAbove']);
 });
 
+// Its own sandbox: writes land on the document now, so reading the fixture's
+// own values back has to be done somewhere nothing else has written.
 test('reading a named style round-trips through the UI shape', (t) => {
-  const styles = S.readNamedStyles(null).styles;
+  const styles = makeSandbox(makeDoc()).readNamedStyles(null).styles;
   const h1 = styles.filter(s => s.namedStyleType === 'HEADING_1')[0];
   t.equal(h1.textStyle.fontFamily, 'Georgia');
   t.equal(h1.textStyle.fontSizePt, 20);
@@ -899,15 +901,17 @@ test('invalid JSON produces a clear message', (t) => {
   t.throws(() => S.importConfig({ config: '{ nope' }), /not valid JSON/);
 });
 
+// Its own sandbox: the preset store is shared for the life of one, and
+// counting what is in it only works while nothing else has saved anything.
 test('style presets save, list and bind to a named style', (t) => {
-  S.saveStylePreset({ name: 'Callout', textStyle: { bold: true, fontSizePt: 12 } });
-  const list = S.listStylePresets();
+  const P = makeSandbox(makeDoc());
+  P.saveStylePreset({ name: 'Callout', textStyle: { bold: true, fontSizePt: 12 } });
+  const list = P.listStylePresets();
   t.equal(list.length, 1);
   t.equal(list[0].name, 'Callout');
 
-  S.__reset();
-  S.applyStylePresetToNamedStyle({ name: 'Callout', namedStyleType: 'HEADING_6' });
-  const r = allRequests(S)[0].updateNamedStyle;
+  P.applyStylePresetToNamedStyle({ name: 'Callout', namedStyleType: 'HEADING_6' });
+  const r = allRequests(P)[0].updateNamedStyle;
   t.equal(r.namedStyle.namedStyleType, 'HEADING_6');
   t.equal(r.namedStyle.textStyle.bold, true);
 });
@@ -1298,6 +1302,10 @@ test('a bare cursor styles the paragraph it sits in', (t) => {
 test('applying with nothing selected explains what to do instead of failing silently', (t) => {
   S.__selection = null;
   S.__cursor = null;
+  // Saved here rather than borrowed from the test above: the preset name is
+  // looked up before the selection is, so without one of its own this test
+  // fails on "no such preset" and never reaches what it is asking about.
+  S.saveStylePreset({ name: 'Quote', textStyle: {}, paragraphStyle: { indentStartPt: 36 } });
   t.throws(() => S.applyStylePresetToSelection({ name: 'Quote' }), /cursor in the document/);
 });
 
