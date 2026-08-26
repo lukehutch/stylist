@@ -51,25 +51,46 @@ var NUMBERED_GLYPH_TYPES = {
   DECIMAL: 1, ZERO_DECIMAL: 1, ALPHA: 1, UPPER_ALPHA: 1, ROMAN: 1, UPPER_ROMAN: 1
 };
 
-/** Index every body paragraph that belongs to a list. */
+/**
+ * Index every paragraph in the body that belongs to a list.
+ *
+ * Table cells are walked too, and so are tables inside them: a list in a cell
+ * is an ordinary list, its paragraphs carry the same document-wide indexes as
+ * any other, and every writer here works from those indexes. Stopping at the
+ * top level would have hidden those lists from the panel and left them out of
+ * every apply, which is not a smaller feature, just a wrong one.
+ */
 function listParagraphs_(content) {
   var byList = {};
-  (((content.body || {}).content) || []).forEach(function (el) {
-    var p = el.paragraph;
-    if (!p || !p.bullet || !p.bullet.listId) return;
-    var id = p.bullet.listId;
-    if (!byList[id]) byList[id] = [];
-    var text = (p.elements || []).map(function (pe) {
-      return (pe.textRun && pe.textRun.content) || '';
-    }).join('').replace(/\s+/g, ' ').trim();
-    byList[id].push({
-      startIndex: el.startIndex || 0,
-      endIndex: el.endIndex,
-      nestingLevel: p.bullet.nestingLevel || 0,
-      text: text,
-      paragraph: p
+
+  function walk(elements) {
+    (elements || []).forEach(function (el) {
+      if (el.table) {
+        // Row-major, which is the order the Docs API lists them in and the
+        // order DocumentApp walks them in -- the two views are joined on it.
+        (el.table.tableRows || []).forEach(function (row) {
+          (row.tableCells || []).forEach(function (cell) { walk(cell.content); });
+        });
+        return;
+      }
+      var p = el.paragraph;
+      if (!p || !p.bullet || !p.bullet.listId) return;
+      var id = p.bullet.listId;
+      if (!byList[id]) byList[id] = [];
+      var text = (p.elements || []).map(function (pe) {
+        return (pe.textRun && pe.textRun.content) || '';
+      }).join('').replace(/\s+/g, ' ').trim();
+      byList[id].push({
+        startIndex: el.startIndex || 0,
+        endIndex: el.endIndex,
+        nestingLevel: p.bullet.nestingLevel || 0,
+        text: text,
+        paragraph: p
+      });
     });
-  });
+  }
+
+  walk(((content.body || {}).content) || []);
   return byList;
 }
 
@@ -117,18 +138,29 @@ function activeListId_inner_(ordered) {
     var body = doc.getBody();
     if (body.getNumChildren === undefined) return null;
     var seen = [], found = null;
-    // Hoisted: every DocumentApp accessor is a call across the service
-    // boundary, so re-asking the child count once per child triples the cost
-    // of this walk on a long document.
-    var n = body.getNumChildren();
-    for (var i = 0; i < n; i++) {
-      var child = body.getChild(i);
-      if (child.getType() !== DocumentApp.ElementType.LIST_ITEM) continue;
-      var id = child.getListId();
-      if (seen.indexOf(id) >= 0) continue;
-      if (id === wanted) found = seen.length;
-      seen.push(id);
-    }
+    // Into table cells as well, in the same row-major order listParagraphs_
+    // uses, because the two views are joined on nothing but this order.
+    (function visit(container) {
+      // Hoisted: every DocumentApp accessor is a call across the service
+      // boundary, so re-asking the child count once per child triples the
+      // cost of this walk on a long document.
+      var n = container.getNumChildren();
+      for (var i = 0; i < n; i++) {
+        var child = container.getChild(i);
+        var type = child.getType();
+        if (type === DocumentApp.ElementType.TABLE ||
+            type === DocumentApp.ElementType.TABLE_ROW ||
+            type === DocumentApp.ElementType.TABLE_CELL) {
+          visit(child);
+          continue;
+        }
+        if (type !== DocumentApp.ElementType.LIST_ITEM) continue;
+        var id = child.getListId();
+        if (seen.indexOf(id) >= 0) continue;
+        if (id === wanted) found = seen.length;
+        seen.push(id);
+      }
+    })(body);
     if (found === null || seen.length !== (ordered || []).length) return null;
     return ordered[found].listId;
   } catch (e) {

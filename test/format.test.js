@@ -504,6 +504,80 @@ test('unifying is a no-op when there is nothing to agree with', (t) => {
 });
 
 /* ------------------------------------------------------------------ */
+/* A list inside a table cell is an ordinary list: it has a listId, its
+   paragraphs carry ordinary document indexes, and clicking into it should show
+   it in the panel. Both halves have to see it -- the Docs API read and the
+   DocumentApp walk that says which list the cursor is in -- because they are
+   joined on nothing but the order lists appear in. */
+function docWithListInACell() {
+  const doc = makeDoc();
+  const tab = doc.tabs[0].documentTab;
+  tab.body.content.push({
+    startIndex: 900,
+    endIndex: 960,
+    table: {
+      rows: 1,
+      columns: 1,
+      tableRows: [{ tableCells: [{ startIndex: 902, content: [
+        { startIndex: 903, endIndex: 920,
+          paragraph: { bullet: { listId: 'kx.cell', nestingLevel: 0 },
+                       elements: [{ textRun: { content: 'in a cell\n' } }] } },
+        { startIndex: 920, endIndex: 940,
+          paragraph: { bullet: { listId: 'kx.cell', nestingLevel: 1 },
+                       elements: [{ textRun: { content: 'deeper\n' } }] } }
+      ] }] }]
+    }
+  });
+  tab.lists['kx.cell'] = { listProperties: { nestingLevels: [
+    { glyphSymbol: '\u25cf', indentStart: { magnitude: 36, unit: 'PT' } },
+    { glyphSymbol: '\u25cb' }
+  ] } };
+  return doc;
+}
+
+test('a list living in a table cell is a list the panel can see', (t) => {
+  const M = makeSandbox(docWithListInACell());
+  const cell = M.readLists(null).lists.filter((l) => l.listId === 'kx.cell')[0];
+  t.ok(cell, 'the cell list is offered alongside the body ones');
+  t.equal(cell.itemCount, 2);
+  t.equal(cell.levels[1].inUse, true, 'and the level the cell item sits on');
+});
+
+test('its paragraphs are written like any other list', (t) => {
+  const M = makeSandbox(docWithListInACell());
+  M.__reset();
+  M.applyBulletPreset({ listId: 'kx.cell', bulletPreset: 'BULLET_CHECKBOX' });
+  const r = allRequests(M)[0].createParagraphBullets;
+  t.deepEqual({ s: r.range.startIndex, e: r.range.endIndex }, { s: 903, e: 940 },
+    'the cell paragraphs carry ordinary document indexes');
+});
+
+test('the cursor in a cell list finds that list, not the one above it', (t) => {
+  const M = makeSandbox(docWithListInACell());
+  // The body as DocumentApp sees it: one body list, then the table whose one
+  // cell holds the second. The join is this order and nothing else.
+  const cellItem = { getType: () => 'LIST_ITEM', getListId: () => 'kx.cell',
+                     getParent: () => tcell };
+  const tcell = { getType: () => 'TABLE_CELL', getParent: () => trow,
+                  getNumChildren: () => 1, getChild: () => cellItem };
+  const trow = { getType: () => 'TABLE_ROW', getParent: () => table,
+                 getNumChildren: () => 1, getChild: () => tcell };
+  const table = { getType: () => 'TABLE', getParent: () => body,
+                  getNumChildren: () => 1, getChild: () => trow };
+  const bodyItem = { getType: () => 'LIST_ITEM', getListId: () => 'list.1',
+                     getParent: () => body };
+  const kids = [bodyItem, table];
+  const body = { getType: () => 'BODY_SECTION', getParent: () => null,
+                 getNumChildren: () => kids.length, getChild: (i) => kids[i] };
+
+  M.__body = body;
+  M.__cursor = { getElement: () => cellItem };
+  t.equal(M.readLists(null).activeListId, 'kx.cell');
+
+  M.__cursor = { getElement: () => bodyItem };
+  t.equal(M.readLists(null).activeListId, 'list.1', 'and the body one from the body');
+});
+
 suite('Tables');
 
 test('tables are found with their geometry and header row', (t) => {
