@@ -95,16 +95,19 @@ Skip this unless you intend to run `npm run test:live` or publish the add-on;
 everything above works without it. **The switch cannot be undone**, and it
 forces everyone who has authorised the script to authorise it again.
 
+Everything in the Cloud console comes first: **Set project** is refused until
+the Cloud project has a configured consent screen.
+
 1. In the [Cloud console](https://console.cloud.google.com/cloud-resource-manager),
    open or create a project, then **More (⋮) → Project settings**, and copy the
    **Project number** (digits only — not the Project ID).
-2. In the Apps Script editor: **Project Settings (⚙) → Google Cloud Project →
+2. Fill in the **OAuth consent screen** for that project, adding yourself under
+   **Audience → Test users**. Do this before step 4: Apps Script will not link
+   to a project that has no consent screen.
+3. Enable the **Google Docs API** in that project — advanced services do not
+   carry over from the default project, and Stylist will not run without it.
+4. In the Apps Script editor: **Project Settings (⚙) → Google Cloud Project →
    Change project**, paste the number, **Set project**.
-3. In the Cloud console for that project, enable the **Google Docs API** —
-   advanced services do not carry over from the default project, and Stylist
-   will not run without it.
-4. Fill in the **OAuth consent screen** for that project, adding yourself as a
-   test user.
 
 ### If a command fails
 
@@ -112,7 +115,7 @@ forces everyone who has authorised the script to authorise it again.
 |---|---|
 | `Script ID not set, unable to open IDE.` | No `.clasp.json` — run `create-script`, or copy `.clasp.json.example` and paste your script id in. |
 | `A file with this name already exists in the current project: appsscript` | `create-script` left a stub at `src/src/appsscript.json`. `rm -rf src/src`, push again. |
-| `We're sorry, a server error occurred while reading from storage.` | Reload the document; if it persists, the script and its Cloud project are out of step — re-check step 3. |
+| `We're sorry, a server error occurred while reading from storage.` | Reload the document; if it persists, the script and its Cloud project are out of step — re-check that the Google Docs API is enabled in that project. |
 | `Access blocked: Stylist has not completed the Google verification process` — with no **Advanced** link | Different from the warning above, and a real block. Your Cloud project's OAuth consent screen is in **Testing** but your account is not on its test-user list. Add yourself under **Audience → Test users**. |
 
 ## The eight tabs
@@ -126,7 +129,7 @@ forces everyone who has authorised the script to authorise it again.
 | **Headers & footers** | A style editor over whichever headers and footers you name. Two menus set that: which sections (only shown when the tab has more than one) and which side of the spread -- L pages, R pages or both. Everything below follows the same choice: the shared-with warning, the header and footer margins (written to that section or to all of them), the buttons that give a section its own header or footer or hand it back, and the list of individual headers and footers underneath. "Different first page" is here too, set one section at a time; "Different L/R pages" beside it is the one document-wide switch. |
 | **Footnotes** | Style all footnote text at once, restyle every footnote callout mark in the document in one pass. Also converts footnotes to an emulated endnote section. |
 | **Tables** | The table your cursor is in, or all of them listed: cell padding, borders, fill and vertical alignment (all cells or header row); row minimum height, header row, prevent-overflow; column width and sizing mode; pinned header rows. **Apply to** works the same way it does for lists. |
-| **Presets** | Save the whole configuration under a name and re-apply it to any document. Save individual style presets and bind them to a named style. Export/import the configuration as JSON for version control. |
+| **Presets** | Save the whole configuration under a name and re-apply it to any document. Save individual style presets and bind them to a named style. **Download** the lot as a JSON file — this tab's page setup and named styles together with every saved preset and style preset — for version control or to hand to someone else, and **Upload** one back: its presets merge into yours by name and its formatting is applied here. |
 
 Units are chosen once in the top bar and every dimension field re-renders in
 that unit immediately, with no server round trip. Values are always stored as
