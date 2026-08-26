@@ -40,7 +40,10 @@ module.exports = ({ suite, test }) => {
       test('the template includes ' + name, (t) => t.match(sidebar, re));
     });
 
-  const ids = new Set([...clientJs.matchAll(/getElementById\('([^']+)'\)/g)].map((m) => m[1]));
+  // byId is getElementById for the code that must survive not having a
+  // document; both name real ids, so both are scanned.
+  const ids = new Set([...clientJs.matchAll(/(?:getElementById|byId)\('([^']+)'\)/g)]
+    .map((m) => m[1]));
   for (const id of ids) {
     test('#' + id + ' exists in the template', (t) => {
       t.match(sidebar, new RegExp('id="' + id + '"'));
@@ -1497,6 +1500,69 @@ module.exports = ({ suite, test }) => {
     t.ok(delay(30000) >= 29000,
       'throttled, and it sleeps out what is left rather than asking nine times a second');
     t.equal(delay(10), 1000, 'never below the slow floor, even at the very end of it');
+  });
+
+  /* The dialog is the sidebar's, and the sidebar is a browser page: neither
+     suite ever draws one. These check that on purpose rather than by luck --
+     that a harness can drive the reporter, read what the user would have been
+     shown, and never be left with a modal it cannot dismiss. */
+
+  const reportInNoDom = (msg, tail) => evalFromClient(
+    ['RATE_LIMIT_BACKOFF_MS', 'throttledUntil', 'dialogSuppressed', 'lastError',
+     'classifyError', 'reportError', 'showDialog', 'hideDialog', 'byId', 'status'],
+    'var console = { error: function () {} };\n' +   // the log is not the test's business
+    'dialogSuppressed = true;\n' +
+    'reportError(new Error(' + JSON.stringify(msg) + '));\n' + tail);
+
+  test('a harness can read the verdict instead of being shown it', (t) => {
+    const r = reportInNoDom('429: Too many requests',
+      'return { kind: lastError.kind, title: lastError.title, detail: lastError.detail };');
+    t.equal(r.kind, 'rate');
+    t.equal(r.detail, '429: Too many requests', 'the raw text is kept for the assertion');
+    t.ok(r.title.length > 0, 'and so is what the user would have read');
+  });
+
+  test('suppressing the dialog suppresses only the drawing', (t) => {
+    const armed = reportInNoDom('429: Too many requests',
+      'return throttledUntil > Date.now() + 50000;');
+    t.ok(armed, 'the poll still stands down, so the backoff stays testable');
+    const untouched = reportInNoDom('Margins must be smaller than the page',
+      'return throttledUntil;');
+    t.equal(untouched, 0, 'and an ordinary failure still arms nothing');
+  });
+
+  test('an ordinary failure under suppression reaches no status bar either', (t) => {
+    // There is no document in this context at all. Without the flag, status()
+    // would throw and bury the failure being reported under a second one.
+    const kind = reportInNoDom('Margins must be smaller than the page',
+      'return lastError.kind;');
+    t.equal(kind, 'other');
+  });
+
+  test('the dialog gives up quietly when there is no page to draw it on', (t) => {
+    const threw = evalFromClient(
+      ['byId', 'status', 'showDialog', 'hideDialog'],
+      'try { showDialog("t", "b", "d"); hideDialog(); return null; }\n' +
+      'catch (e) { return String(e && e.message); }');
+    t.equal(threw, null, 'no document, no dialog, and no second exception');
+  });
+
+  test('nothing in the sidebar switches the dialog off', (t) => {
+    // It is a seam for a harness, not a mode the add-on can find itself in.
+    t.equal((clientJs.match(/dialogSuppressed/g) || []).length, 2,
+      'declared once, read once, assigned nowhere');
+  });
+
+  test('the live suite runs where there is no dialog to block it', (t) => {
+    // gappRunInGas runs server-side in Apps Script and never loads the
+    // sidebar, so the modal cannot stop it finishing. Assert the separation
+    // rather than trusting it.
+    const serverJs = fs.readdirSync(SRC).filter((f) => f.endsWith('.js'))
+      .map((f) => read(f)).join('\n');
+    ['showDialog', 'reportError', 'classifyError', 'lastError'].forEach((n) => {
+      t.notOk(new RegExp('\\b' + n + '\\b').test(serverJs),
+        n + ' is client-only, and stays that way');
+    });
   });
 
   test('a quota failure is what sets that timer, and nothing else does', (t) => {

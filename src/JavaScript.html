@@ -177,6 +177,20 @@ function status(msg, kind) {
  * come back down before anything works again.
  * ================================================================= */
 
+/**
+ * Set by a harness that runs this code outside a browser -- the local suite
+ * loads the whole script into a bare context and calls into it. With this on,
+ * a failure is classified, logged and backed off from exactly as it would be,
+ * but nothing is drawn: the verdict is left in lastError to be read instead
+ * of a dialog nobody is there to dismiss.
+ *
+ * Nothing in the sidebar ever sets it. It exists so a test can ask what the
+ * user would have been shown without having to see it.
+ */
+var dialogSuppressed = false;
+/** The last classified failure, whether or not it was drawn. */
+var lastError = null;
+
 /** Docs API quotas are counted per minute, so a minute is what clears one. */
 var RATE_LIMIT_BACKOFF_MS = 60000;
 /** Set when a quota error comes back; read by tickDelay to stand the poll down. */
@@ -273,11 +287,15 @@ function reportError(e, opts) {
   if (e && typeof e === 'object') { try { e.__reported = true; } catch (ignored) {} }
 
   var c = classifyError(e);
+  lastError = c;
   // Still logged: a copyable stack is what a bug report needs. It is just no
   // longer the only place the failure appears, which was the problem.
   if (typeof console !== 'undefined' && console.error) console.error('Stylist:', e);
 
   if (c.kind === 'rate') throttledUntil = Date.now() + RATE_LIMIT_BACKOFF_MS;
+
+  // Everything above has happened; only the drawing is skipped.
+  if (dialogSuppressed) return;
 
   if (c.kind !== 'other' || opts.intro) {
     showDialog(c.title, opts.intro ? opts.intro + '\n\n' + c.body : c.body, c.detail);
@@ -291,25 +309,28 @@ function reportError(e, opts) {
  * anything the status bar can carry belongs in the status bar.
  */
 function showDialog(title, body, detail) {
-  var box = document.getElementById('alert');
-  var head = document.getElementById('alertTitle');
-  if (!box || !head) { status(title + ' ' + body, 'err'); return; }
+  var box = byId('alert');
+  var head = byId('alertTitle');
+  // No dialog in the page, or no page at all. Falling back to the status bar
+  // is better than nothing; throwing here would bury the failure being
+  // reported under a second one.
+  if (!box || !head) { if (byId('status')) status(title + ' ' + body, 'err'); return; }
   // The same failure arriving again while it is still on screen must not
   // rewrite the dialog and steal the focus back from the button.
   if (box.classList.contains('on') && head.textContent === title) return;
   head.textContent = title;
-  document.getElementById('alertBody').textContent = body;
-  var d = document.getElementById('alertDetail');
+  byId('alertBody').textContent = body;
+  var d = byId('alertDetail');
   d.textContent = detail || '';
   d.style.display = detail ? 'block' : 'none';
   box.classList.add('on');
   box.setAttribute('aria-hidden', 'false');
-  var ok = document.getElementById('alertOk');
+  var ok = byId('alertOk');
   if (ok) ok.focus();
 }
 
 function hideDialog() {
-  var box = document.getElementById('alert');
+  var box = byId('alert');
   if (!box) return;
   box.classList.remove('on');
   box.setAttribute('aria-hidden', 'true');
@@ -318,6 +339,16 @@ function hideDialog() {
 /* =================================================================
  * DOM helpers
  * ================================================================= */
+/**
+ * getElementById, for the code that has to survive not having a document --
+ * the error reporter, which is loaded and called by the local suite in a bare
+ * context, and which must not throw a second failure over the first one.
+ */
+function byId(id) {
+  return (typeof document !== 'undefined' && document.getElementById)
+    ? document.getElementById(id) : null;
+}
+
 /** A detached copy, so an editor's working model never mutates S.data. */
 function copy(o) { return JSON.parse(JSON.stringify(o || {})); }
 
