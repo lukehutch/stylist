@@ -111,6 +111,23 @@ on it comes after.
 4. In the Apps Script editor: **Project Settings (⚙) → Google Cloud Project →
    Change project**, paste the number, **Set project**.
 
+On a personal Google account **External** is the only user type on offer —
+**Internal** needs a Workspace domain — and an External app starts in
+**Testing**, which carries two limits worth knowing before you get caught by
+them. It admits at most 100 named test users. And it has Google revoke its
+refresh tokens after **seven days**, so the `clasp login` the live suite runs
+on has to be repeated about weekly; the symptom is `npm run test:live` failing
+with `invalid_grant: Token has been expired or revoked`, which says nothing
+about your script and means only that the token aged out.
+
+Until the app is verified, everyone authorising it sees the *"Google hasn't
+verified this app"* screen described above. Verification is a real requirement
+if you ever distribute it: `.../auth/documents` is a **sensitive** scope, so
+Google asks for a written justification per scope and a video of the consent
+flow and the data being used. It is not a **restricted** scope — those are the
+wide Drive and Gmail ones — so the annual third-party security assessment that
+restricted scopes carry does not apply here.
+
 ### If a command fails
 
 | Message | Fix |
