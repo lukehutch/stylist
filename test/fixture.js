@@ -275,6 +275,57 @@ function makeMultiDoc() {
   };
 }
 
+/**
+ * The shape of the document the live suite builds for itself.
+ *
+ * src/LiveFixture.js makes a real Google Doc with a title, headings, a
+ * footnote, two kinds of list, a table, a section break and a second section
+ * keeping a header of its own. The live tests are written against that, so
+ * running them offline against anything less means half of them find nothing
+ * to exercise and pass on a comment. This is that document, near enough:
+ * named styles AND two sections, which no other fixture here has both of.
+ */
+function makeLiveLikeDoc() {
+  const t = mainTab();
+  t.body.content.push({
+    startIndex: 120, endIndex: 121,
+    sectionBreak: {
+      sectionStyle: {
+        sectionType: 'NEXT_PAGE',
+        marginTop: { magnitude: 90, unit: 'PT' },
+        marginBottom: { magnitude: 72, unit: 'PT' },
+        marginLeft: { magnitude: 72, unit: 'PT' },
+        marginRight: { magnitude: 72, unit: 'PT' },
+        // The second section keeps a header to itself, which is what the
+        // header/footer tests need in order to have anything to tell apart.
+        // SectionStyle spells it defaultHeaderId; there is no plain headerId.
+        defaultHeaderId: 'h.section'
+      }
+    }
+  });
+  t.body.content.push({
+    startIndex: 121, endIndex: 150,
+    paragraph: {
+      paragraphStyle: Object.assign(realParagraphDefaults(), { namedStyleType: 'NORMAL_TEXT' }),
+      elements: [{ startIndex: 121, endIndex: 150,
+                   textRun: { content: 'A paragraph in the second section' } }]
+    }
+  });
+  t.headers['h.section'] = { headerId: 'h.section', content: [
+    { startIndex: 0, endIndex: 15, paragraph: {
+      paragraphStyle: realParagraphDefaults(),
+      elements: [{ startIndex: 0, endIndex: 15, textRun: { content: 'Section header' } }] } }
+  ] };
+  return {
+    title: 'Live-like Doc',
+    documentId: 'DOC_ID',
+    tabs: [{
+      tabProperties: { tabId: 't.0', title: 'Main', index: 0, nestingLevel: 0 },
+      documentTab: t
+    }]
+  };
+}
+
 /** Same content, but exposed the legacy (pre-tabs) way. */
 function makeLegacyDoc() {
   const t = mainTab();
@@ -343,4 +394,5 @@ function makeSectionedDoc() {
 }
 
 module.exports = { makeDoc, makeLegacyDoc, makeMultiDoc, makeSectionedDoc,
+                   makeLiveLikeDoc,
                    noBorder, realTextDefaults, realParagraphDefaults };

@@ -17,6 +17,7 @@ const { sandbox } = require('gapp-tester');
 const config = require('../gapp.config.json');
 const { checkRequests } = require('./apicheck');
 const { protoize } = require('./proto3');
+const { applyRequests } = require('./apply');
 
 const ROOT = path.join(__dirname, '..');
 
@@ -53,6 +54,7 @@ function makeSandbox(doc, opts) {
 
   const counts = { get: 0 };
   const created = [];
+  const skipped = [];
   // `opts.docsGet(id, optionalArgs)` replaces get() wholesale when a test has
   // to see the exact call -- the masked-read tests do, since their whole
   // subject is what got asked for.
@@ -61,7 +63,10 @@ function makeSandbox(doc, opts) {
   // has no startIndex. opts.verbatim hands the fixture over as written, for
   // the few tests whose subject is the fixture rather than the reading of it.
   const shape = (d) => (opts.verbatim ? JSON.parse(JSON.stringify(d)) : protoize(d));
-  const docsGet = opts.docsGet || (() => { counts.get++; return shape(doc); });
+  // One document that writes actually change, so a test can write a value
+  // and read it back the way a user would. `doc` itself is left alone.
+  const live = JSON.parse(JSON.stringify(doc));
+  const docsGet = opts.docsGet || (() => { counts.get++; return shape(live); });
   const Docs = {
     Documents: {
       get: docsGet,
@@ -79,6 +84,10 @@ function makeSandbox(doc, opts) {
             throw e;
           }
         }
+        // Style updates are applied through their field masks, so a mask
+        // that misses a field means the field does not change here either.
+        // Content edits are recorded only; see test/apply.js.
+        skipped.push.apply(skipped, applyRequests(live, resource.requests));
         return { replies: [] };
       },
       // The live suite's fixture builder makes its scratch document if it
@@ -111,9 +120,15 @@ function makeSandbox(doc, opts) {
   });
   sb.__captured = captured;
   sb.__created = created;
+  /** Request kinds that were recorded but not applied -- content edits. */
+  sb.__skipped = skipped;
+  /** The document as it now stands, writes included, API-shaped. */
+  sb.__doc = () => shape(live);
   // fetchDoc_ caches the document for the length of one Apps Script execution;
   // a test is a fresh execution, so the cache and the fetch count go with it.
-  sb.__reset = () => { captured.length = 0; counts.get = 0; sb.docCache_ = null; };
+  sb.__reset = () => {
+    captured.length = 0; skipped.length = 0; counts.get = 0; sb.docCache_ = null;
+  };
   return sb;
 }
 

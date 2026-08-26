@@ -111,6 +111,69 @@ test('updateNamedStyle is accepted with the field mask we build', function (t) {
   t.comment(res.applied + ' request(s) accepted, values unchanged');
 });
 
+/**
+ * Does the write actually land?
+ *
+ * Acceptance is not the same as effect. The Docs API answers 200 to a
+ * request whose field mask does not name what the payload sets, and simply
+ * does nothing -- so a mask can be wrong for a long time without anything
+ * saying so. These write a value, read the document back, and check the
+ * value changed, which is the only way to tell the two apart.
+ */
+test('a margin written is a margin read back', function (t) {
+  var before = readPageFormat(null);
+  writePageFormat({ tabId: before.tabId, marginLeftPt: 90 });
+  var after = readPageFormat(null);
+  t.near(after.marginLeftPt, 90, 0.01, 'the margin did not change');
+  writePageFormat({ tabId: before.tabId, marginLeftPt: before.marginLeftPt });
+  t.near(readPageFormat(null).marginLeftPt, before.marginLeftPt, 0.01,
+    'and it goes back where it was');
+});
+
+/**
+ * writePageFormat names only "documentFormat.documentMode" in its mask,
+ * while NamedStyles has a comment saying the API wants the parent path as
+ * well as the leaf. If that is true here too, switching to pageless does
+ * nothing at all and says so to nobody.
+ */
+test('switching to pageless actually switches to pageless', function (t) {
+  var before = readPageFormat(null);
+  try {
+    writePageFormat({ tabId: before.tabId, documentMode: 'PAGELESS' });
+    t.equal(readPageFormat(null).documentMode, 'PAGELESS',
+      'the mask names documentFormat.documentMode but nothing changed');
+  } finally {
+    writePageFormat({ tabId: before.tabId, documentMode: before.documentMode || 'PAGES' });
+  }
+  t.equal(readPageFormat(null).documentMode, before.documentMode || 'PAGES',
+    'and it goes back to pages');
+});
+
+/**
+ * writeSection sends a zero-width range, on the reasoning that a range only
+ * has to overlap the section it means. Nothing had ever checked that.
+ */
+test('a zero-width range picks out the section it sits on', function (t) {
+  var secs = readSections(null);
+  if (secs.sections.length < 2) {
+    t.comment('this document has only one section');
+    t.ok(true, 'nothing to tell apart');
+    return;
+  }
+  var last = secs.sections[secs.sections.length - 1];
+  var was = last.marginTopPt;
+  var want = (was === 90) ? 108 : 90;
+
+  writeSection({ tabId: secs.tabId, startIndex: last.startIndex, marginTopPt: want });
+  var now = readSections(null).sections;
+  t.near(now[now.length - 1].marginTopPt, want, 0.01,
+    'the zero-width range did not reach the section');
+  t.notEqual(now[0].marginTopPt, want,
+    'and it reached only that one, not the first section too');
+
+  writeSection({ tabId: secs.tabId, startIndex: last.startIndex, marginTopPt: was });
+});
+
 test('segment styling is accepted on footnotes', function (t) {
   var segs = readSegments(null);
   if (!segs.footnotes.length) {

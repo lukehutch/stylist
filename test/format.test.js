@@ -9,7 +9,8 @@
  */
 const assert = require('assert');
 const { makeSandbox, allRequests } = require('./harness');
-const { makeDoc, makeLegacyDoc, makeMultiDoc, makeSectionedDoc } = require('./fixture');
+const { makeDoc, makeLegacyDoc, makeMultiDoc, makeSectionedDoc,
+        makeLiveLikeDoc } = require('./fixture');
 
 module.exports = ({ suite, test }) => {
 
@@ -1407,7 +1408,11 @@ test('the live suite registers its tests against the fixture document', (t) => {
 });
 
 test('the live suite passes against the mocked services', (t) => {
-  const run = S.gappRun();
+  // Its own sandbox, deliberately. Writes now land on the document rather
+  // than only being recorded, so S carries whatever every test above it
+  // wrote, and a live test that reads the document back would be reading
+  // their leavings rather than the fixture.
+  const run = makeSandbox(makeLiveLikeDoc()).gappRun();
   // All but the first suite, which builds the scratch document. Its whole
   // subject is a write having landed, and this sandbox's batchUpdate records
   // requests without applying them, so there is nothing here it could pass
