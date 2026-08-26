@@ -8,16 +8,38 @@
  *
  * How to run:
  *   gapp-test live            (pushes, runs, prints the report here)
- *   or pick gappRunInGas in the Apps Script editor and press Run, with the
- *   document you want to test open.
+ *   or pick gappRunInGas in the Apps Script editor and press Run.
  *
- * Every write re-asserts values the document already has, so a passing run
- * leaves the formatting exactly as it found it. A failing run is the
- * interesting case, and Ctrl+Z in the document undoes anything it did.
+ * What it runs against is a scratch document of its own -- made on the first
+ * run, emptied and refilled with a known fixture at the start of every run
+ * after that. See LiveFixture.js. Nothing needs to be open in a browser, and
+ * no document of yours is touched.
+ *
+ * Every write below re-asserts a value the document already has, so the
+ * fixture comes out of a passing run exactly as it went in.
  *
  * `suite`, `test` and the assertions come from GappTester.js, which is
  * pushed alongside this file.
  */
+
+suite('The document under test');
+
+/**
+ * First, because everything after it reads the document this leaves behind.
+ * It is also the one test that changes anything: the rest put back what they
+ * find.
+ */
+test('the scratch document is emptied and refilled with the fixture', function (t) {
+  var f = resetLiveFixture_();
+  t.ok(f.documentId, 'no scratch document came back');
+  t.equal(f.sections, 2, 'the fixture has a second section to test against');
+  t.ok(f.footnotes >= 1, 'the fixture has a footnote');
+  t.ok(f.headers >= 2, 'a default header and one the second section keeps to itself');
+  t.ok(f.footers >= 1, 'and a default footer');
+  t.comment('https://docs.google.com/document/d/' + f.documentId + '/edit');
+  t.comment(f.sections + ' section(s), ' + f.headers + ' header(s), ' +
+            f.footers + ' footer(s), ' + f.footnotes + ' footnote(s)');
+});
 
 suite('Runtime');
 

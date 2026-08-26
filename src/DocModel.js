@@ -6,8 +6,30 @@
  * colour; the sidebar renders them in whatever unit the user picked.
  */
 
+/**
+ * Names the document the live suite runs against, when there is no container
+ * one to run against. Only the script's owner can set it, from the Apps
+ * Script editor; see LiveFixture.js, which is what puts it there.
+ */
+var LIVE_TEST_DOC_PROP_ = 'stylist.liveTestDocId';
+
+/**
+ * The document to work on.
+ *
+ * In the add-on this is always the container: the sidebar exists only inside
+ * a document, and that document is what every read and write is addressed to.
+ * The fallback below cannot be reached from the add-on at all, because there
+ * is no path through it that leaves getActiveDocument() empty. It is there
+ * for the live suite, which runs against the standalone script from clasp,
+ * with no container of any kind.
+ */
 function activeDocId_() {
-  return DocumentApp.getActiveDocument().getId();
+  var doc = DocumentApp.getActiveDocument();
+  if (doc) return doc.getId();
+  var id = PropertiesService.getScriptProperties().getProperty(LIVE_TEST_DOC_PROP_);
+  if (id) return id;
+  throw new Error('No document to work on: nothing is open, and no ' +
+    LIVE_TEST_DOC_PROP_ + ' script property names one.');
 }
 
 /**

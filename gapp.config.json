@@ -12,6 +12,7 @@
     "Presets.js",
     "CustomStyles.js",
     "GappTester.js",
+    "LiveFixture.js",
     "LiveTests.js",
     "Code.js"
   ],

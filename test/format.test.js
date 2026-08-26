@@ -1363,9 +1363,61 @@ test('the live suite registers its tests against the fixture document', (t) => {
 
 test('the live suite passes against the mocked services', (t) => {
   const run = S.gappRun();
-  const failed = run.results.filter((r) => !r.ok).map((r) => r.name + ': ' + r.error);
+  // All but the first suite, which builds the scratch document. Its whole
+  // subject is a write having landed, and this sandbox's batchUpdate records
+  // requests without applying them, so there is nothing here it could pass
+  // against. What it does issue is checked below instead.
+  const failed = run.results
+    .filter((r) => !r.ok && r.suite !== 'The document under test')
+    .map((r) => r.name + ': ' + r.error);
   t.deepEqual(failed, [], 'live tests failing locally');
-  t.equal(run.failed, 0);
+  t.equal(run.failed, 1, 'and only the fixture build, for want of a real document');
+});
+
+/**
+ * The fixture builder, as far as a sandbox can take it. It stops where it
+ * asks the document to read back the text it just wrote -- which a recording
+ * mock never will -- so what is checkable is everything before that: that it
+ * empties the document, puts the page setup back, and writes the fixture.
+ */
+test('the fixture builder empties the document before it refills it', (t) => {
+  const sb = makeSandbox(makeDoc());
+  t.throws(() => sb.resetLiveFixture_(), /no paragraph starting/,
+    'it stops rather than half-building a fixture it cannot read back');
+
+  const reqs = allRequests(sb);
+  const kinds = reqs.map((r) => Object.keys(r)[0]);
+  t.ok(kinds.indexOf('deleteContentRange') === 0, 'the body goes first');
+  ['deleteHeader', 'deleteFooter', 'updateDocumentStyle', 'insertText']
+    .forEach((k) => t.ok(kinds.indexOf(k) > 0, 'it also issues ' + k));
+
+  const wipe = reqs[0].deleteContentRange.range;
+  t.equal(wipe.startIndex, 1, 'from the top');
+  t.ok(wipe.endIndex >= 1, "and short of the document's own last newline");
+
+  const setup = reqs[kinds.indexOf('updateDocumentStyle')].updateDocumentStyle;
+  t.equal(setup.documentStyle.marginTop.magnitude, 72, 'one-inch margins every run');
+  t.equal(setup.documentStyle.useFirstPageHeaderFooter, false,
+    'and no first-page variant left over from a previous run');
+
+  const text = reqs[kinds.indexOf('insertText')].insertText;
+  t.equal(text.location.index, 1);
+  ['Stylist live tests', 'First bullet', 'First step', 'After the break']
+    .forEach((line) => t.match(text.text, new RegExp(line),
+      'the fixture text carries "' + line + '"'));
+});
+
+test('the scratch document is made only when there is not one already', (t) => {
+  const sb = makeSandbox(makeDoc());
+  try { sb.resetLiveFixture_(); } catch (e) { /* stops at the read-back, as above */ }
+  t.equal(sb.__created.length, 1, 'nothing was stored, so one was made');
+  t.match(sb.__created[0].title, /Stylist live tests/, 'and named for what it is for');
+
+  const again = makeSandbox(makeDoc());
+  again.PropertiesService.getScriptProperties().setProperty(
+    again.LIVE_TEST_DOC_PROP_, 'AN_EXISTING_DOC');
+  try { again.resetLiveFixture_(); } catch (e) { /* same */ }
+  t.equal(again.__created.length, 0, 'the one from last time is reused');
 });
 
 test('its report is TAP, so live mode can read it back', (t) => {

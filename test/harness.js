@@ -50,6 +50,7 @@ function makeSandbox(doc, opts) {
   };
 
   const counts = { get: 0 };
+  const created = [];
   // `opts.docsGet(id, optionalArgs)` replaces get() wholesale when a test has
   // to see the exact call -- the masked-read tests do, since their whole
   // subject is what got asked for.
@@ -61,6 +62,13 @@ function makeSandbox(doc, opts) {
       batchUpdate: (resource, id) => {
         captured.push({ documentId: id, requests: resource.requests });
         return { replies: [] };
+      },
+      // The live suite's fixture builder makes its scratch document if it
+      // does not have one. Nothing here has a Drive to put it in, so this
+      // records the call and hands back an id.
+      create: (resource) => {
+        created.push(resource);
+        return { documentId: 'CREATED_DOC_ID', title: resource && resource.title };
       }
     }
   };
@@ -84,6 +92,7 @@ function makeSandbox(doc, opts) {
     get: () => state.cursor, set: (v) => { state.cursor = v; }
   });
   sb.__captured = captured;
+  sb.__created = created;
   // fetchDoc_ caches the document for the length of one Apps Script execution;
   // a test is a fresh execution, so the cache and the fetch count go with it.
   sb.__reset = () => { captured.length = 0; counts.get = 0; sb.docCache_ = null; };
