@@ -245,16 +245,31 @@ terminal or in CI, because Google's Execution API asks for a fair amount
    `client_secret.json` — `.gitignore` already covers it — and:
 
    ```bash
-   clasp login --user gapp-tests --creds client_secret.json \
+   clasp login --user live --creds client_secret.json \
                --use-project-scopes --include-clasp-scopes
    ```
 
-   `--use-project-scopes` is needed because the token must cover every scope in
+   Both switches are needed, and neither is enough alone.
+   `--use-project-scopes` makes the token cover every scope in
    `appsscript.json`, not just the ones `gappRunInGas` touches.
    `--include-clasp-scopes` is needed because `--use-project-scopes` alone
-   *replaces* clasp's own scopes rather than adding to them, which drops
-   `script.projects` and breaks the `clasp push` that runs first. Then put
-   `{"live": {"user": "gapp-tests"}}` in `gapp.config.json`.
+   *replaces* clasp's own scopes rather than adding to them: clasp's source
+   reads `scopes = manifestScopes ? [...manifestScopes] : scopes`, so the token
+   comes back holding only the two manifest scopes, `script.projects` is gone,
+   and both the `clasp push` that runs first and `clasp list-deployments` fail
+   with *"Request had insufficient authentication scopes."* The user name must
+   match the one in `gapp.config.json`, which is `{"live": {"user": "live"}}`;
+   name a user that has no token and the runner silently falls back to your
+   everyday `default` credential, which cannot run the function.
+
+   With both switches the consent screen lists nine scopes rather than two —
+   Drive metadata, `drive.file`, Docs, service management, cloud-platform,
+   webapp deploy, logging, script deployments, script projects. That is clasp
+   the command-line tool asking for permission to manage *your own* script
+   projects on *your own* account, through the Desktop-App OAuth client you
+   just made. It is not what Stylist asks for. Users of the add-on authorise
+   `src/appsscript.json`, which is two scopes and nothing else; nothing you do
+   at this login changes their consent screen.
 4. Add `"executionApi": {"access": "MYSELF"}` to `src/appsscript.json` and
    `clasp push --force`. The manifest has to declare it before a deployment can
    be an API Executable.
@@ -265,11 +280,10 @@ terminal or in CI, because Google's Execution API asks for a fair amount
    reading from storage. Error code NOT_FOUND"* — confirmed by adding the
    deployment and watching that error change.
 
-Step 4 is deliberately **not** committed. `executionApi` is a permanent
-execution surface on the add-on, and shipping one for the sake of a test suite
-is the wrong trade for something published to the Marketplace. Add it while
-testing, take it out before publishing — `git diff src/appsscript.json` is the
-reminder that it is still there.
+Step 4 **is** committed, and should not stay that way. `executionApi` is a
+permanent execution surface on the add-on, and shipping one for the sake of a
+test suite is the wrong trade for something published to the Marketplace.
+Take it out of `src/appsscript.json` before publishing.
 
 The other error worth recognising is *"Unable to run script function. Please
 make sure you have permission to run the script function."* That is step 3: the
@@ -367,6 +381,7 @@ between them. Regenerate the rasters after editing it:
 
 ```bash
 inkscape assets/icon.svg -w 128 -h 128 -o assets/icon-128.png
+inkscape assets/icon.svg -w 120 -h 120 -o assets/icon-120.png
 inkscape assets/icon.svg -w  32 -h  32 -o assets/icon-32.png
 inkscape assets/banner.svg -w 220 -h 140 -o assets/banner-220x140.png
 ```
@@ -380,9 +395,15 @@ Workspace Marketplace SDK**, uploaded as part of the store listing:
 
 | Asset | Size | Where |
 |---|---|---|
+| `assets/icon-120.png` | 120×120 PNG | Google Auth Platform → Branding → App logo |
 | `assets/icon-32.png` | 32×32 PNG | Marketplace SDK → App Configuration → Application icon |
 | `assets/icon-128.png` | 128×128 PNG | Marketplace SDK → Store Listing → Application icon |
 | `assets/banner-220x140.png` | 220×140 PNG | Marketplace SDK → Store Listing → Card banner |
+
+`icon-120.png` is the odd one out: it is not a Marketplace asset at all but the
+logo on the OAuth consent screen, uploaded under Branding in the Cloud console,
+and it is what makes verification possible — Google will not review an app
+without one. The other three belong to the store listing.
 
 There is no naming requirement — the files are uploaded, not referenced by
 path. The sidebar draws the same artwork inline as SVG in `src/Sidebar.html`,
