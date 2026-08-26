@@ -103,6 +103,12 @@ and saves it to your computer. Nothing is uploaded anywhere in the process. The
 **Upload** button reads a file you choose, in your browser, and applies it. The
 file is never sent to any server.
 
+**The file can expose no personal data**, because there is none in it to
+expose. It holds page dimensions and margins, named style definitions, and your
+saved presets — fonts, sizes, spacing, indents, colors, and the names you chose
+for them. No document text, no document title, no account, no identifier of any
+kind. You can open one in a text editor and see the whole of it.
+
 ## The one outbound request, and it carries nothing
 
 For completeness, because "transmits nothing" should mean it: the sidebar loads
@@ -118,22 +124,11 @@ sidebar, and the document itself, under the Google account you are signed in to
 at the time. It is governed by
 [Google's privacy policy](https://policies.google.com/privacy).
 
-**In plain terms about the law here.** Under the GDPR an IP address counts as
-personal data, and a German court held in 2022 that loading fonts from Google's
-servers without consent was an unlawful transfer. That decision concerned an
-ordinary public website, where a visitor who has no relationship with Google is
-exposed to it unawares. Stylist's sidebar is a different situation: it runs
-inside Google Docs, in a document Google is already storing, served by Google
-from Google's own servers, to a browser already signed in to Google. Google
-learns nothing from the font request that it does not already have.
-
-The developer's view is therefore that this is disclosed rather than hidden,
-and harmless in context — but that is a judgment, not a ruling, and you are
-entitled to disagree with it. There is at present no way to switch the font
-request off while still using Stylist. If this matters to you, please
-[say so on the issue tracker](https://github.com/lukehutch/stylist/issues): the
-fonts can be bundled with the add-on instead, and the request removed
-altogether.
+The request goes from Google, to Google, about a Google document, under the
+Google account you are already signed in to. It conveys to Google nothing that
+Google does not already hold, and it conveys nothing whatsoever to anyone else.
+What Google does with it is Google's own affair, governed by its policy and by
+your agreement with it.
 
 Stylist makes no other network request of any kind. It contains no
 `UrlFetchApp` call — the only way Apps Script code can reach the internet — so
@@ -157,32 +152,35 @@ This section is here because privacy law requires a notice to contain certain
 things whether or not they apply. In Stylist's case almost none of them apply,
 and it is worth saying why rather than filling the space with boilerplate.
 
-**Who is responsible for your data.** For the contents of your documents and
-for your saved presets, **you are** — or, if you are using a work account, your
-employer. Stylist runs entirely inside your own Google account, under your own
-Google login. The developer operates no server, receives no copy of anything,
-and has no technical means of access. In the GDPR's terms the developer is not
-a controller or a processor of that data, because none of it is ever
-transmitted to or processed by the developer. Google acts as your provider for
-Docs and Apps Script, under your agreement with Google.
+**The developer is neither a controller nor a processor of your data.** No
+personal data is collected, received, stored, or processed by the developer at
+any point, so there is no processing by the developer for data protection law
+to attach to.
 
-The single exception is the font stylesheet described above, which is a request
-your browser makes to Google because Stylist's code asks it to. The developer
-chose to include it, and so may be treated as a controller for that one narrow
-transfer of your IP address to Google. It is described in full in that section,
-and nothing about you or your documents travels with it.
+**Everything that happens to your data is Google's.** Your documents are
+Google's to store. The presets Stylist saves are held by Google, in Google's
+Apps Script property store, inside your own Google account. Stylist's code runs
+on Google's servers, in a data center Google chooses. Where any of it is kept,
+where it is processed, which country it crosses into, and what safeguards cover
+it are matters determined by Google, under
+[your agreement with Google](https://policies.google.com/privacy) — not by
+Stylist, which has no say in any of it and no means of finding out. For all of
+that, Google is your provider and your point of contact.
+
+**What that leaves the developer responsible for** is the code, which is public
+and which you can read. There is nothing else.
 
 **The information a notice is required to state:**
 
 | Required | For Stylist |
 |---|---|
-| Identity and contact details of the controller | Luke Hutchison, via [the issue tracker](https://github.com/lukehutch/stylist/issues) |
+| Identity and contact details of the controller | There is no controller on the developer's side, because there is no processing. The developer is Luke Hutchison, luke.hutch@gmail.com. |
 | Contact details of a data protection officer | None. One is required only of public authorities and of organizations carrying out large-scale monitoring or processing of special-category data; Stylist does none of those. |
 | Purposes of processing | To display and apply the formatting of the document you have open, and to store the presets you choose to save. Nothing else. |
-| Legal basis | Article 6(1)(b) — performing the task you asked for, which is the entire reason you installed it. For the font request, your consent, which you give by installing and opening the sidebar. |
+| Legal basis | Not applicable — the developer carries out no processing. Google's processing rests on your agreement with Google. |
 | Legitimate interests, where relied on | None are relied on. |
 | Recipients of the data | None. Nothing is disclosed to anyone. The developer is not a recipient. |
-| Transfers outside the EEA or UK | None by Stylist. Where Google stores your documents is a matter between you and Google. The font request goes to Google's servers, which may be outside the EEA, under Google's own safeguards. |
+| Transfers outside the EEA or UK | None by the developer, who receives nothing. Where Google stores and processes your documents, your presets, and the add-on's own execution is determined by Google under your agreement with Google, together with the safeguards covering it. |
 | How long data is kept | Document content is not kept at all — it is read, displayed, and discarded when the execution finishes. Presets are kept until you delete them or uninstall the add-on. |
 | Right of access, rectification, erasure, restriction, objection, portability | See below. |
 | Right to withdraw consent | Uninstall the add-on, or revoke it at [your Google account's third-party access page](https://myaccount.google.com/permissions). Both take effect immediately. |
@@ -239,5 +237,5 @@ the above is checkable in a few minutes:
 ## Changes, and how to reach the author
 
 Any change to this policy will be committed to the project's public repository,
-where its full history is visible. Questions or concerns:
+where its full history is visible. Questions or concerns: luke.hutch@gmail.com, or
 [open an issue](https://github.com/lukehutch/stylist/issues).

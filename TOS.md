@@ -145,7 +145,8 @@ Stylist is a personal project. The developer is under no obligation to provide
 support, to fix any defect, to accept any change, or to continue developing or
 publishing Stylist. Reports and questions are welcome at the project's
 [issue tracker](https://github.com/lukehutch/stylist/issues), with no
-undertaking that any of them will be answered or acted on.
+undertaking that any of them will be answered or acted on. The developer can
+also be reached at luke.hutch@gmail.com.
 
 ## 11. Changes to these terms
 
@@ -161,9 +162,8 @@ terms and that license conflict as to the code, the license governs.
 
 ## 13. Governing law
 
-These terms are governed by the laws of `<JURISDICTION>`, without regard to its
-conflict of law rules. *(To be completed before publication — this should be
-where the developer is resident.)*
+These terms are governed by the laws of the State of `<STATE>`, United States,
+without regard to its conflict of law rules.
 
 If you are a consumer resident in the European Economic Area, the United
 Kingdom, or anywhere else whose law gives you the right to the protection of
