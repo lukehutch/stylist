@@ -95,15 +95,17 @@ Skip this unless you intend to run `npm run test:live` or publish the add-on;
 everything above works without it. **The switch cannot be undone**, and it
 forces everyone who has authorised the script to authorise it again.
 
-Everything in the Cloud console comes first: **Set project** is refused until
-the Cloud project has a configured consent screen.
+The consent screen has to exist before anything else will accept the project:
+the Cloud console refuses to create an OAuth client without one, and Apps
+Script refuses to link to it. So it comes second, and everything that depends
+on it comes after.
 
 1. In the [Cloud console](https://console.cloud.google.com/cloud-resource-manager),
    open or create a project, then **More (⋮) → Project settings**, and copy the
    **Project number** (digits only — not the Project ID).
 2. Fill in the **OAuth consent screen** for that project, adding yourself under
-   **Audience → Test users**. Do this before step 4: Apps Script will not link
-   to a project that has no consent screen.
+   **Audience → Test users**. Both of the steps below are refused until this
+   is done, as is creating the OAuth client the live suite needs.
 3. Enable the **Google Docs API** in that project — advanced services do not
    carry over from the default project, and Stylist will not run without it.
 4. In the Apps Script editor: **Project Settings (⚙) → Google Cloud Project →
