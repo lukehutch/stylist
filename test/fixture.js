@@ -327,6 +327,39 @@ function makeLiveLikeDoc() {
 }
 
 /** Same content, but exposed the legacy (pre-tabs) way. */
+/**
+ * The least a document could possibly be.
+ *
+ * Deliberately harsher than a real blank document, which still carries a full
+ * namedStyles list. Everything optional is left out: no named styles, no
+ * lists, no headers, no footers, no footnotes, no table, no margins, no page
+ * size, and a body holding nothing but the section break and the one empty
+ * paragraph that a document cannot exist without. Every read has to survive
+ * this, because proto3 omission means any of these can be missing in a real
+ * response too, and a reader that reaches through one of them without looking
+ * throws where a user just sees the sidebar fail to open.
+ */
+function makeBareDoc() {
+  return {
+    title: '',
+    documentId: 'BARE_DOC_ID',
+    tabs: [{
+      tabProperties: { tabId: 't.0', title: '', index: 0, nestingLevel: 0 },
+      documentTab: {
+        documentStyle: {},
+        body: {
+          content: [
+            { startIndex: 0, endIndex: 1, sectionBreak: {} },
+            { startIndex: 1, endIndex: 2, paragraph: { elements: [
+              { startIndex: 1, endIndex: 2, textRun: { content: '\n' } }
+            ] } }
+          ]
+        }
+      }
+    }]
+  };
+}
+
 function makeLegacyDoc() {
   const t = mainTab();
   return Object.assign({ title: 'Legacy Doc', documentId: 'DOC_ID' }, t);
@@ -393,6 +426,6 @@ function makeSectionedDoc() {
   };
 }
 
-module.exports = { makeDoc, makeLegacyDoc, makeMultiDoc, makeSectionedDoc,
+module.exports = { makeDoc, makeLegacyDoc, makeMultiDoc, makeSectionedDoc, makeBareDoc,
                    makeLiveLikeDoc,
                    noBorder, realTextDefaults, realParagraphDefaults };
