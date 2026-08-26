@@ -39,6 +39,11 @@ function fromPt_(pt, unit, places) {
 }
 
 /** Build a Docs API Dimension from a value already in points. */
+/** Nothing-in-particular -> 0, for the fields that have no inherited value. */
+function blankIsZero_(v) {
+  return (v === undefined || v === null || v === '') ? 0 : v;
+}
+
 function ptDim_(pt) {
   if (pt === null || pt === undefined || pt === '') return null;
   var n = Number(pt);
@@ -48,7 +53,16 @@ function ptDim_(pt) {
 
 /** Read a Docs API Dimension back out as points (null when unset). */
 function dimPt_(dim) {
-  if (!dim || dim.magnitude === null || dim.magnitude === undefined) return null;
+  if (dim === null || dim === undefined) return null;
+  // Dimension is a proto3 message, so a magnitude of zero is left out of the
+  // JSON altogether -- a zero margin arrives as {unit: 'PT'} and a zero
+  // border width as {}. A Dimension that is there but carries no magnitude
+  // therefore means zero, not "unset", the same rule colorToHex_ follows for
+  // RgbColor channels. Reading it as null made a real zero indistinguishable
+  // from an absent value, and null travels on to mean "put this property back
+  // to whatever it inherits" -- so re-asserting a style that had a zero in it
+  // quietly cleared the field instead of leaving it alone.
+  if (dim.magnitude === null || dim.magnitude === undefined) return 0;
   return Number(dim.magnitude);
 }
 

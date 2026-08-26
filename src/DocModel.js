@@ -429,8 +429,12 @@ function uiToBorder_(u) {
   if (!u) return null;
   return {
     color: hexToColor_(u.color),
-    width: ptDim_(u.widthPt === undefined || u.widthPt === '' ? 0 : u.widthPt),
-    padding: ptDim_(u.paddingPt === undefined || u.paddingPt === '' ? 0 : u.paddingPt),
+    // A border with no width is a zero-width border; there is no "inherit"
+    // for these two. Letting a blank through as null puts a null where the
+    // API wants a Dimension, and it reads that as unit UNIT_UNSPECIFIED and
+    // rejects the whole request.
+    width: ptDim_(blankIsZero_(u.widthPt)),
+    padding: ptDim_(blankIsZero_(u.paddingPt)),
     dashStyle: u.dashStyle || 'SOLID'
   };
 }

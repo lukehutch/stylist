@@ -34,6 +34,51 @@ test('points back to each unit', (t) => {
   t.near(S.fromPt_(2.8346456692913385, 'MM'), 1, 1e-4);
 });
 
+/**
+ * Dimension is proto3, so a magnitude of zero is not in the JSON at all.
+ * Reading a present-but-empty Dimension as null made a real zero look like an
+ * absent value, and null means "put this back to what it inherits" by the
+ * time it reaches a request -- so re-asserting a style with a zero in it
+ * cleared the field, and a zero-width border went out as a null Dimension,
+ * which Google rejects as UNIT_UNSPECIFIED.
+ */
+test('a Dimension that is there but has no magnitude is zero', (t) => {
+  t.equal(S.dimPt_({ unit: 'PT' }), 0, 'a zero margin, as the API sends it');
+  t.equal(S.dimPt_({}), 0, 'a zero border width, as the API sends it');
+  t.equal(S.dimPt_({ magnitude: 0, unit: 'PT' }), 0, 'and when it is spelled out');
+});
+
+test('a Dimension that is not there at all is still unset', (t) => {
+  t.equal(S.dimPt_(null), null);
+  t.equal(S.dimPt_(undefined), null);
+});
+
+test('a zero-width border goes out as a Dimension, never as null', (t) => {
+  ['widthPt', 'paddingPt'].forEach((k) => {
+    [undefined, null, ''].forEach((blank) => {
+      const b = S.uiToBorder_({ color: '#000000', widthPt: 1, paddingPt: 1 });
+      const u = { color: '#000000', widthPt: 1, paddingPt: 1 };
+      u[k] = blank;
+      const got = S.uiToBorder_(u);
+      const dim = got[k === 'widthPt' ? 'width' : 'padding'];
+      t.deepEqual(dim, { magnitude: 0, unit: 'PT' },
+        k + ' = ' + JSON.stringify(blank) + ' becomes a zero Dimension');
+      t.ok(b, 'and an ordinary border still builds');
+    });
+  });
+});
+
+test('re-asserting a style that holds a zero leaves the zero alone', (t) => {
+  // What the live suite does: read a named style, write the same back.
+  const ps = { indentStart: { unit: 'PT' }, spaceAbove: { magnitude: 6, unit: 'PT' } };
+  const ui = S.paragraphStyleToUi_(ps);
+  t.equal(ui.indentStartPt, 0, 'the zero survives the round to the UI');
+  const built = S.uiToParagraphStyle_(ui);
+  t.deepEqual(built.style.indentStart, { magnitude: 0, unit: 'PT' },
+    'and comes back as an explicit zero, not a request to clear the field');
+  t.ok(built.fields.indexOf('indentStart') >= 0, 'still named in the mask');
+});
+
 test('round trip survives all four units', (t) => {
   ['PT', 'IN', 'CM', 'MM'].forEach(u => {
     t.near(S.fromPt_(S.toPt_(3.75, u), u), 3.75, 1e-4, u);
