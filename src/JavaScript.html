@@ -1881,45 +1881,131 @@ function renderLists() {
  * sense on one button standing for a whole list; on a level of its own it says
  * nothing about the level you are looking at.
  */
+/**
+ * Whether a level's marker is a number rather than a bullet.
+ *
+ * The API says so only by which glyphType it carries: the six counting types
+ * are the ones GLYPH_SAMPLES knows how to draw, and everything else is a
+ * symbol.
+ */
+function numberedLevel(lv) {
+  return !!GLYPH_SAMPLES[(lv || {}).glyphType];
+}
+
+/**
+ * The glyphs one kind of preset can put on one level, each offered once.
+ *
+ * Four of the nine bullet presets end in a square and three of the six
+ * numbered ones end in "i.", so asked for level 3 the raw preset list would
+ * offer the same character four times over. Only the first preset reaching a
+ * given glyph is kept; which of the collided presets is actually written is
+ * settled later, by presetForGlyph, on the evidence of the other levels.
+ */
+function glyphChoices(presets, slot, numbered) {
+  var seen = {}, out = [];
+  (presets || []).forEach(function (p) {
+    if (!!p.numbered !== numbered) return;
+    var g = p.glyphs[slot];
+    if (!g || seen[g]) return;
+    seen[g] = true;
+    out.push(g);
+  });
+  return out;
+}
+
+/**
+ * Which preset to write when a reader picks one glyph for one level.
+ *
+ * A preset is the only way to set a glyph and it always writes the list's
+ * whole ladder, so choosing "square, on level 3" still decides levels 1 and 2.
+ * Of the presets that put the asked-for glyph on the asked-for level, this
+ * takes the one that leaves the most of the other levels looking as they look
+ * now. That is the least the panel can do about a change it cannot confine.
+ */
+function presetForGlyph(presets, slot, glyph, numbered, levels) {
+  var mine = (presets || []).filter(function (p) {
+    return !!p.numbered === numbered && p.glyphs[slot] === glyph;
+  });
+  var best = null, score = -1;
+  mine.forEach(function (p) {
+    var kept = 0;
+    p.glyphs.forEach(function (g, i) {
+      if (i !== slot && glyphExample((levels || [])[i] || {}) === g) kept++;
+    });
+    if (kept > score) { score = kept; best = p; }
+  });
+  return best;
+}
+
 function markerFold(list, lv, levels) {
   var fold = styleFold('', 'bullet/number', 'sfold:lvl' + lv.level + ':mark');
   var box = fold.body;
-  // A preset writes the first three nesting levels and stops -- measured
-  // against a real document, since Google documents neither the reach nor
-  // what is left behind. Level 4 and below keep the markers they already
-  // have, and no request in the API edits a nesting level, so from there
-  // down the marker cannot be changed at all. Only taking it off still
-  // works, because that is a change to paragraphs rather than to a level.
-  var slot = lv.level < 3 ? lv.level : -1;
-  box.appendChild(el('p', 'hint', slot < 0
-    ? 'A marker is one choice for the whole list, and a preset reaches its ' +
-      'first three levels only. Level ' + (lv.level + 1) + ' keeps the marker ' +
-      'it has: the Docs API offers no way to change it. Taking it off still works.'
-    : 'A marker is one choice for the whole list. A preset sets the first ' +
-      'three levels, so every button shows all three, with the glyph this ' +
-      'level would get picked out.'));
-
   var presets = S.data.constants.bulletPresets || [];
   var current = glyphExample(lv || {});
+
+  // What a marker write can and cannot do, measured against a real document
+  // rather than taken from the reference, which describes neither:
+  //
+  //   - createParagraphBullets is the only request in the API that sets a
+  //     glyph, and it rewrites the whole list's level definitions however
+  //     narrow the range it is aimed at. Aimed at a single paragraph it still
+  //     changed all nine levels, and did not split off a list of its own. So
+  //     a marker cannot be given to one level and withheld from the others.
+  //   - A bullet preset writes levels 1 to 3 and leaves 4 to 9 as they were.
+  //     A numbered preset writes all nine, cycling its three glyphs.
+  //
+  // Hence: from level 4 down a bullet glyph cannot be chosen at all, and the
+  // only thing left to say is which of the two kinds the level should wear.
+  if (lv.level > 2) {
+    box.appendChild(el('p', 'hint',
+      'Bullet/numbering type cannot be configured more than 3 levels deep.'));
+    var opts = [
+      { id: 'bullet', label: 'Bullet' + (current && !numberedLevel(lv) ? '  ' + current : '') },
+      { id: 'number', label: 'Number' + (current && numberedLevel(lv) ? '  ' + current : '') },
+      { id: 'none', label: 'No marker' }
+    ];
+    var now = !current ? 'none' : (numberedLevel(lv) ? 'number' : 'bullet');
+    box.appendChild(selectField(opts, now, function (v) {
+      var t = listTarget(list);
+      if (v === 'none') {
+        t.level = lv.level;
+        return listWrite('removeBullets', t);
+      }
+      // No glyph to ask for at this depth, so the pick is made on the first
+      // three levels instead: whichever preset of that kind already matches
+      // what level 1 wears keeps the change as small as it can be, and the
+      // first of that kind stands in when none of them does.
+      var numbered = v === 'number';
+      var choices = glyphChoices(presets, 0, numbered);
+      var worn = glyphExample((levels || [])[0] || {});
+      var p = presetForGlyph(presets, 0,
+        choices.indexOf(worn) >= 0 ? worn : choices[0], numbered, levels);
+      if (!p) return;
+      t.bulletPreset = p.id;
+      return listWrite('applyBulletPreset', t);
+    }));
+    return fold.item;
+  }
+
+  var slot = lv.level;
+  box.appendChild(el('p', 'hint',
+    'Pick the marker for level ' + (lv.level + 1) + '. The Docs API has no ' +
+    'request that changes one level on its own, so the other levels of this ' +
+    'list move with it — the closest match to what they wear now is kept.'));
+
   [['Bullets', false], ['Numbering', true]].forEach(function (g) {
-    var mine = presets.filter(function (p) { return !!p.numbered === g[1]; });
-    if (!mine.length) return;
+    var choices = glyphChoices(presets, slot, g[1]);
+    if (!choices.length) return;
     box.appendChild(el('h2', null, g[0]));
     var row = el('div', 'glyphs');
-    mine.forEach(function (p) {
-      // The whole ladder rather than this level's glyph alone. Four of the
-      // nine bullet presets end in a square and three of the six numbered
-      // ones end in "i.", so from level 3 down a one-glyph button would show
-      // the same character for presets that are not the same choice at all.
-      var b = el('button', p.numbered ? 'glyph num ladder' : 'glyph ladder');
-      p.glyphs.forEach(function (glyph, i) {
-        b.appendChild(el('span', i === slot ? 'g at' : 'g', glyph));
-      });
-      b.title = 'Levels 1-3:  ' + p.glyphs.join('   ') + (slot < 0
-        ? '   \u2014   level ' + (lv.level + 1) + ' is out of its reach'
-        : '   \u2014   level ' + (lv.level + 1) + ' gets ' + p.glyphs[slot]);
-      if (presetOnList(levels, p)) b.classList.add('on');
+    choices.forEach(function (glyph) {
+      var b = el('button', g[1] ? 'glyph num' : 'glyph', glyph);
+      var p = presetForGlyph(presets, slot, glyph, g[1], levels);
+      b.title = 'Level ' + (lv.level + 1) + ': ' + glyph +
+        (p ? '   —   levels 1-3 become  ' + p.glyphs.join('   ') : '');
+      if (current === glyph && numberedLevel(lv) === g[1]) b.classList.add('on');
       b.addEventListener('click', function () {
+        if (!p) return;
         var t = listTarget(list);
         t.bulletPreset = p.id;
         return listWrite('applyBulletPreset', t);
@@ -2033,17 +2119,15 @@ function listBody(list) {
     if (name) name.style.marginLeft = lv.level + 'ex';
     box.appendChild(row);
   });
-  // Said once at the foot rather than on every level: a preset fixes three
-  // levels, no request in the Docs API edits a level's glyph, and Docs
-  // repeats the three from the fourth level down. Only shown when a level
+  // Said once at the foot rather than on every level, and only when a level
   // past the third is on screen, since otherwise it explains nothing.
   if (levels.some(function (lv) { return lv.level > 2 && lv.inUse; })) {
     box.appendChild(el('p', 'hint',
-      'A marker preset reaches the first three levels only. Level 4 and ' +
-      'below keep the markers they already have \u2014 for a list Docs made, ' +
-      'its own disc, circle and square repeating \u2014 and the Docs API has ' +
-      'no request that can change them. Indent, spacing and text style are ' +
-      'still each level\u2019s own, and the markers can still be taken off.'));
+      'Bullet/numbering type cannot be configured more than 3 levels deep. A ' +
+      'bullet preset writes the first three levels and leaves the rest as ' +
+      'they were; a numbered one repeats its three all the way down. Indent, ' +
+      'spacing and text style are still each level\u2019s own, and a marker ' +
+      'can be taken off any level.'));
   }
   return box;
 }

@@ -1251,7 +1251,9 @@ module.exports = ({ suite, test }) => {
   /* The subsection built for real against a stand-in DOM, so what is asserted
      here is what would be on screen. */
   const buildFold = (list, lv, presets, levels) => evalFromClient(
-    ['markerFold', 'styleFold', 'glyphExample', 'GLYPH_SAMPLES', 'presetOnList', 'listTarget'],
+    ['markerFold', 'styleFold', 'glyphExample', 'GLYPH_SAMPLES', 'presetOnList',
+     'listTarget', 'numberedLevel', 'glyphChoices', 'presetForGlyph',
+     'selectField', 'bindCommit', 'shownValue'],
     'var made = [];\n' +
     'var el = function (tag, cls, text) {\n' +
     '  var n = { tag: tag, cls: cls || "", text: text || "", kids: [], title: "",\n' +
@@ -1260,11 +1262,19 @@ module.exports = ({ suite, test }) => {
     '                         toggle: function (c) { n.cls += " " + c; },\n' +
     '                         contains: function (c) { return n.cls.split(" ").indexOf(c) >= 0; } },\n' +
     '            appendChild: function (k) { n.kids.push(k); return k; },\n' +
-    '            addEventListener: function (_, f) { n.click = f; } };\n' +
+    '            blur: function () {},\n' +
+    '            on: {},\n' +
+    // Buttons have one listener and tests fire it as .click(); a select bound
+    // by bindCommit has three, so those are kept by name as well.
+    '            addEventListener: function (ev, f) { n.on[ev] = f; n.click = n.click || f; } };\n' +
+    '  n.classList.remove = function (c) {\n' +
+    "  n.cls = n.cls.split(' ').filter(function (x) { return x && x !== c; }).join(' '); };\n" +
     '  made.push(n); return n;\n' +
     '};\n' +
     'var calls = [];\n' +
     'var listWrite = function (fn, t) { calls.push([fn, t]); };\n' +
+    'var rerendering = false;\n' +
+    'var status = function () {};\n' +
     'var S = { tabId: "t.0", open: {},\n' +
     '  data: { constants: { bulletPresets: ' + JSON.stringify(presets) + ' } } };\n' +
     'var item = markerFold(' + JSON.stringify(list) + ', ' + JSON.stringify(lv) +
@@ -1277,11 +1287,8 @@ module.exports = ({ suite, test }) => {
     { id: 'NUMBERED_DECIMAL_ALPHA_ROMAN', numbered: true, glyphs: ['1.', 'a.', 'i.'] }
   ];
   const glyphButtons = (r) => r.made.filter((n) => /\bglyph\b/.test(n.cls));
-  // A preset button carries its three glyphs as child spans, so its face is
-  // what those spans say, and the one in full ink is the level being edited.
-  const ladder = (n) => n.kids.map((k) => k.text);
-  const picked = (n) => n.kids.filter((k) => /\bat\b/.test(k.cls)).map((k) => k.text)[0];
   const offButtons = (r) => r.made.filter((n) => /^act\b/.test(n.cls));
+  const hint = (r) => r.made.filter((n) => n.cls === 'hint')[0].text;
 
   test('the chooser is a folded subsection of the level, not a pop-up', (t) => {
     const r = buildFold({ listId: 'list.1' }, { level: 0 }, PRESETS);
@@ -1310,43 +1317,113 @@ module.exports = ({ suite, test }) => {
       'and the key falls back to the name where there is one');
   });
 
+  /* Each level's chooser offers that level's marker and nothing else. The
+     ladder the button used to show was three levels' worth of decision on one
+     button, which is not what a reader clicking inside "Level 2" is asking
+     for. */
   test('a marker is offered as the character it is, not as the name of an enum', (t) => {
     const r = buildFold({ listId: 'list.1' }, { level: 0 }, PRESETS);
-    t.deepEqual(glyphButtons(r).map(ladder),
-      [['\u25cf', '\u25cb', '\u25a0'], ['\u2751', '\u2751', '\u2751'], ['1.', 'a.', 'i.']],
-      'every preset shows the whole ladder it would put on the list');
+    t.deepEqual(glyphButtons(r).map((n) => n.text), ['●', '❑', '1.'],
+      'one glyph per button, and it is this level\'s');
     t.notOk(/BULLET_|NUMBERED_/.test(r.made.map((n) => n.text).join(' ')),
       'no API enum reaches the button faces');
   });
 
-  /* A preset writes three levels and stops -- measured against a real
-     document by the live suite, because Google documents neither the reach
-     nor what survives it. Four of Docs' nine bullet presets end in a square,
-     so a button showing only the level's own glyph would be four identical
-     buttons: the whole ladder is shown, and the level's glyph picked out of
-     it -- where the level has one to pick. */
-  test('each level has its own glyph picked out of the ladder', (t) => {
-    t.equal(picked(glyphButtons(buildFold(null, { level: 1 }, PRESETS))[0]), '\u25cb',
-      'level 2 takes the second of the three');
-    t.equal(picked(glyphButtons(buildFold(null, { level: 2 }, PRESETS))[0]), '\u25a0',
-      'level 3 the third');
-    t.deepEqual(ladder(glyphButtons(buildFold(null, { level: 6 }, PRESETS))[0]),
-      ['\u25cf', '\u25cb', '\u25a0'], 'while the ladder itself never changes');
+  test('each level offers its own glyph, not the first level\'s', (t) => {
+    t.deepEqual(glyphButtons(buildFold(null, { level: 1 }, PRESETS)).map((n) => n.text),
+      ['○', '❑', 'a.'], 'level 2 takes the second of each preset\'s three');
+    t.deepEqual(glyphButtons(buildFold(null, { level: 2 }, PRESETS)).map((n) => n.text),
+      ['■', '❑', 'i.'], 'level 3 the third');
   });
 
-  /* Applying a preset at level 4 does something -- it sets levels 1 to 3 --
-     but it does not do it here, and a glyph picked out would be a promise the
-     API cannot keep. */
-  test('past the third level nothing is picked out, and the hint says why', (t) => {
-    const r = buildFold(null, { level: 3 }, PRESETS);
-    t.equal(picked(glyphButtons(r)[0]), undefined, 'no glyph claimed for level 4');
-    t.deepEqual(ladder(glyphButtons(r)[0]), ['\u25cf', '\u25cb', '\u25a0'],
-      'the preset is still offered: it is the whole list\'s choice');
-    t.match(glyphButtons(r)[0].title, /level 4 is out of its reach$/);
-    t.match(r.made.filter((n) => n.cls === 'hint')[0].text,
-      /Level 4 keeps the marker it has/);
-    t.match(r.made.filter((n) => n.cls === 'hint')[0].text, /Taking it off still works/,
-      'and what can still be done from here');
+  /* Four of Docs' nine bullet presets end in a square and three of the six
+     numbered ones end in "i.", so at level 3 the undeduplicated list offered
+     the same character four times over, with no way to tell the buttons
+     apart. */
+  test('presets that collide on a level are offered once, not four times', (t) => {
+    const clash = [
+      { id: 'A', numbered: false, glyphs: ['●', '○', '■'] },
+      { id: 'B', numbered: false, glyphs: ['◆', '○', '■'] },
+      { id: 'C', numbered: false, glyphs: ['★', '○', '■'] }
+    ];
+    t.deepEqual(glyphButtons(buildFold(null, { level: 2 }, clash)).map((n) => n.text),
+      ['■'], 'three presets, one square');
+    t.equal(glyphButtons(buildFold(null, { level: 0 }, clash)).length, 3,
+      'while level 1 tells them apart perfectly well');
+  });
+
+  /* A preset always rewrites the list's whole ladder -- measured against a
+     real document, where one aimed at a single paragraph still changed all
+     nine levels. Of the presets that put the asked-for glyph on this level,
+     the one written is the one that disturbs the other levels least. */
+  test('the preset written is the one that keeps the other levels as they are', (t) => {
+    const clash = [
+      { id: 'DISC', numbered: false, glyphs: ['●', '○', '■'] },
+      { id: 'STAR', numbered: false, glyphs: ['★', '○', '■'] }
+    ];
+    const worn = [{ glyphSymbol: '★', glyphFormat: '%0' },
+                  { glyphSymbol: '○', glyphFormat: '%0' }];
+    const r = buildFold({ listId: 'list.7' }, { level: 2 }, clash, worn);
+    glyphButtons(r)[0].click();
+    t.deepEqual(r.calls, [['applyBulletPreset',
+      { tabId: 't.0', listId: 'list.7', bulletPreset: 'STAR' }]],
+      'the star is already on level 1, so the star preset is the smaller change');
+  });
+
+  test('and the button says what the whole list will become', (t) => {
+    const r = buildFold({ listId: 'list.1' }, { level: 1 }, PRESETS);
+    t.match(glyphButtons(r)[0].title, /^Level 2: ○/, 'this level first');
+    t.match(glyphButtons(r)[0].title, /levels 1-3 become  ●   ○   ■$/,
+      'and then the change it cannot avoid making');
+  });
+
+  /* From level 4 down no glyph can be chosen at all: a bullet preset does not
+     reach past level 3, so offering squares here would be a promise the API
+     cannot keep. Which of the two kinds the level wears is still worth
+     asking, because a numbered preset does reach all nine. */
+  test('past the third level only the kind can be chosen, from a combo box', (t) => {
+    const r = buildFold({ listId: 'list.1' }, { level: 3 }, PRESETS);
+    t.equal(glyphButtons(r).length, 0, 'no glyph is offered for level 4');
+    const sel = r.made.filter((n) => n.tag === 'select')[0];
+    t.ok(sel, 'a combo box stands in its place');
+    t.deepEqual(sel.kids.map((n) => n.text), ['Bullet', 'Number', 'No marker']);
+    t.equal(hint(r),
+      'Bullet/numbering type cannot be configured more than 3 levels deep.',
+      'and the caveat is one sentence, not a paragraph');
+  });
+
+  test('the combo box shows the kind the level wears, and its marker with it', (t) => {
+    const num = buildFold({ listId: 'list.1' },
+      { level: 4, glyphType: 'DECIMAL', glyphFormat: '%0.' }, PRESETS);
+    const sel = num.made.filter((n) => n.tag === 'select')[0];
+    t.equal(sel.value, 'number', 'a counting glyph reads as numbering');
+    t.equal(sel.kids[1].text, 'Number  1.', 'and the marker itself is shown');
+    t.equal(sel.kids[0].text, 'Bullet', 'the kind it does not wear shows no marker');
+
+    const bare = buildFold({ listId: 'list.1' }, { level: 4 }, PRESETS);
+    t.equal(bare.made.filter((n) => n.tag === 'select')[0].value, 'none',
+      'a level with no marker starts on "No marker"');
+  });
+
+  test('choosing a kind at level 4 writes a preset; choosing none strips the level', (t) => {
+    const r = buildFold({ listId: 'list.7' }, { level: 3 }, PRESETS);
+    const sel = r.made.filter((n) => n.tag === 'select')[0];
+    sel.value = 'number';
+    sel.on.change();
+    t.deepEqual(r.calls, [['applyBulletPreset',
+      { tabId: 't.0', listId: 'list.7', bulletPreset: 'NUMBERED_DECIMAL_ALPHA_ROMAN' }]],
+      'a numbered preset repeats its three all the way down, so level 4 does change');
+
+    // From a level that wears one: picking the kind it already has would be
+    // no change at all, and the field is right not to write it out again.
+    const r2 = buildFold({ listId: 'list.7' },
+      { level: 3, glyphSymbol: '\u25cf', glyphFormat: '%0' }, PRESETS);
+    const sel2 = r2.made.filter((n) => n.tag === 'select')[0];
+    sel2.value = 'none';
+    sel2.on.change();
+    t.deepEqual(r2.calls, [['removeBullets',
+      { tabId: 't.0', listId: 'list.7', level: 3 }]],
+      'and taking a marker off works on paragraphs, so it can be aimed at one level');
   });
 
   test('bullets, numbering and none each get their own heading', (t) => {
@@ -1355,19 +1432,19 @@ module.exports = ({ suite, test }) => {
       ['Bullets', 'Numbering', 'No marker']);
   });
 
-  test('the preset the list already wears is the one marked', (t) => {
+  test('the marker the level already wears is the one marked', (t) => {
     const r = buildFold({ listId: 'list.1' },
-      { level: 0, glyphSymbol: '\u2751', glyphFormat: '%0' }, PRESETS,
-      [{ glyphSymbol: '\u2751', glyphFormat: '%0' }, { glyphSymbol: '\u2751', glyphFormat: '%0' }]);
+      { level: 0, glyphSymbol: '❑', glyphFormat: '%0' }, PRESETS,
+      [{ glyphSymbol: '❑', glyphFormat: '%0' }]);
     const on = glyphButtons(r).filter((n) => n.classList.contains('on'));
     t.equal(on.length, 1);
-    t.deepEqual(ladder(on[0]), ['\u2751', '\u2751', '\u2751']);
+    t.equal(on[0].text, '❑');
   });
 
   test('a level with no marker has "this level" marked instead', (t) => {
     const r = buildFold({ listId: 'list.1' }, { level: 0 }, PRESETS);
     t.equal(glyphButtons(r).filter((n) => n.classList.contains('on')).length, 0,
-      'no preset is worn');
+      'no marker is worn');
     t.deepEqual(offButtons(r).filter((n) => n.classList.contains('on')).map((n) => n.text),
       ['This level'], 'the level is already bare, and the button says so');
   });
@@ -1376,16 +1453,22 @@ module.exports = ({ suite, test }) => {
     // Format > Bullets & numbering > More bullets can put any character
     // there, and no preset produces it.
     const r = buildFold({ listId: 'list.1' },
-      { level: 0, glyphSymbol: '\u2600', glyphFormat: '%0' }, PRESETS,
-      [{ glyphSymbol: '\u2600', glyphFormat: '%0' }]);
+      { level: 0, glyphSymbol: '☀', glyphFormat: '%0' }, PRESETS,
+      [{ glyphSymbol: '☀', glyphFormat: '%0' }]);
     t.equal(glyphButtons(r).filter((n) => n.classList.contains('on')).length, 0);
   });
 
-  test('what the preset does to the whole list is on the button, not lost', (t) => {
+  /* The panel has to say this, because the reader who clicks a bullet inside
+     "Level 2" and watches level 1 change with it has found a real limit of
+     the API, not a bug in the panel, and nothing on screen would otherwise
+     tell them so. */
+  test('the hint admits that the other levels move too', (t) => {
     const r = buildFold({ listId: 'list.1' }, { level: 1 }, PRESETS);
-    t.match(glyphButtons(r)[0].title, /^Levels 1-3:/, 'all three, in order');
-    t.match(glyphButtons(r)[0].title, /\u25cf.*\u25cb.*\u25a0/);
-    t.match(glyphButtons(r)[0].title, /level 2 gets \u25cb$/, 'and what this level takes from them');
+    t.match(hint(r), /^Pick the marker for level 2\./);
+    t.match(hint(r), /no request that changes one level on its own/,
+      'the cause is named');
+    t.match(hint(r), /the other levels of this list move with it/,
+      'and so is the consequence');
   });
 
   test('clicking a marker applies that preset to that one list', (t) => {
@@ -1418,14 +1501,10 @@ module.exports = ({ suite, test }) => {
       'no level named is every level');
   });
 
-  /* Three is not a default Docs happens to use: it is the whole of what the
-     API can express. No request in it edits a nesting level, and every preset
-     but the checkbox fixes three levels, so the panel says so once rather
-     than leaving a reader to wonder why level 4 will not change. */
   test('the repeat is explained where a level past the third is on screen', (t) => {
     const body = /function listBody\(list\)[^]*?\n}/.exec(clientJs)[0];
     t.match(body, /lv\.level > 2 && lv\.inUse/, 'only when there is one to explain');
-    t.match(body, /A marker preset reaches the first three levels only/);
+    t.match(body, /Bullet\/numbering type cannot be configured more than 3 levels deep/);
   });
 
   test('the preset a list already wears is found by more than its first marker', (t) => {
@@ -1864,8 +1943,8 @@ module.exports = ({ suite, test }) => {
     t.notOk(/Google Docs has no footnote style/.test(clientJs),
       'the footnote note leads with what happens, not with why');
     t.match(clientJs, /Written into every footnote in the tab/);
-    t.match(clientJs, /A marker is one choice for the whole list/,
-      'the marker explanation leads with the consequence');
+    t.match(clientJs, /Pick the marker for level ' \+ \(lv\.level \+ 1\)/,
+      'the marker explanation leads with what to do, then the consequence');
   });
 
   test('the heading says what the add-on is, not what it is called', (t) => {

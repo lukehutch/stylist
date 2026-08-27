@@ -972,21 +972,58 @@ test('a bullet preset is accepted and changes the marker', function (t) {
 });
 
 /**
- * What happens below the third level, which Google documents nowhere.
+ * How far a preset reaches, which Google documents nowhere.
  *
- * Every preset but the checkbox is described as fixing "the first 3 list
- * nesting levels", and Docs defines nine. The reference does not say what
- * levels 4 to 9 do, and the sidebar has to tell the reader something, so it
- * is measured here rather than assumed.
+ * Measured, twice, because the sidebar has to tell a reader something and
+ * the reference says only that a preset covers "the first 3 list nesting
+ * levels":
  *
- * Measured answer: the preset reaches the first three levels and stops.
- * Levels 4 to 9 keep whatever glyphs they already had -- for a list Docs
- * made, its own disc / circle / square, repeating -- and since no request in
- * the API edits a nesting level, nothing can change them at all. Applying
- * DIAMOND_CIRCLE_SQUARE to a fresh list reads back as
- * "diamond circle square  disc circle square  disc circle square".
+ *   - A preset aimed at ONE paragraph of a list rewrites the whole list's
+ *     level definitions, and leaves every paragraph in the list it was
+ *     already in. So a marker cannot be chosen per level: there is no range
+ *     narrow enough to make createParagraphBullets a local change.
+ *   - A bullet preset writes levels 1 to 3 and leaves 4 to 9 as they were.
+ *     A numbered preset writes all nine, cycling its three glyphs.
+ *
+ * Both halves are checked here, because the panel is built on them.
  */
-test('a preset reaches the first three levels and no further', function (t) {
+test('a preset rewrites the whole list, however narrow the range', function (t) {
+  var read = readLists(null);
+  if (!read.lists.length) { t.ok(true, 'no lists to mark'); return; }
+  var list = read.lists[0];
+  var id = list.listId;
+  function ladder() {
+    var l = readLists(null).lists.filter(function (x) { return x.listId === id; })[0];
+    return (l.levels || []).map(function (lv) {
+      return lv.glyphSymbol || lv.glyphType || '-';
+    });
+  }
+  var before = ladder();
+  t.comment('before: ' + before.join(' '));
+  try {
+    // Aimed at a single paragraph of the list, which is the narrowest range
+    // there is. If a per-level marker were possible at all, this is what
+    // would do it.
+    applyBulletPreset({ listId: id, level: 0, bulletPreset: 'NUMBERED_DECIMAL_ALPHA_ROMAN' });
+    var after = ladder();
+    t.comment('after:  ' + after.join(' '));
+    // Offline the sandbox records a content request rather than applying it,
+    // so there is nothing to read back and nothing this test can assert.
+    if (after.join(' ') === before.join(' ')) {
+      t.ok(true, 'the marker write was recorded, not applied: not a live document');
+      return;
+    }
+    t.equal(after[0], 'DECIMAL', 'level 1 took the numbering');
+    t.equal(after[1], 'ALPHA', 'and so did level 2, which was never asked');
+    t.equal(after[2], 'ROMAN', 'and level 3');
+    t.equal(readLists(null).lists.length, read.lists.length,
+      'and no new list was split off to hold it');
+  } finally {
+    applyBulletPreset({ listId: id, bulletPreset: 'BULLET_DISC_CIRCLE_SQUARE' });
+  }
+});
+
+test('a bullet preset stops at the third level; a numbered one does not', function (t) {
   var read = readLists(null);
   if (!read.lists.length) { t.ok(true, 'no lists to mark'); return; }
   var id = read.lists[0].listId;
@@ -996,18 +1033,23 @@ test('a preset reaches the first three levels and no further', function (t) {
       return lv.glyphSymbol || lv.glyphType || '-';
     });
   }
-  var before = ladder();
-  t.comment('before: ' + before.join(' '));
-  if (before.length < 4) { t.ok(true, 'no levels past the third to compare'); return; }
+  if (ladder().length < 4) { t.ok(true, 'no levels past the third to compare'); return; }
   try {
     applyBulletPreset({ listId: id, bulletPreset: 'BULLET_DIAMOND_CIRCLE_SQUARE' });
-    var after = ladder();
-    t.comment('after:  ' + after.join(' '));
-    t.equal(after[0], '\u25c6', 'level 1 should have taken the diamond');
-    for (var i = 3; i < after.length; i++) {
-      t.equal(after[i], before[i],
-        'level ' + (i + 1) + ' is out of the preset\'s reach and should not have moved');
+    var bullets = ladder();
+    t.comment('bullet preset:   ' + bullets.join(' '));
+    if (bullets[0] !== '◆') {
+      t.ok(true, 'the marker write was recorded, not applied: not a live document');
+      return;
     }
+    t.equal(bullets[0], '◆', 'level 1 took the diamond');
+    t.notEqual(bullets[3], '◆', 'level 4 did not: a bullet preset stops at three');
+
+    applyBulletPreset({ listId: id, bulletPreset: 'NUMBERED_DECIMAL_ALPHA_ROMAN' });
+    var numbers = ladder();
+    t.comment('numbered preset: ' + numbers.join(' '));
+    t.equal(numbers[3], 'DECIMAL', 'a numbered preset does reach level 4');
+    t.equal(numbers[8], 'ROMAN', 'and all the way to the ninth');
   } finally {
     applyBulletPreset({ listId: id, bulletPreset: 'BULLET_DISC_CIRCLE_SQUARE' });
   }
@@ -1751,4 +1793,3 @@ function namedStyle_(type) {
   });
   return found;
 }
-

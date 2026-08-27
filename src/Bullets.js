@@ -13,11 +13,14 @@
  *           one of the 15 fixed presets below. Custom glyph symbols and
  *           per-level glyph formats cannot be set programmatically.
  *
- *           A preset reaches the first three nesting levels and stops.
- *           Docs defines nine, and levels 4 to 9 keep whatever glyphs they
- *           already carried -- measured, because Google documents neither
- *           the reach nor what survives it; see the live suite. So the
- *           markers below level 3 cannot be changed at all, only removed.
+ *           A preset is never a local change. Aimed at a single paragraph's
+ *           range it still rewrote all nine of the list's level definitions
+ *           and left every paragraph in the list it was already in, so a
+ *           marker cannot be given to one level and withheld from the rest.
+ *           A bullet preset writes levels 1 to 3 and leaves 4 to 9 as they
+ *           were; a numbered preset writes all nine, cycling its three. All
+ *           measured, because Google documents none of it; see the live
+ *           suite.
  *
  * What *is* writable per level is the paragraph styling of the items:
  * indents, spacing and text style. That is exposed here so indentation and
