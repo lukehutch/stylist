@@ -7,10 +7,17 @@
  *   READ  - NestingLevel exposes everything per level: glyphType,
  *           glyphSymbol, glyphFormat, startNumber, bulletAlignment,
  *           indentStart, indentFirstLine and the bullet's textStyle.
- *   WRITE - there is no updateListProperties request in the Docs API. The
+ *   WRITE - there is no updateListProperties request in the Docs API, and
+ *           none of its other 47 requests edits a nesting level either. The
  *           only glyph-level write is createParagraphBullets, which takes
- *           one of 16 fixed presets. Custom glyph symbols and per-level
- *           glyph formats cannot be set programmatically.
+ *           one of the 15 fixed presets below. Custom glyph symbols and
+ *           per-level glyph formats cannot be set programmatically.
+ *
+ *           A preset reaches the first three nesting levels and stops.
+ *           Docs defines nine, and levels 4 to 9 keep whatever glyphs they
+ *           already carried -- measured, because Google documents neither
+ *           the reach nor what survives it; see the live suite. So the
+ *           markers below level 3 cannot be changed at all, only removed.
  *
  * What *is* writable per level is the paragraph styling of the items:
  * indents, spacing and text style. That is exposed here so indentation and

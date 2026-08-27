@@ -1932,6 +1932,90 @@ test('plain paragraphs report their text; no selection at all reports nothing', 
   t.deepEqual(ctxOf(M), {}, 'no selection at all');
 });
 
+/**
+ * A row of siblings under one body, each an indent and a kind.
+ *
+ * `['li', 36]` is a bulleted line at the first level, `['p', 36]` a line
+ * indented to sit with it but carrying no bullet of its own -- which is what
+ * you get by pressing Enter twice in a list, or by indenting a continuation
+ * under a bullet.
+ */
+function siblings(spec, listId) {
+  const made = spec.map(([kind, indent], i) => {
+    const type = kind === 'li' ? 'LIST_ITEM' : 'PARAGRAPH';
+    const el = {
+      getType: () => type,
+      getText: () => kind + i,
+      getIndentStart: () => indent,
+      getPreviousSibling: () => (i > 0 ? made[i - 1] : null),
+      getParent: () => ({ getType: () => 'BODY_SECTION', getParent: () => null,
+                          getText: () => '' })
+    };
+    if (kind === 'li') el.getListId = () => listId || 'list.X';
+    return el;
+  });
+  return made;
+}
+
+/* A line typed between two bullets carries no bullet of its own, so neither
+   DocumentApp nor the API calls it a list item -- and clicking it used to
+   leave the lists panel showing nothing at all, though to a reader the line
+   is plainly part of the list it sits in. */
+suite('A line inside a list that wears no bullet');
+
+test('an unbulleted line indented under a bullet belongs to that bullet\'s list', (t) => {
+  const M = makeSandbox(makeDoc());
+  const row = siblings([['li', 36], ['p', 36]]);
+  M.__selection = selectionOf(row[1]);
+  t.equal(ctxOf(M).listId, 'list.X', 'the list above it');
+  t.equal(ctxOf(M).paraKind, 'p', 'still reported as the plain paragraph it is');
+});
+
+test('one level less counts, and two levels less does not', (t) => {
+  const M = makeSandbox(makeDoc());
+  M.__selection = selectionOf(siblings([['li', 36], ['p', 72]])[1]);
+  t.equal(ctxOf(M).listId, 'list.X', 'indented one step past the bullet above');
+  M.__selection = selectionOf(siblings([['li', 36], ['p', 144]])[1]);
+  t.equal(ctxOf(M).listId, undefined, 'but two steps past it is something else');
+});
+
+test('a run of unbulleted lines all answers with the same list', (t) => {
+  const M = makeSandbox(makeDoc());
+  const row = siblings([['li', 36], ['p', 36], ['p', 36], ['p', 36]]);
+  M.__selection = selectionOf(row[3]);
+  t.equal(ctxOf(M).listId, 'list.X', 'stepped over the two between');
+});
+
+test('a line further out than the one above it is outside the list', (t) => {
+  const M = makeSandbox(makeDoc());
+  // The unbulleted line at 72 is inside; the one at 36 after it is a line the
+  // list has been left behind at, so the search stops rather than reaching
+  // back over it.
+  const row = siblings([['li', 72], ['p', 36], ['p', 72]]);
+  M.__selection = selectionOf(row[2]);
+  t.equal(ctxOf(M).listId, undefined);
+});
+
+test('a line at the margin is inside nothing, however many bullets precede it', (t) => {
+  const M = makeSandbox(makeDoc());
+  M.__selection = selectionOf(siblings([['li', 36], ['p', 0]])[1]);
+  t.equal(ctxOf(M).listId, undefined, 'flush left is out of the list');
+});
+
+test('a bulleted line still costs nothing to place', (t) => {
+  // The rule above runs only where nothing bulleted was found, so a click
+  // into a real list item makes no extra accessor call at all.
+  const M = makeSandbox(makeDoc());
+  const row = siblings([['li', 36], ['li', 36]]);
+  let asked = 0;
+  row[1].getPreviousSibling = () => { asked++; return row[0]; };
+  M.__selection = selectionOf(row[1]);
+  t.equal(ctxOf(M).listId, 'list.X');
+  t.equal(asked, 0, 'no sibling was looked at');
+});
+
+suite('The cursor probe that gates content reads');
+
 test('whatever goes wrong up there, the answer stays an object', (t) => {
   const M = makeSandbox(makeDoc());
   M.__selection = { getRangeElements: () => { throw new Error('no ui'); } };

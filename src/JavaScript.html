@@ -749,20 +749,36 @@ function openPopup(anchor, fill) {
  * Colour
  * ================================================================= */
 
-/* The Docs palette, in the four rows the Docs colour menu shows: greys, then
-   the bold hues, then their light and dark shades. Having them here is what
-   lets the pop-up be ours -- the browser's own colour picker cannot be added
-   to, and "no colour" is a choice only the document can express. */
-var PALETTE = [
-  ['#000000', '#434343', '#666666', '#999999', '#b7b7b7',
-   '#cccccc', '#d9d9d9', '#efefef', '#f3f3f3', '#ffffff'],
-  ['#980000', '#ff0000', '#ff9900', '#ffff00', '#00ff00',
-   '#00ffff', '#4a86e8', '#0000ff', '#9900ff', '#ff00ff'],
-  ['#e6b8af', '#f4cccc', '#fce5cd', '#fff2cc', '#d9ead3',
-   '#d0e0e3', '#c9daf8', '#cfe2f3', '#d9d2e9', '#ead1dc'],
-  ['#a61c00', '#cc0000', '#e69138', '#f1c232', '#6aa84f',
-   '#45818e', '#3c78d8', '#3d85c6', '#674ea7', '#a64d79']
-];
+/* Nine rows blending down the menu: near-white tints at the top, fully
+   saturated colour across the middle row, near-black shades at the foot.
+   Generated rather than listed, so the ramp is even and the intent is
+   readable; the first column is neutral and runs the whole way, which is what
+   puts pure white and pure black on the menu when no hue reaches either.
+   Having the palette here at all is what lets the pop-up be ours -- the
+   browser's own colour picker cannot be added to, and "no colour" is a choice
+   only the document can express. */
+function buildPalette() {
+  var hues = [0, 20, 40, 60, 90, 150, 180, 200, 220, 260, 290, 320];
+  var lightness = [0.93, 0.85, 0.74, 0.62, 0.50, 0.42, 0.33, 0.23, 0.13];
+  // HSL to hex, the usual formulation. Saturation is held at 1 for the hues,
+  // so a row is one step of lightness and nothing else varies down a column.
+  function hsl(h, s, l) {
+    function chan(n) {
+      var k = (n + h / 30) % 12;
+      var a = s * Math.min(l, 1 - l);
+      var v = l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1));
+      var t = Math.round(v * 255).toString(16);
+      return t.length < 2 ? '0' + t : t;
+    }
+    return '#' + chan(0) + chan(8) + chan(4);
+  }
+  return lightness.map(function (l, i) {
+    var row = [hsl(0, 0, 1 - i / (lightness.length - 1))];
+    hues.forEach(function (h) { row.push(hsl(h, 1, l)); });
+    return row;
+  });
+}
+var PALETTE = buildPalette();
 
 /**
  * Colour field: a swatch that opens the colour menu.
@@ -961,10 +977,14 @@ function buildStyleEditor(model, commit, opts) {
   function setP(k, v) { model.paragraphStyle[k] = v; return fire('paragraphStyle', k); }
 
   var what = opts.what || '';
+  // The name shown and the key remembering whether the fold is open are two
+  // different things: a list level shows no name but still needs a key of its
+  // own, or every level would open and shut together.
+  var keyed = opts.keyed || what;
 
   /* ---- character ---- */
   if (opts.character !== false) {
-    var cFold = styleFold(what, 'character style', 'sfold:' + what + ':char');
+    var cFold = styleFold(what, 'character style', 'sfold:' + keyed + ':char');
     root.appendChild(cFold.item);
     var gChar = cFold.body;
 
@@ -1030,7 +1050,7 @@ function buildStyleEditor(model, commit, opts) {
 
   /* ---- paragraph ---- */
   if (opts.paragraph !== false) {
-    var pFold = styleFold(what, 'paragraph style', 'sfold:' + what + ':para');
+    var pFold = styleFold(what, 'paragraph style', 'sfold:' + keyed + ':para');
     root.appendChild(pFold.item);
     var gPara = pFold.body;
 
@@ -1174,12 +1194,18 @@ function applyAllScope(kind, opts) {
  * of them, so they arrive shut with their names on the outside. `what` names
  * what is being styled, so a header reads "Heading 1 character style" rather
  * than a bare "Character" repeated down the panel.
+ *
+ * It is left empty where the thing being styled is already named on the row
+ * immediately above -- a list level says "Level 3" there, and repeating it
+ * inside only makes the fold's name longer. With no prefix the half is the
+ * whole name, so it is capitalised as the start of one.
  */
 function styleFold(what, half, key) {
   var item = el('div', 'item');
   var head = el('div', 'head');
   head.appendChild(el('span', 'tw'));
-  head.appendChild(el('span', 'name', (what ? what + ' ' : '') + half));
+  head.appendChild(el('span', 'name',
+    what ? what + ' ' + half : half.charAt(0).toUpperCase() + half.slice(1)));
   var body = el('div', 'body');
   head.addEventListener('click', function () {
     item.classList.toggle('open');
@@ -1856,27 +1882,42 @@ function renderLists() {
  * nothing about the level you are looking at.
  */
 function markerFold(list, lv, levels) {
-  var what = 'Level ' + (lv.level + 1);
-  var fold = styleFold(what, 'bullet/number', 'sfold:' + what + ':mark');
+  var fold = styleFold('', 'bullet/number', 'sfold:lvl' + lv.level + ':mark');
   var box = fold.body;
-  box.appendChild(el('p', 'hint',
-    'A marker style is one choice for the whole list. Taking the marker off ' +
-    'is this level\u2019s alone.'));
+  // A preset writes the first three nesting levels and stops -- measured
+  // against a real document, since Google documents neither the reach nor
+  // what is left behind. Level 4 and below keep the markers they already
+  // have, and no request in the API edits a nesting level, so from there
+  // down the marker cannot be changed at all. Only taking it off still
+  // works, because that is a change to paragraphs rather than to a level.
+  var slot = lv.level < 3 ? lv.level : -1;
+  box.appendChild(el('p', 'hint', slot < 0
+    ? 'A marker is one choice for the whole list, and a preset reaches its ' +
+      'first three levels only. Level ' + (lv.level + 1) + ' keeps the marker ' +
+      'it has: the Docs API offers no way to change it. Taking it off still works.'
+    : 'A marker is one choice for the whole list. A preset sets the first ' +
+      'three levels, so every button shows all three, with the glyph this ' +
+      'level would get picked out.'));
 
   var presets = S.data.constants.bulletPresets || [];
   var current = glyphExample(lv || {});
-  // Presets define three levels and cycle, so this is the glyph the preset
-  // would put on the level being edited.
-  var slot = lv.level % 3;
   [['Bullets', false], ['Numbering', true]].forEach(function (g) {
     var mine = presets.filter(function (p) { return !!p.numbered === g[1]; });
     if (!mine.length) return;
     box.appendChild(el('h2', null, g[0]));
     var row = el('div', 'glyphs');
     mine.forEach(function (p) {
-      var b = el('button', p.numbered ? 'glyph num' : 'glyph', p.glyphs[slot]);
-      b.title = what + ': ' + p.glyphs[slot] +
-        '  \u2014  whole list: ' + p.glyphs.join('   ');
+      // The whole ladder rather than this level's glyph alone. Four of the
+      // nine bullet presets end in a square and three of the six numbered
+      // ones end in "i.", so from level 3 down a one-glyph button would show
+      // the same character for presets that are not the same choice at all.
+      var b = el('button', p.numbered ? 'glyph num ladder' : 'glyph ladder');
+      p.glyphs.forEach(function (glyph, i) {
+        b.appendChild(el('span', i === slot ? 'g at' : 'g', glyph));
+      });
+      b.title = 'Levels 1-3:  ' + p.glyphs.join('   ') + (slot < 0
+        ? '   \u2014   level ' + (lv.level + 1) + ' is out of its reach'
+        : '   \u2014   level ' + (lv.level + 1) + ' gets ' + p.glyphs[slot]);
       if (presetOnList(levels, p)) b.classList.add('on');
       b.addEventListener('click', function () {
         var t = listTarget(list);
@@ -1888,17 +1929,28 @@ function markerFold(list, lv, levels) {
     box.appendChild(row);
   });
 
+  // Taking a marker off is the one marker change that is not the list's as a
+  // whole: it works on paragraphs, so it can be aimed at one level. It can
+  // also be aimed at all of them, which is what a reader who has just seen
+  // level 4 keep the marker they removed from level 1 was asking for -- the
+  // levels share a glyph, but they are different paragraphs, and only the
+  // ones named lose it.
   box.appendChild(el('h2', null, 'No marker'));
-  var off = el('div', 'glyphs');
-  var none = el('button', 'glyph none', '\u2298');
-  none.title = 'Take the markers off this level';
-  if (!current) none.classList.add('on');
-  none.addEventListener('click', function () {
-    var t = listTarget(list);
-    t.level = lv.level;
-    return listWrite('removeBullets', t);
-  });
-  off.appendChild(none);
+  var off = el('div', 'acts');
+  [['This level', lv.level, 'Take the markers off level ' + (lv.level + 1) +
+    ' only. Other levels keep theirs.'],
+   ['Whole list', null, 'Take the markers off every level of this list.']]
+    .forEach(function (spec) {
+      var b = el('button', 'act', spec[0]);
+      b.title = spec[2];
+      if (spec[1] !== null && !current) b.classList.add('on');
+      b.addEventListener('click', function () {
+        var t = listTarget(list);
+        if (spec[1] !== null) t.level = spec[1];
+        return listWrite('removeBullets', t);
+      });
+      off.appendChild(b);
+    });
   box.appendChild(off);
   return fold.item;
 }
@@ -1935,11 +1987,13 @@ function listWrite(fn, t) {
  * the items -- belongs to one level rather than to the list.
  *
  * The one thing that does not is the marker. createParagraphBullets takes a
- * preset that fixes the glyph for all three levels together, and no request
- * in the API edits a level's glyph, so the marker style is chosen once for
- * the whole list and each level shows what that choice gives it. Taking a
- * marker off is different: that works on paragraphs, so a level can drop its
- * markers on its own.
+ * preset that fixes the glyph for three levels together, and no request in
+ * the API edits a level's glyph, so the marker style is chosen once for the
+ * whole list and each level shows what that choice gives it. Three is also
+ * as far as it reaches: levels 4 to 9 keep the markers they already carry,
+ * measured against a real document and said so in the panel. Taking a marker
+ * off is different: that works on paragraphs, so any level can drop its
+ * markers on its own, or the whole list can.
  */
 function listBody(list) {
   var box = el('div');
@@ -1969,7 +2023,7 @@ function listBody(list) {
           t.textStyle = payload.textStyle;
           t.paragraphStyle = payload.paragraphStyle;
           return call('writeListLevelStyle', [t]);
-        }, { mixed: cur.mixed, what: 'Level ' + (lv.level + 1) }));
+        }, { mixed: cur.mixed, keyed: 'lvl' + lv.level }));
         return inner;
       },
       'lvl:' + key + ':' + lv.level);
@@ -1979,6 +2033,18 @@ function listBody(list) {
     if (name) name.style.marginLeft = lv.level + 'ex';
     box.appendChild(row);
   });
+  // Said once at the foot rather than on every level: a preset fixes three
+  // levels, no request in the Docs API edits a level's glyph, and Docs
+  // repeats the three from the fourth level down. Only shown when a level
+  // past the third is on screen, since otherwise it explains nothing.
+  if (levels.some(function (lv) { return lv.level > 2 && lv.inUse; })) {
+    box.appendChild(el('p', 'hint',
+      'A marker preset reaches the first three levels only. Level 4 and ' +
+      'below keep the markers they already have \u2014 for a list Docs made, ' +
+      'its own disc, circle and square repeating \u2014 and the Docs API has ' +
+      'no request that can change them. Indent, spacing and text style are ' +
+      'still each level\u2019s own, and the markers can still be taken off.'));
+  }
   return box;
 }
 

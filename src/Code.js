@@ -199,6 +199,11 @@ function refresh(tabId, what, ctx) {
  * built. It is recorded on the way up even inside a table cell, and the climb
  * carries on so a table holding that paragraph is still reported.
  *
+ * A paragraph carrying no bullet is still asked whether it sits inside a
+ * list, because a line typed between two bullets is one to a reader whatever
+ * the API calls it. See listAbove_; it runs only when nothing bulleted was
+ * found, so it never slows down finding a list item that is one.
+ *
  * The climb runs all the way to the root rather than stopping at the first
  * thing it recognises, because the outermost element is the one that says
  * whether the cursor is in a header, a footer or a footnote rather than in
@@ -208,6 +213,53 @@ function refresh(tabId, what, ctx) {
  * models a document as having at most one header section, so it cannot tell
  * the default header from the first-page or even-page one.
  */
+/**
+ * The list an unbulleted line belongs to by sitting inside one.
+ *
+ * A line typed between two bullets, or one indented under a bullet to carry
+ * on the same point, wears no bullet of its own. Docs does not call it a list
+ * item and neither does the API, so a click into it used to leave the lists
+ * panel showing nothing -- even though to a reader the line is plainly part
+ * of the list it sits in.
+ *
+ * The rule is the plain one: an indented line whose nearest preceding sibling
+ * carrying a bullet sits at the same indent, or one level less, belongs to
+ * that list. Unbulleted lines in between are stepped over, so a run of them
+ * all answers with the same list; a line further out than this one ends the
+ * search, because that is a line the list is no longer inside.
+ *
+ * Cost: two accessor calls per line stepped over, and it runs only when the
+ * cursor is NOT in a list item. Finding a real list item is exactly as fast
+ * as it was.
+ */
+function listAbove_(para) {
+  try {
+    if (!para.getIndentStart || !para.getPreviousSibling) return null;
+    var mine = para.getIndentStart();
+    if (!(mine > 0)) return null;                    // flush left: not inside anything
+    var el = para.getPreviousSibling();
+    for (var steps = 0; el && steps < 20; steps++) {
+      var type = el.getType();
+      if (type === DocumentApp.ElementType.LIST_ITEM) {
+        var theirs = el.getIndentStart ? el.getIndentStart() : null;
+        // Docs' nesting levels are 36pt apart, so "one level less" is a drop
+        // of up to 36pt; the slack either side is for a hand-set indent that
+        // is close to a level without being exactly on it.
+        if (theirs === null || (theirs <= mine + 2 && theirs >= mine - 54)) {
+          return el.getListId !== undefined ? el.getListId()
+            : (el.getList && el.getList() ? el.getList().getId() : null);
+        }
+        return null;
+      }
+      if (type !== DocumentApp.ElementType.PARAGRAPH) return null;
+      var out = el.getIndentStart ? el.getIndentStart() : null;
+      if (!(out !== null && out >= mine - 2)) return null;
+      el = el.getPreviousSibling();
+    }
+  } catch (e) { /* no indent, no sibling, or an element carrying neither */ }
+  return null;
+}
+
 function cursorContext() {
   var out = {};
   try {
@@ -240,6 +292,14 @@ function cursorContext() {
           out.paraHead === undefined) {
         out.paraKind = type === DocumentApp.ElementType.LIST_ITEM ? 'li' : 'p';
         out.paraHead = String(el.getText() || '').slice(0, 80);
+      }
+      // An indented line with no bullet of its own, sitting inside a list:
+      // the list it is inside is the one the panel should open. Only asked
+      // when nothing bulleted has been found, so it costs a list item
+      // nothing.
+      if (type === DocumentApp.ElementType.PARAGRAPH && out.listId === undefined) {
+        var inside = listAbove_(el);
+        if (inside) out.listId = inside;
       }
       if (type === DocumentApp.ElementType.LIST_ITEM && out.listId === undefined) {
         // getListId is the identity of the list this item belongs to. Some

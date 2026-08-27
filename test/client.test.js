@@ -447,8 +447,9 @@ module.exports = ({ suite, test }) => {
 
   test('a fold arrives shut, and says what it is a style of', (t) => {
     const fn = /function styleFold\(what, half, key\)[^]*?\n}/.exec(clientJs)[0];
-    t.match(fn, /el\('span', 'name', \(what \? what \+ ' ' : ''\) \+ half\)/,
-      '"Heading 1 character style", not a bare "Character"');
+    t.match(fn, /what \? what \+ ' ' \+ half : half\.charAt\(0\)\.toUpperCase\(\)/,
+      '"Heading 1 character style", not a bare "Character" -- and where the row '
+      + 'above already names the thing, the half stands alone and is capitalised');
     t.notOk(/classList\.add\('open'\);\s*$/.test(fn.split('\n')[3] || ''),
       'nothing opens it on the way in');
     t.match(fn, /if \(S\.open\[key\]\) item\.classList\.add\('open'\)/,
@@ -456,10 +457,13 @@ module.exports = ({ suite, test }) => {
   });
 
   test('every editor names what it is styling', (t) => {
-    ['what: st.label', 'what: p.name', "what: 'Level ' + (lv.level + 1)",
-     'what: seg.role', 'what: label'].forEach((s) => {
+    // Every editor but a list level's, which sits under a row that has just
+    // said "Level 3" and would only be repeating it.
+    ['what: st.label', 'what: p.name', 'what: seg.role', 'what: label'].forEach((s) => {
       t.ok(clientJs.includes(s), s);
     });
+    t.ok(clientJs.includes("keyed: 'lvl' + lv.level"),
+      'a list level names nothing, and is keyed by its depth instead');
   });
 
   test('every heading inside a panel is a group heading now', (t) => {
@@ -1273,48 +1277,76 @@ module.exports = ({ suite, test }) => {
     { id: 'NUMBERED_DECIMAL_ALPHA_ROMAN', numbered: true, glyphs: ['1.', 'a.', 'i.'] }
   ];
   const glyphButtons = (r) => r.made.filter((n) => /\bglyph\b/.test(n.cls));
+  // A preset button carries its three glyphs as child spans, so its face is
+  // what those spans say, and the one in full ink is the level being edited.
+  const ladder = (n) => n.kids.map((k) => k.text);
+  const picked = (n) => n.kids.filter((k) => /\bat\b/.test(k.cls)).map((k) => k.text)[0];
+  const offButtons = (r) => r.made.filter((n) => /^act\b/.test(n.cls));
 
   test('the chooser is a folded subsection of the level, not a pop-up', (t) => {
     const r = buildFold({ listId: 'list.1' }, { level: 0 }, PRESETS);
     t.equal(r.made.filter((n) => n.cls === 'item').length, 1, 'one disclosure row');
-    t.equal(r.made.filter((n) => n.cls === 'name').map((n) => n.text)[0],
-      'Level 1 bullet/number', 'named for the level it belongs to');
     t.notOk(r.made.some((n) => n.cls === 'popup'), 'nothing floats over the panel');
     t.notOk(/function openMarkerMenu/.test(clientJs), 'and the pop-up is gone from the source');
   });
 
-  test('the name matches the style subsections it sits above', (t) => {
-    // "Level 3 bullet/number" reads like "Level 3 character style" because it
-    // is built by the same function, with the same key scheme.
+  /* The level number is on the row this fold sits inside, so repeating it in
+     the fold's own name only made the name longer. */
+  test('the fold does not say the level over again', (t) => {
     const r = buildFold({ listId: 'list.1' }, { level: 2 }, PRESETS);
     t.equal(r.made.filter((n) => n.cls === 'name').map((n) => n.text)[0],
-      'Level 3 bullet/number');
+      'Bullet/number', 'the half stands alone, capitalised as a name');
     const fn = /function markerFold\(list, lv, levels\)[^]*?\n}/.exec(clientJs)[0];
-    t.match(fn, /styleFold\(what, 'bullet\/number', 'sfold:' \+ what \+ ':mark'\)/,
-      'and it remembers being open the same way too');
+    t.match(fn, /styleFold\('', 'bullet\/number', 'sfold:lvl' \+ lv\.level \+ ':mark'\)/,
+      'and the key is the level, so the folds still open one at a time');
+  });
+
+  test('the style folds beside it drop the level too, and keep their own keys', (t) => {
+    const body = /function listBody\(list\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(body, /keyed: 'lvl' \+ lv\.level/, 'keyed by level, named by nothing');
+    t.notOk(/what: 'Level '/.test(body), 'the level name is gone from the editor');
+    const ed = /function buildStyleEditor\(model, commit, opts\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(ed, /var keyed = opts\.keyed \|\| what;/,
+      'and the key falls back to the name where there is one');
   });
 
   test('a marker is offered as the character it is, not as the name of an enum', (t) => {
     const r = buildFold({ listId: 'list.1' }, { level: 0 }, PRESETS);
-    t.deepEqual(glyphButtons(r).map((n) => n.text),
-      ['●', '❑', '1.', '⊘'],
-      'one marker per button: the one that preset gives this level');
+    t.deepEqual(glyphButtons(r).map(ladder),
+      [['\u25cf', '\u25cb', '\u25a0'], ['\u2751', '\u2751', '\u2751'], ['1.', 'a.', 'i.']],
+      'every preset shows the whole ladder it would put on the list');
     t.notOk(/BULLET_|NUMBERED_/.test(r.made.map((n) => n.text).join(' ')),
       'no API enum reaches the button faces');
   });
 
-  /* A preset defines three levels and repeats them from the fourth down, so
-     the marker level 5 gets is the preset's second. Showing level 1's marker
-     on every level's chooser said nothing about the level being edited. */
-  test('each level is offered the marker that level would actually get', (t) => {
-    t.deepEqual(glyphButtons(buildFold(null, { level: 1 }, PRESETS)).map((n) => n.text),
-      ['○', '❑', 'a.', '⊘'], 'level 2 takes the second of the three');
-    t.deepEqual(glyphButtons(buildFold(null, { level: 2 }, PRESETS)).map((n) => n.text),
-      ['■', '❑', 'i.', '⊘'], 'level 3 the third');
-    t.deepEqual(glyphButtons(buildFold(null, { level: 3 }, PRESETS)).map((n) => n.text),
-      ['●', '❑', '1.', '⊘'], 'and level 4 is back to the first');
-    t.deepEqual(glyphButtons(buildFold(null, { level: 6 }, PRESETS)).map((n) => n.text),
-      ['●', '❑', '1.', '⊘'], 'as is level 7');
+  /* A preset writes three levels and stops -- measured against a real
+     document by the live suite, because Google documents neither the reach
+     nor what survives it. Four of Docs' nine bullet presets end in a square,
+     so a button showing only the level's own glyph would be four identical
+     buttons: the whole ladder is shown, and the level's glyph picked out of
+     it -- where the level has one to pick. */
+  test('each level has its own glyph picked out of the ladder', (t) => {
+    t.equal(picked(glyphButtons(buildFold(null, { level: 1 }, PRESETS))[0]), '\u25cb',
+      'level 2 takes the second of the three');
+    t.equal(picked(glyphButtons(buildFold(null, { level: 2 }, PRESETS))[0]), '\u25a0',
+      'level 3 the third');
+    t.deepEqual(ladder(glyphButtons(buildFold(null, { level: 6 }, PRESETS))[0]),
+      ['\u25cf', '\u25cb', '\u25a0'], 'while the ladder itself never changes');
+  });
+
+  /* Applying a preset at level 4 does something -- it sets levels 1 to 3 --
+     but it does not do it here, and a glyph picked out would be a promise the
+     API cannot keep. */
+  test('past the third level nothing is picked out, and the hint says why', (t) => {
+    const r = buildFold(null, { level: 3 }, PRESETS);
+    t.equal(picked(glyphButtons(r)[0]), undefined, 'no glyph claimed for level 4');
+    t.deepEqual(ladder(glyphButtons(r)[0]), ['\u25cf', '\u25cb', '\u25a0'],
+      'the preset is still offered: it is the whole list\'s choice');
+    t.match(glyphButtons(r)[0].title, /level 4 is out of its reach$/);
+    t.match(r.made.filter((n) => n.cls === 'hint')[0].text,
+      /Level 4 keeps the marker it has/);
+    t.match(r.made.filter((n) => n.cls === 'hint')[0].text, /Taking it off still works/,
+      'and what can still be done from here');
   });
 
   test('bullets, numbering and none each get their own heading', (t) => {
@@ -1325,33 +1357,35 @@ module.exports = ({ suite, test }) => {
 
   test('the preset the list already wears is the one marked', (t) => {
     const r = buildFold({ listId: 'list.1' },
-      { level: 0, glyphSymbol: '❑', glyphFormat: '%0' }, PRESETS,
-      [{ glyphSymbol: '❑', glyphFormat: '%0' }, { glyphSymbol: '❑', glyphFormat: '%0' }]);
+      { level: 0, glyphSymbol: '\u2751', glyphFormat: '%0' }, PRESETS,
+      [{ glyphSymbol: '\u2751', glyphFormat: '%0' }, { glyphSymbol: '\u2751', glyphFormat: '%0' }]);
     const on = glyphButtons(r).filter((n) => n.classList.contains('on'));
     t.equal(on.length, 1);
-    t.equal(on[0].text, '❑');
+    t.deepEqual(ladder(on[0]), ['\u2751', '\u2751', '\u2751']);
   });
 
-  test('a level with no marker has "none" marked instead', (t) => {
+  test('a level with no marker has "this level" marked instead', (t) => {
     const r = buildFold({ listId: 'list.1' }, { level: 0 }, PRESETS);
-    const on = glyphButtons(r).filter((n) => n.classList.contains('on'));
-    t.equal(on.length, 1);
-    t.equal(on[0].text, '⊘');
+    t.equal(glyphButtons(r).filter((n) => n.classList.contains('on')).length, 0,
+      'no preset is worn');
+    t.deepEqual(offButtons(r).filter((n) => n.classList.contains('on')).map((n) => n.text),
+      ['This level'], 'the level is already bare, and the button says so');
   });
 
   test('nothing is marked when the marker is one Docs itself set', (t) => {
     // Format > Bullets & numbering > More bullets can put any character
     // there, and no preset produces it.
     const r = buildFold({ listId: 'list.1' },
-      { level: 0, glyphSymbol: '☀', glyphFormat: '%0' }, PRESETS,
-      [{ glyphSymbol: '☀', glyphFormat: '%0' }]);
+      { level: 0, glyphSymbol: '\u2600', glyphFormat: '%0' }, PRESETS,
+      [{ glyphSymbol: '\u2600', glyphFormat: '%0' }]);
     t.equal(glyphButtons(r).filter((n) => n.classList.contains('on')).length, 0);
   });
 
   test('what the preset does to the whole list is on the button, not lost', (t) => {
     const r = buildFold({ listId: 'list.1' }, { level: 1 }, PRESETS);
-    t.match(glyphButtons(r)[0].title, /^Level 2: ○/, 'this level first');
-    t.match(glyphButtons(r)[0].title, /●.*○.*■/, 'then all three, in order');
+    t.match(glyphButtons(r)[0].title, /^Levels 1-3:/, 'all three, in order');
+    t.match(glyphButtons(r)[0].title, /\u25cf.*\u25cb.*\u25a0/);
+    t.match(glyphButtons(r)[0].title, /level 2 gets \u25cb$/, 'and what this level takes from them');
   });
 
   test('clicking a marker applies that preset to that one list', (t) => {
@@ -1368,11 +1402,30 @@ module.exports = ({ suite, test }) => {
       { tabId: 't.0', allLists: true, bulletPreset: 'NUMBERED_DECIMAL_ALPHA_ROMAN' }]]);
   });
 
-  test('"none" takes the markers off the one level it was opened from', (t) => {
+  /* Levels four and seven wear level one's glyph, but they are different
+     paragraphs and only the ones named lose their markers. Both aims are
+     offered, because taking the marker off level 1 and finding level 4 still
+     wearing one reads as a bug however correct it is. */
+  test('the markers come off the one level, or off the whole list', (t) => {
     const r = buildFold({ listId: 'list.7' }, { level: 2 }, PRESETS);
-    glyphButtons(r).slice(-1)[0].click();
+    t.deepEqual(offButtons(r).map((n) => n.text), ['This level', 'Whole list']);
+    offButtons(r)[0].click();
     t.deepEqual(r.calls, [['removeBullets',
       { tabId: 't.0', listId: 'list.7', level: 2 }]]);
+    const r2 = buildFold({ listId: 'list.7' }, { level: 2 }, PRESETS);
+    offButtons(r2)[1].click();
+    t.deepEqual(r2.calls, [['removeBullets', { tabId: 't.0', listId: 'list.7' }]],
+      'no level named is every level');
+  });
+
+  /* Three is not a default Docs happens to use: it is the whole of what the
+     API can express. No request in it edits a nesting level, and every preset
+     but the checkbox fixes three levels, so the panel says so once rather
+     than leaving a reader to wonder why level 4 will not change. */
+  test('the repeat is explained where a level past the third is on screen', (t) => {
+    const body = /function listBody\(list\)[^]*?\n}/.exec(clientJs)[0];
+    t.match(body, /lv\.level > 2 && lv\.inUse/, 'only when there is one to explain');
+    t.match(body, /A marker preset reaches the first three levels only/);
   });
 
   test('the preset a list already wears is found by more than its first marker', (t) => {
@@ -1811,8 +1864,8 @@ module.exports = ({ suite, test }) => {
     t.notOk(/Google Docs has no footnote style/.test(clientJs),
       'the footnote note leads with what happens, not with why');
     t.match(clientJs, /Written into every footnote in the tab/);
-    t.match(clientJs, /A marker style is one choice for the whole list/,
-      'the marker explanation is one sentence, not four');
+    t.match(clientJs, /A marker is one choice for the whole list/,
+      'the marker explanation leads with the consequence');
   });
 
   test('the heading says what the add-on is, not what it is called', (t) => {
@@ -1839,7 +1892,7 @@ module.exports = ({ suite, test }) => {
 
   /* The menu built for real against a stand-in DOM. */
   const buildColor = (hex, opts) => evalFromClient(
-    ['colorField', 'openPopup', 'closePopup', 'popupMenu', 'PALETTE'],
+    ['colorField', 'openPopup', 'closePopup', 'popupMenu', 'buildPalette', 'PALETTE'],
     'var made = [];\n' +
     'var el = function (tag, cls, text) {\n' +
     '  var n = { tag: tag, cls: cls || "", text: text || "", kids: [], title: "",\n' +
@@ -1919,25 +1972,36 @@ module.exports = ({ suite, test }) => {
     t.match(css, /pointer-events: none/, 'and takes no clicks, so the menu still opens');
   });
 
-  test('the palette is the four rows the Docs colour menu shows', (t) => {
+  /* Nine rows blending down the menu, which is what makes a colour findable:
+     a reader looking for a dark blue goes to the blue column and down. */
+  test('the palette blends near-white to near-black down nine rows', (t) => {
     const r = buildColor('#4a86e8');
     const rows = inMenu(r, 'swatches');
-    t.equal(rows.length, 4);
-    rows.forEach((row) => t.equal(row.kids.length, 10, 'ten to a row'));
-    t.equal(rows[0].kids[0].style.background, '#000000');
-    t.equal(rows[0].kids[9].style.background, '#ffffff');
+    t.equal(rows.length, 9);
+    rows.forEach((row) => t.equal(row.kids.length, 13, 'thirteen to a row'));
+    const at = (row, col) => rows[row].kids[col].style.background;
+    // The first column is neutral and runs the whole way, so both extremes of
+    // the menu are reachable; no hue reaches either.
+    t.equal(at(0, 0), '#ffffff', 'white at the top of the neutral column');
+    t.equal(at(8, 0), '#000000', 'black at the foot of it');
+    t.equal(at(4, 1), '#ff0000', 'and the middle row is fully saturated');
+    const lum = (hex) => parseInt(hex.slice(1, 3), 16) + parseInt(hex.slice(3, 5), 16) +
+      parseInt(hex.slice(5, 7), 16);
+    for (let i = 1; i < 9; i++) {
+      t.ok(lum(at(i, 5)) < lum(at(i - 1, 5)), 'row ' + i + ' is darker than the one above');
+    }
   });
 
   test('the colour the document holds is the one marked in the palette', (t) => {
-    const r = buildColor('#4A86E8');
+    const r = buildColor('#0055FF');       // row 5, the fully saturated one
     const on = inMenu(r, 'sw').filter((n) => n.classList.contains('on'));
     t.equal(on.length, 1, 'matched however the document cased it');
-    t.equal(on[0].style.background, '#4a86e8');
+    t.equal(on[0].style.background, '#0055ff');
   });
 
   test('picking from the palette writes that colour and repaints the swatch', (t) => {
     const r = buildColor(null);
-    inMenu(r, 'sw')[11].onclick();
+    inMenu(r, 'sw')[4 * 13 + 1].onclick();     // pure red, the middle row's first hue
     t.deepEqual(r.wrote, ['#ff0000']);
     t.equal(r.swatch.kids[0].style.background, '#ff0000');
     t.notOk(r.swatch.classList.contains('none'), 'no longer unset');
@@ -1960,7 +2024,7 @@ module.exports = ({ suite, test }) => {
     // With nothing set the swatch still has to show a colour. Choosing that
     // same colour on purpose is a change -- from no colour to that one.
     const r = buildColor(null);            // blank swatch, shown as black
-    inMenu(r, 'sw')[0].onclick();          // and black is picked deliberately
+    inMenu(r, 'sw')[8 * 13].onclick();     // and black is picked deliberately
     t.deepEqual(r.wrote, ['#000000'], 'which is a write, not a no-op');
   });
 

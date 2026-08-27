@@ -972,6 +972,48 @@ test('a bullet preset is accepted and changes the marker', function (t) {
 });
 
 /**
+ * What happens below the third level, which Google documents nowhere.
+ *
+ * Every preset but the checkbox is described as fixing "the first 3 list
+ * nesting levels", and Docs defines nine. The reference does not say what
+ * levels 4 to 9 do, and the sidebar has to tell the reader something, so it
+ * is measured here rather than assumed.
+ *
+ * Measured answer: the preset reaches the first three levels and stops.
+ * Levels 4 to 9 keep whatever glyphs they already had -- for a list Docs
+ * made, its own disc / circle / square, repeating -- and since no request in
+ * the API edits a nesting level, nothing can change them at all. Applying
+ * DIAMOND_CIRCLE_SQUARE to a fresh list reads back as
+ * "diamond circle square  disc circle square  disc circle square".
+ */
+test('a preset reaches the first three levels and no further', function (t) {
+  var read = readLists(null);
+  if (!read.lists.length) { t.ok(true, 'no lists to mark'); return; }
+  var id = read.lists[0].listId;
+  function ladder() {
+    var l = readLists(null).lists.filter(function (x) { return x.listId === id; })[0];
+    return (l.levels || []).map(function (lv) {
+      return lv.glyphSymbol || lv.glyphType || '-';
+    });
+  }
+  var before = ladder();
+  t.comment('before: ' + before.join(' '));
+  if (before.length < 4) { t.ok(true, 'no levels past the third to compare'); return; }
+  try {
+    applyBulletPreset({ listId: id, bulletPreset: 'BULLET_DIAMOND_CIRCLE_SQUARE' });
+    var after = ladder();
+    t.comment('after:  ' + after.join(' '));
+    t.equal(after[0], '\u25c6', 'level 1 should have taken the diamond');
+    for (var i = 3; i < after.length; i++) {
+      t.equal(after[i], before[i],
+        'level ' + (i + 1) + ' is out of the preset\'s reach and should not have moved');
+    }
+  } finally {
+    applyBulletPreset({ listId: id, bulletPreset: 'BULLET_DISC_CIRCLE_SQUARE' });
+  }
+});
+
+/**
  * A level is not something the API can address, so "every level" is really
  * "every paragraph of this list, whatever depth it sits at". Passing null is
  * how the panel says that, and the check is that each level in use comes back
